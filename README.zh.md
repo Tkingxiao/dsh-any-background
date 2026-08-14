@@ -30,23 +30,22 @@
 
 ```
 dsh-any-background/
-├── README.md                 # 英文版说明
-├── README.zh.md              # 本文件（中文）
-├── cordis.yml                # 开发用补丁覆盖层（pnpm dsh web --patch）
-└── dsh-any-background/       # 插件包
-    ├── package.json          # 包元数据、dsh.client 声明、依赖
-    ├── cordis.patch.yml      # 捆绑补丁层（插入到 profile 组合配置中）
-    ├── tsdown.config.ts      # 构建配置：Node 端（ESM）+ 客户端（CJS 浏览器包）
-    ├── src/
-    │   ├── index.ts          # Node 端 — 空壳，供 Cordis 加载器挂载
-    │   ├── invariant.ts      # 不变量 companion（注册包所有权）
-    │   └── client/
-    │       └── index.tsx     # 浏览器端 — 所有 UI 逻辑都在这里（约 886 行）
-    └── lib/                  # 构建产物（由 tsdown 生成）
-        ├── index.js          # Node 入口
-        ├── invariant.js      # 不变量入口
-        ├── client.js         # 浏览器包（经 __ModuleLoader__ 包装）
-        └── client.js.map     # 源码映射
+├── package.json          # 包元数据、dsh.client 声明、依赖
+├── cordis.patch.yml      # 捆绑补丁层（插入到 profile 组合配置中）
+├── cordis.yml            # 开发用补丁覆盖层（pnpm dsh web --patch）
+├── tsdown.config.ts      # 构建配置：Node 端（ESM）+ 客户端（CJS 浏览器包）
+├── src/
+│   ├── index.ts          # Node 端 — 空壳，供 Cordis 加载器挂载
+│   ├── invariant.ts      # 不变量 companion（注册包所有权）
+│   └── client/
+│       └── index.tsx     # 浏览器端 — 所有 UI 逻辑都在这里
+├── lib/                  # 构建产物（已提交，安装无需构建步骤）
+│   ├── index.js          # Node 入口
+│   ├── invariant.js      # 不变量入口
+│   ├── client.js         # 浏览器包（经 __ModuleLoader__ 包装）
+│   └── client.js.map     # 源码映射
+├── README.md             # 英文版说明
+└── README.zh.md          # 本文件（中文）
 ```
 
 ## 实现原理
@@ -134,30 +133,24 @@ npx @deepseek-ai/dsh web
 
 ### 方式三：本地构建（开发模式）
 
-克隆 DeepSeek Harness 仓库并从源码构建：
+`lib/` 目录已提交，安装无需构建步骤。若修改了 `src/` 需要重新构建（需 Node + pnpm）：
 
 ```sh
-# 1. 克隆 harness 仓库
-git clone https://github.com/deepseek-ai/deepseek-harness.git
-cd deepseek-harness
+# 1. 克隆本仓库
+git clone https://github.com/Tkingxiao/dsh-any-background.git
+cd dsh-any-background
 
-# 2. 安装依赖
+# 2. 安装构建工具
 pnpm install
 
-# 3. 在 harness 文件夹中新建 plugin 文件夹，把插件放入
-mkdir plugins
-cp -r pluginexample/dsh-any-background/dsh-any-background plugins/
-
-# 4. 构建插件
-cd plugins/dsh-any-background
+# 3. 重新构建 lib/
 pnpm run bundle
-cd ../..
 
-# 5. 在 harness 根目录运行安装命令
-pnpm dsh plugin --profile web add ./plugins/dsh-any-background
+# 4. 从本地安装到 web profile
+dsh plugin --profile web add -w .
 
-# 6. 启动
-pnpm dsh web
+# 5. 启动
+dsh web
 ```
 
 ## 依赖

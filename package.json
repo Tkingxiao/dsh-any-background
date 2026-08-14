@@ -1,7 +1,22 @@
 {
   "name": "dsh-any-background",
   "version": "0.1.0",
-  "description": "Deep Midnight theme plugin: a reference appearance plugin registering a custom dark theme with gradient background and adapted text colors.",
+  "description": "Appearance plugin for DeepSeek Harness: custom theme color (PS-style color wheel), background wallpaper with opacity/blur controls, and separate main/settings interface opacity.",
+  "license": "MIT",
+  "author": "Tkingxiao",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Tkingxiao/dsh-any-background.git"
+  },
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "plugin",
+    "dsh-plugin",
+    "theme",
+    "wallpaper",
+    "web-ui"
+  ],
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/types/index.d.ts",
@@ -44,8 +59,7 @@
   ],
   "scripts": {
     "bundle": "tsdown",
-    "watch": "tsdown --watch",
-    "prepare": "tsdown"
+    "watch": "tsdown --watch"
   },
   "peerDependencies": {
     "react": "^18.2.0",
@@ -56,10 +70,6 @@
     "@deepseek-ai/dsh-invariants": "^0.1.0-rc.6"
   },
   "devDependencies": {
-    "@deepseek-ai/cordis": "^4.0.1",
-    "@deepseek-ai/dsh-client-runtime": "^0.1.0-rc.6",
-    "@deepseek-ai/dsh-client-ui-theme": "^0.1.0-rc.6",
-    "@deepseek-ai/dsh-client-locale": "^0.1.0-rc.6",
-    "@deepseek-ai/dsh-invariants": "^0.1.0-rc.6"
+    "tsdown": "^0.22.2"
   }
 }
