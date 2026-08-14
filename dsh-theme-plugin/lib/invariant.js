@@ -1,7 +1,7 @@
 //#region src/invariant.ts
-const PACKAGE_NAME = "dsh-theme-plugin";
+const PACKAGE_NAME = "dsh-any-background";
 /** Cordis companion plugin name. */
-const name = "dsh-theme-plugin-invariant";
+const name = "dsh-any-background-invariant";
 /** Service required before the companion can reserve package ownership. */
 const inject = ["invariants"];
 /**

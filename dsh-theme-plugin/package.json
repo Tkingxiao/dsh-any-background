@@ -1,5 +1,5 @@
 {
-  "name": "dsh-theme-plugin",
+  "name": "dsh-any-background",
   "version": "0.1.0",
   "description": "Deep Midnight theme plugin: a reference appearance plugin registering a custom dark theme with gradient background and adapted text colors.",
   "type": "module",
@@ -27,8 +27,11 @@
     "client": {
       "platform": "web",
       "inject": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-locale",
         "@deepseek-ai/dsh-client-ui-theme"
-      ]
+      ],
+      "immediately": true
     }
   },
   "files": [
@@ -45,13 +48,18 @@
     "prepare": "tsdown"
   },
   "peerDependencies": {
+    "react": "^18.2.0",
     "@deepseek-ai/cordis": "workspace:^",
+    "@deepseek-ai/dsh-client-runtime": "workspace:^",
     "@deepseek-ai/dsh-client-ui-theme": "workspace:^",
+    "@deepseek-ai/dsh-client-locale": "workspace:^",
     "@deepseek-ai/dsh-invariants": "workspace:^"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "workspace:^",
+    "@deepseek-ai/dsh-client-runtime": "workspace:^",
     "@deepseek-ai/dsh-client-ui-theme": "workspace:^",
+    "@deepseek-ai/dsh-client-locale": "workspace:^",
     "@deepseek-ai/dsh-invariants": "workspace:^"
   }
 }

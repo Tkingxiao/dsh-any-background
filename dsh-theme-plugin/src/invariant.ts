@@ -1,14 +1,14 @@
 /**
- * Package-owned invariant companion for `dsh-theme-plugin`.
- * @module dsh-theme-plugin/invariant
+ * Package-owned invariant companion for `dsh-any-background`.
+ * @module dsh-any-background/invariant
  */
 import type { Context } from '@deepseek-ai/cordis'
 import type { InvariantInstaller } from '@deepseek-ai/dsh-invariants'
 
-const PACKAGE_NAME = 'dsh-theme-plugin'
+const PACKAGE_NAME = 'dsh-any-background'
 
 /** Cordis companion plugin name. */
-export const name = 'dsh-theme-plugin-invariant'
+export const name = 'dsh-any-background-invariant'
 /** Service required before the companion can reserve package ownership. */
 export const inject = ['invariants']
 

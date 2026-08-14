@@ -4,5 +4,5 @@
 # into the composed configuration.
 
 - insert:
-    - id: dsh-theme-plugin
-      name: 'dsh-theme-plugin'
+    - id: dsh-any-background
+      name: 'dsh-any-background'

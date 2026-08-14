@@ -6,12 +6,15 @@
  */
 import type { UserConfig } from 'tsdown'
 
-const ID = 'dsh-theme-plugin'
+const ID = 'dsh-any-background'
 
 /** Externals resolved from the loader module table at runtime. */
 const EXTERNALS = [
+  'react',
+  'react/jsx-runtime',
   '@deepseek-ai/dsh-client-connection',
   '@deepseek-ai/dsh-client-runtime',
+  '@deepseek-ai/dsh-client-runtime/client',
   '@deepseek-ai/dsh-client-locale',
   '@deepseek-ai/dsh-client-ui-settings',
   '@deepseek-ai/dsh-api-remotes',
@@ -37,7 +40,7 @@ const configs: UserConfig[] = [
   // Client half: lib/client.js (browser bundle)
   {
     name: `${ID}/client`,
-    entry: { client: 'src/client/index.ts' },
+    entry: { client: 'src/client/index.tsx' },
     outDir: 'lib',
     format: 'cjs',
     platform: 'browser',
