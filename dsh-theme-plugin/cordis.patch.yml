@@ -1,0 +1,8 @@
+# Deep Midnight theme plugin: bundle patch layer.
+# When this package is installed into a profile via `dsh plugin add`,
+# this patch is applied as a layer, inserting the theme plugin row
+# into the composed configuration.
+
+- insert:
+    - id: dsh-theme-plugin
+      name: 'dsh-theme-plugin'

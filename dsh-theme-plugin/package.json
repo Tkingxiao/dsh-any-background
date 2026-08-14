@@ -1,0 +1,57 @@
+{
+  "name": "dsh-theme-plugin",
+  "version": "0.1.0",
+  "description": "Deep Midnight theme plugin: a reference appearance plugin registering a custom dark theme with gradient background and adapted text colors.",
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./invariant": {
+      "types": "./lib/types/invariant.d.ts",
+      "default": "./lib/invariant.js"
+    },
+    "./client": {
+      "types": "./lib/types/client/index.d.ts",
+      "default": "./lib/client.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-theme"
+      ]
+    }
+  },
+  "files": [
+    "lib/index.js",
+    "lib/invariant.js",
+    "lib/client.js",
+    "lib/client.js.map",
+    "cordis.patch.yml",
+    "lib/types/**/*.d.ts"
+  ],
+  "scripts": {
+    "bundle": "tsdown",
+    "watch": "tsdown --watch",
+    "prepare": "tsdown"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "workspace:^",
+    "@deepseek-ai/dsh-client-ui-theme": "workspace:^",
+    "@deepseek-ai/dsh-invariants": "workspace:^"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "workspace:^",
+    "@deepseek-ai/dsh-client-ui-theme": "workspace:^",
+    "@deepseek-ai/dsh-invariants": "workspace:^"
+  }
+}
