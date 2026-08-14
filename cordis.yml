@@ -1,11 +1,11 @@
 # Deep Midnight theme plugin: patch overlay for the web profile.
 #
 # Usage:
-#   pnpm dsh web --patch ./pluginexample/theme-plugin/cordis.yml
+#   pnpm dsh web --patch ./pluginexample/dsh-any-background/cordis.yml
 #
 # This inserts the theme plugin into the web composition. The plugin registers
 # a "midnight" dark theme visible in the Appearance settings row.
 
 - insert:
-    - id: dsh-theme-plugin
-      name: 'dsh-theme-plugin'
+    - id: dsh-any-background
+      name: 'dsh-any-background'

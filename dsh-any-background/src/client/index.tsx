@@ -6,10 +6,12 @@
  *    real-time theme color selection with dynamic token generation.
  * 2. Background image editor modal with drag-to-pan and scroll-to-zoom
  *    inside a viewport-proportional preview rectangle.
- * 3. Opacity / blur sliders with zero-lag direct DOM manipulation.
+ * 3. Opacity / blur sliders with zero-lag direct DOM manipulation: the
+ *    homepage background opacity (主界面透明度) and the settings panel opacity
+ *    (设置界面透明度) are separate sliders.
  *
- * The color wheel uses two stacked canvases: a hue ring and an SL square.
- * Mouse interaction on either canvas regenerates the full theme token set
+ * The color wheel is one canvas: a hue ring and an inscribed SL square.
+ * Mouse interaction on either region regenerates the full theme token set
  * and applies it instantly via ctx.theme.setTheme().
  *
  * The bg editor modal shows a rectangle matching the viewport aspect ratio.
@@ -56,9 +58,11 @@ const NS = 'settings.anyBg'
 const LS_COLOR = 'dsh-any-background:color'
 const LS_WP = 'dsh-any-background:wallpaper'
 const LS_OP = 'dsh-any-background:opacity'
+const LS_WOP = 'dsh-any-background:wallpaper-opacity'
 const LS_BL = 'dsh-any-background:blur'
 const LS_BG = 'dsh-any-background:bgState'
-const DEF_OP = 0.85; const DEF_BL = 0
+const LS_SOP = 'dsh-any-background:settings-opacity'
+const DEF_OP = 0.85; const DEF_BL = 0; const DEF_SOP = 1
 const CUSTOM_ID = 'custom-color'
 
 // ── i18n ───────────────────────────────────────────────────────────────────────
@@ -66,8 +70,11 @@ const CUSTOM_ID = 'custom-color'
 const zh: Record<string, string> = {
   nav: '主题', subtitle: '自定义界面外观',
   colorTitle: '主题色', colorHint: '在色轮上选择色相，在方形中调整饱和度和明度',
-  bgTitle: '背景图片', bgChoose: '选择图片', bgRemove: '移除',
-  bgEdit: '编辑位置', bgOpacity: '透明度', bgBlur: '模糊',
+  uiTitle: '界面',
+  uiOpacity: '主界面透明度', uiOpacityHint: '拖动滑块调整主页界面背景的透明度',
+  uiSop: '设置界面透明度', uiSopHint: '拖动滑块调整设置页界面背景的透明度',
+  bgTitle: '背景图片', bgChoose: '选择图片', bgRemove: '移除图片',
+  bgEdit: '编辑位置', wpOpacity: '壁纸透明度', bgBlur: '壁纸模糊',
   bgHint: '拖动滑块实时调整。点击背景图可打开编辑器调整位置和大小',
   editorTitle: '背景编辑器', editorHint: '拖动移动图片，滚轮缩放大小',
   editorCommit: '确认', editorCancel: '取消', editorReset: '重置',
@@ -75,8 +82,11 @@ const zh: Record<string, string> = {
 const en: Record<string, string> = {
   nav: 'Theme', subtitle: 'Customize appearance',
   colorTitle: 'Theme color', colorHint: 'Pick hue on the ring, adjust saturation & lightness in the square',
-  bgTitle: 'Wallpaper', bgChoose: 'Choose image', bgRemove: 'Remove',
-  bgEdit: 'Edit position', bgOpacity: 'Opacity', bgBlur: 'Blur',
+  uiTitle: 'Interface',
+  uiOpacity: 'Main interface opacity', uiOpacityHint: 'Drag to adjust homepage interface background opacity',
+  uiSop: 'Settings interface opacity', uiSopHint: 'Drag to adjust the settings page background opacity',
+  bgTitle: 'Wallpaper', bgChoose: 'Choose image', bgRemove: 'Remove image',
+  bgEdit: 'Edit position', wpOpacity: 'Wallpaper opacity', bgBlur: 'Wallpaper blur',
   bgHint: 'Drag sliders for real-time adjustment. Click the image to open the editor',
   editorTitle: 'Background editor', editorHint: 'Drag to move, scroll to zoom',
   editorCommit: 'Confirm', editorCancel: 'Cancel', editorReset: 'Reset',
@@ -88,7 +98,11 @@ function rLS(k: string): string | null {
   try { const v = localStorage.getItem(k); return typeof v === 'string' ? v : null } catch { return null }
 }
 function wLS(k: string, v: string | null): void {
-  try { v === null ? localStorage.removeItem(k) : localStorage.setItem(k, v) } catch { /* */ }
+  try { v === null ? localStorage.removeItem(k) : localStorage.setItem(k, v) } catch (e) {
+    // Surface storage failure (private mode, quota, blocked origin) so a
+    // "saved values lost on reload" report is diagnosable from the console.
+    console.warn(`dsh-any-background: localStorage write failed for "${k}"`, e)
+  }
 }
 function rColor(): [number, number, number] {
   try { const v = JSON.parse(rLS(LS_COLOR) || ''); if (Array.isArray(v) && v.length === 3) return v as [number, number, number] } catch { /* */ }
@@ -96,16 +110,19 @@ function rColor(): [number, number, number] {
 }
 function rWp(): string | null { const v = rLS(LS_WP); return v?.length ? v : null }
 function rOp(): number { const v = rLS(LS_OP); if (!v) return DEF_OP; const n = +v; return isFinite(n) ? Math.min(1, Math.max(0, n)) : DEF_OP }
+function rWop(): number { const v = rLS(LS_WOP); if (!v) return 1; const n = +v; return isFinite(n) ? Math.min(1, Math.max(0, n)) : 1 }
 function rBl(): number { const v = rLS(LS_BL); if (!v) return DEF_BL; const n = +v; return isFinite(n) ? Math.min(60, Math.max(0, n)) : DEF_BL }
-function rBgState(): { zoom: number; px: number; py: number } {
-  try { const v = JSON.parse(rLS(LS_BG) || ''); if (v && typeof v.zoom === 'number') return v } catch { /* */ }
-  return { zoom: 1, px: 0, py: 0 }
+function rSop(): number { const v = rLS(LS_SOP); if (!v) return DEF_SOP; const n = +v; return isFinite(n) ? Math.min(1, Math.max(0, n)) : DEF_SOP }
+function rBgState(): { zoom: number; x: number; y: number; iw: number; ih: number } {
+  try { const v = JSON.parse(rLS(LS_BG) || ''); if (v && typeof v.zoom === 'number' && typeof v.iw === 'number' && v.iw > 0 && v.ih > 0) return v } catch { /* */ }
+  return { zoom: 1, x: 0, y: 0, iw: 0, ih: 0 }
 }
 
 // ── HSV ↔ HSL ────────────────────────────────────────────────────────────────
-// The color wheel canvas renders an HSV S-V plane (white → hue → black),
-// and pickSL returns HSV (H, S_hsv, V). genTokens expects HSL (H, S_hsl, L).
-// These helpers convert at the boundary so the two halves stay consistent.
+// The wheel works in HSV end to end: props and pickSL are HSV, the canvas
+// renders the HSV S-V plane directly. Storage and genTokens expect HSL, so
+// setColor converts HSV → HSL at the boundary; sectionInject converts stored
+// HSL → HSV for the initial wheel props. Conversions never stack.
 
 function hsvToHsl(h: number, s: number, v: number): [number, number, number] {
   const l = v * (1 - s / 2)
@@ -143,13 +160,14 @@ function genTokens(hue: number, sat: number, lit: number): { colorScheme: 'light
         '--dsw-alias-bg-overlay': hsl(h(0), s(-0.05), l(0.12)),
         '--dsw-alias-border-l1': rgba(h(0), s(-0.1), l(0.18), 0.12),
         '--dsw-alias-border-l2': rgba(h(0), s(-0.1), l(0.22), 0.22),
-        '--dsw-alias-label-primary': hsl(h(0), s(-0.35), 0.92),
-        '--dsw-alias-label-secondary': hsl(h(0), s(-0.3), 0.65),
-        '--dsw-alias-label-tertiary': hsl(h(0), s(-0.3), 0.48),
+        '--dsw-alias-label-primary': hsl(0, 0, 1),
+        '--dsw-alias-label-secondary': hsl(0, 0, 1),
+        '--dsw-alias-label-tertiary': hsl(0, 0, 1),
         '--dsw-alias-brand-primary': hsl(h(0), s(0.1), Math.max(l(0.2), 0.5)),
         '--dsw-alias-brand-text': l(0.2) > 0.6 ? '#000' : '#fff',
         '--dsw-alias-button-primary-hover': hsl(h(0), s(0.1), Math.max(l(0.28), 0.58)),
         '--dsw-alias-button-primary-dimmed': hsl(h(0), s(0), l(0.07)),
+        '--dsw-alias-button-elevated-fill': hsl(h(0), s(0), l(0.04)),
         '--dsw-alias-interactive-bg-hover': rgba(h(0), s(0), Math.max(l(0.15), 0.4), 0.12),
         '--dsw-alias-interactive-bg-active': rgba(h(0), s(0), Math.max(l(0.15), 0.4), 0.2),
         '--dsw-alias-markdown-code-block': hsl(h(0), s(0), l(-0.06)),
@@ -160,6 +178,7 @@ function genTokens(hue: number, sat: number, lit: number): { colorScheme: 'light
         '--dsw-specific-sidebar-fill': hsl(h(0), s(0), l(-0.06)),
         '--dsw-specific-sidebar-nav-item-active': hsl(h(0), s(0), l(0.04)),
         '--dsw-specific-sidebar-nav-item-hover': hsl(h(0), s(0), l(0)),
+        '--dsw-specific-input-major': hsl(h(0), s(0), l(0.02)),
         '--dsw-alias-scrollbar-bg-l1': hsl(h(0), s(-0.05), l(0.12)),
         '--dsw-alias-scrollbar-bg-l2': hsl(h(0), s(-0.05), l(0.16)),
         '--dsw-alias-scrollbar-hover-l1': hsl(h(0), s(-0.05), l(0.22)),
@@ -170,31 +189,36 @@ function genTokens(hue: number, sat: number, lit: number): { colorScheme: 'light
   return {
     colorScheme: 'light',
     tokens: {
-      '--dsw-alias-bg-base': hsl(h(0), s(-0.2), l(0.04)),
-      '--dsw-alias-bg-layer-1': hsl(h(0), s(-0.3), l(0.08)),
-      '--dsw-alias-bg-layer-2': hsl(h(0), s(-0.2), l(-0.02)),
-      '--dsw-alias-bg-layer-3': hsl(h(0), s(-0.15), l(-0.08)),
-      '--dsw-alias-bg-overlay': hsl(h(0), s(-0.3), l(0.09)),
-      '--dsw-alias-border-l1': rgba(h(0), s(-0.2), l(-0.2), 0.1),
-      '--dsw-alias-border-l2': rgba(h(0), s(-0.2), l(-0.2), 0.18),
-      '--dsw-alias-label-primary': hsl(h(0), s(-0.2), l(-0.35)),
-      '--dsw-alias-label-secondary': hsl(h(0), s(-0.15), l(-0.15)),
-      '--dsw-alias-label-tertiary': hsl(h(0), s(-0.1), l(-0.08)),
-      '--dsw-alias-brand-primary': hsl(h(0), s(0.05), l(-0.15)),
+      // Backgrounds track the picked color at its lightness — theme-colored,
+      // with only mild desaturation so the surfaces stay readable.
+      '--dsw-alias-bg-base': hsl(h(0), s(-0.08), l(0.03)),
+      '--dsw-alias-bg-layer-1': hsl(h(0), s(-0.12), l(0.07)),
+      '--dsw-alias-bg-layer-2': hsl(h(0), s(-0.1), l(-0.03)),
+      '--dsw-alias-bg-layer-3': hsl(h(0), s(-0.08), l(-0.09)),
+      '--dsw-alias-bg-overlay': hsl(h(0), s(-0.12), l(0.08)),
+      '--dsw-alias-border-l1': rgba(h(0), s(-0.15), l(-0.35), 0.18),
+      '--dsw-alias-border-l2': rgba(h(0), s(-0.15), l(-0.35), 0.3),
+      // Text is pure black on light surfaces, pure white on dark.
+      '--dsw-alias-label-primary': hsl(0, 0, 0),
+      '--dsw-alias-label-secondary': hsl(0, 0, 0),
+      '--dsw-alias-label-tertiary': hsl(0, 0, 0),
+      '--dsw-alias-brand-primary': hsl(h(0), s(0.05), Math.min(l(-0.18), 0.45)),
       '--dsw-alias-brand-text': '#fff',
-      '--dsw-alias-button-primary-hover': hsl(h(0), s(0.05), l(-0.1)),
-      '--dsw-alias-button-primary-dimmed': hsl(h(0), s(-0.2), l(-0.02)),
-      '--dsw-alias-interactive-bg-hover': rgba(h(0), s(0), l(-0.15), 0.08),
-      '--dsw-alias-interactive-bg-active': rgba(h(0), s(0), l(-0.15), 0.14),
-      '--dsw-alias-markdown-code-block': hsl(h(0), s(-0.2), l(-0.02)),
-      '--dsw-alias-markdown-inline-code': hsl(h(0), s(-0.15), l(-0.04)),
-      '--dsw-specific-sidebar-fill': hsl(h(0), s(-0.2), l(-0.02)),
-      '--dsw-specific-sidebar-nav-item-active': hsl(h(0), s(-0.15), l(-0.06)),
-      '--dsw-specific-sidebar-nav-item-hover': hsl(h(0), s(-0.18), l(-0.03)),
-      '--dsw-alias-scrollbar-bg-l1': hsl(h(0), s(-0.15), l(-0.1)),
-      '--dsw-alias-scrollbar-bg-l2': hsl(h(0), s(-0.12), l(-0.12)),
-      '--dsw-alias-scrollbar-hover-l1': hsl(h(0), s(-0.1), l(-0.16)),
-      '--dsw-alias-scrollbar-hover-l2': hsl(h(0), s(-0.1), l(-0.16)),
+      '--dsw-alias-button-primary-hover': hsl(h(0), s(0.05), Math.min(l(-0.12), 0.5)),
+      '--dsw-alias-button-primary-dimmed': hsl(h(0), s(-0.1), l(-0.03)),
+      '--dsw-alias-button-elevated-fill': hsl(h(0), s(-0.1), l(0.1)),
+      '--dsw-alias-interactive-bg-hover': rgba(h(0), s(0), l(-0.3), 0.08),
+      '--dsw-alias-interactive-bg-active': rgba(h(0), s(0), l(-0.3), 0.14),
+      '--dsw-alias-markdown-code-block': hsl(h(0), s(-0.1), l(-0.03)),
+      '--dsw-alias-markdown-inline-code': hsl(h(0), s(-0.08), l(0.04)),
+      '--dsw-specific-sidebar-fill': hsl(h(0), s(-0.1), l(-0.03)),
+      '--dsw-specific-sidebar-nav-item-active': hsl(h(0), s(-0.08), l(0.05)),
+      '--dsw-specific-sidebar-nav-item-hover': hsl(h(0), s(-0.12), l(0)),
+      '--dsw-specific-input-major': hsl(h(0), s(-0.12), l(0.1)),
+      '--dsw-alias-scrollbar-bg-l1': hsl(h(0), s(-0.1), l(-0.08)),
+      '--dsw-alias-scrollbar-bg-l2': hsl(h(0), s(-0.08), l(-0.12)),
+      '--dsw-alias-scrollbar-hover-l1': hsl(h(0), s(-0.08), l(-0.16)),
+      '--dsw-alias-scrollbar-hover-l2': hsl(h(0), s(-0.08), l(-0.16)),
     },
   }
 }
@@ -202,7 +226,6 @@ function genTokens(hue: number, sat: number, lit: number): { colorScheme: 'light
 // ── Wallpaper layer (direct DOM) ───────────────────────────────────────────────
 
 let wpEl: HTMLDivElement | null = null
-let ovEl: HTMLStyleElement | null = null
 let ctxRef: Ctx = null as any
 
 function toRgba(c: string, a: number): string {
@@ -214,49 +237,70 @@ function toRgba(c: string, a: number): string {
   if (hsl) return `hsla(${hsl[1]},${hsl[2]}%,${hsl[3]}%,${a})`
   return c.trim()
 }
-function resolveBase(scheme: 'light' | 'dark', active: { colorScheme: string; tokens: Record<string, string> }): string {
-  if (active.colorScheme === scheme && active.tokens['--dsw-alias-bg-base']) return active.tokens['--dsw-alias-bg-base']
-  return scheme === 'light' ? 'rgb(255,255,255)' : 'rgb(21,21,23)'
-}
 
-/** Clear the direct CSS-variable overrides. */
-function clearOv(): void {
-  if (ovEl) { ovEl.remove(); ovEl = null }
+let appliedTokenNames: string[] = []
+
+/** Remove every inline token this plugin wrote (teardown symmetry). */
+function clearCustomTokens(): void {
+  for (const name of appliedTokenNames) document.body.style.removeProperty(name)
+  appliedTokenNames = []
 }
 
 /**
- * Apply semi-transparent overrides to bg-base and sidebar-fill via a dedicated
- * `<style>` element on `<html>`.  This bypasses the theme service's
- * `overrideTokens` mechanism so the overrides survive `setTheme` race
- * conditions — inline styles on `:root` always win over stylesheet rules.
+ * Write the saved color's full token set as inline variables on body — the
+ * same write surface the theme presenter owns, but derived DIRECTLY from the
+ * saved pick, so the theme color never depends on the theme service's active
+ * state or the presenter's timing. The bg-base and sidebar tokens are
+ * re-emitted at the requested alpha; every other token (layers, labels,
+ * borders, brand) is written verbatim. No reads: nothing can observe a stale
+ * or reset theme value and leave the homepage on the system color.
  */
-function applyBgOverrides(op: number): void {
-  clearOv()
+function applyCustomTokens(op: number): void {
+  const [h, s, l] = rColor()
+  const { tokens } = genTokens(h, s, l)
   const sideOp = Math.min(1, op + 0.08)
-  const snap = ctxRef.theme.getTheme()
-  const bgBase = toRgba(resolveBase('light', snap.active), op)
-  const bgBaseDark = toRgba(resolveBase('dark', snap.active), op)
-  const sideBase = toRgba(resolveBase('light', snap.active), sideOp)
-  const sideBaseDark = toRgba(resolveBase('dark', snap.active), sideOp)
-  ovEl = document.createElement('style')
-  ovEl.dataset.plugin = 'dsh-any-background-ov'
-  ovEl.textContent =
-    `:root{` +
-    `--dsw-alias-bg-base:${bgBase};` +
-    `--dsw-specific-sidebar-fill:${sideBase}` +
-    `}` +
-    `@media(prefers-color-scheme:dark){:root{` +
-    `--dsw-alias-bg-base:${bgBaseDark};` +
-    `--dsw-specific-sidebar-fill:${sideBaseDark}` +
-    `}}`
-  // When the active theme explicitly declares a colorScheme, also force that
-  // scheme's override regardless of system preference.
-  if (snap.active.colorScheme === 'dark') {
-    ovEl.textContent += `:root[data-ds-dark-theme]{--dsw-alias-bg-base:${bgBaseDark};--dsw-specific-sidebar-fill:${sideBaseDark}}`
-  } else if (snap.active.colorScheme === 'light') {
-    ovEl.textContent += `:root[data-ds-light-theme]{--dsw-alias-bg-base:${bgBase};--dsw-specific-sidebar-fill:${sideBase}}`
+  clearCustomTokens()
+  // Drive the base-palette switch ourselves so tokens the plugin does not
+  // override (the input surface, masks, static tokens) follow the picked
+  // color's dark/light scheme even while the theme service preference is
+  // being adopted/reset.
+  if (l < 0.55) document.body.setAttribute('data-ds-dark-theme', '')
+  else document.body.removeAttribute('data-ds-dark-theme')
+  for (const [name, value] of Object.entries(tokens)) {
+    let v = value
+    if (name === '--dsw-alias-bg-base') v = toRgba(value, op)
+    else if (name === '--dsw-specific-sidebar-fill') v = toRgba(value, sideOp)
+    document.body.style.setProperty(name, v)
+    appliedTokenNames.push(name)
   }
-  document.documentElement.appendChild(ovEl)
+}
+
+// ── Settings panel opacity ─────────────────────────────────────────────────────
+// The settings modal is the only aria-modal dialog that identifies itself with
+// aria-labelledby (ui-primitives' Modal and the image lightbox use aria-label),
+// so this selector scopes the translucency to the settings panel alone. The
+// panel surface is --dsw-alias-bg-layer-2, resolved here from body's computed
+// style (the theme presenter writes custom-theme tokens inline on body; the
+// base palettes declare the alias in the stylesheets) and re-emitted with an
+// alpha through a plugin-owned variable, so the panel keeps its current color
+// while fading toward whatever sits behind the modal.
+
+const SETTINGS_PANEL_SEL = '[role="dialog"][aria-modal="true"][aria-labelledby]'
+const SETTINGS_STYLE_RULE = `${SETTINGS_PANEL_SEL}{background:var(--dsh-any-bg-settings-surface,var(--dsw-alias-bg-layer-2))}`
+
+function applySettingsOverrides(op: number): void {
+  if (op >= 1) {
+    document.documentElement.style.removeProperty('--dsh-any-bg-settings-surface')
+    return
+  }
+  // Derive the panel surface from the saved color's layer-2 token (not a
+  // computed-style read), so the settings panel matches the homepage tint
+  // without depending on the presenter or theme state.
+  const [h, s, l] = rColor()
+  const layer2 = genTokens(h, s, l).tokens['--dsw-alias-bg-layer-2']
+  if (layer2 !== undefined) {
+    document.documentElement.style.setProperty('--dsh-any-bg-settings-surface', toRgba(layer2, op))
+  }
 }
 
 function applyWp(ctx: Ctx): void {
@@ -270,17 +314,37 @@ function applyWp(ctx: Ctx): void {
     }
     const bg = rBgState()
     wpEl.style.backgroundImage = `url("${url}")`
-    wpEl.style.backgroundSize = `${Math.round(bg.zoom * 100)}%`
-    wpEl.style.backgroundPosition = `${bg.px}px ${bg.py}px`
+    if (bg.iw > 0) {
+      // Saved placement: contain-fit at zoom with the image CENTER pinned to
+      // the committed fractional viewport point (x, y are center fractions,
+      // 0.5 = viewport center — the editor commits the same anchor), so the
+      // framed region survives viewport changes: window moves between screens,
+      // aspect-ratio changes, and panel splitters re-derive a consistent view.
+      const fit = Math.min(window.innerWidth / bg.iw, window.innerHeight / bg.ih)
+      const w = bg.iw * fit * bg.zoom
+      const h = bg.ih * fit * bg.zoom
+      wpEl.style.backgroundSize = `${w}px ${h}px`
+      wpEl.style.backgroundPosition = `${bg.x * window.innerWidth - w / 2}px ${bg.y * window.innerHeight - h / 2}px`
+    } else {
+      // Fresh image: match the editor's initial centered contain view.
+      wpEl.style.backgroundSize = 'contain'
+      wpEl.style.backgroundPosition = 'center'
+    }
     const blur = rBl()
     wpEl.style.filter = blur > 0 ? `blur(${blur}px)` : 'none'
+    wpEl.style.opacity = String(rWop())
   }
-  // Background transparency — applied via direct <style> on :root so it
-  // survives theme switches regardless of overrideTokens lifecycle.
+  // Theme color + opacity: write the full token set inline (self-contained),
+  // then the settings panel surface.
   const op = rOp()
-  applyBgOverrides(op)
+  applyCustomTokens(op)
+  applySettingsOverrides(rSop())
 }
-function teardownWp(): void { wpEl?.remove(); wpEl = null; clearOv() }
+function teardownWp(): void {
+  wpEl?.remove(); wpEl = null
+  clearCustomTokens()
+  document.documentElement.style.removeProperty('--dsh-any-bg-settings-surface')
+}
 
 // ── Color Wheel (combined hue ring + SL square on single canvas) ───────────────
 
@@ -288,11 +352,13 @@ const WHEEL_SIZE = 220
 const CX = WHEEL_SIZE / 2
 const RING_OUTER = 106
 const RING_INNER = 82
-const SQ_HALF = 74
+// Square inscribed in the ring's inner circle: half-side = RING_INNER / √2,
+// so the four corners sit exactly on the inner edge of the hue ring.
+const SQ_HALF = Math.round(RING_INNER / Math.SQRT2)
 
 function drawWheel(cvs: HTMLCanvasElement, hue: number, sat: number, lit: number): void {
-  // genTokens stores HSL; the canvas renders HSV S-V plane — convert back.
-  const [hv, sv, vv] = hslToHsv(hue, sat, lit)
+  // Wheel coordinates are HSV (the S-V plane); props arrive in HSV from the
+  // section. The HSL conversion happens at the setColor boundary.
   const c = cvs.getContext('2d')!
   c.clearRect(0, 0, WHEEL_SIZE, WHEEL_SIZE)
   // Hue ring
@@ -302,17 +368,17 @@ function drawWheel(cvs: HTMLCanvasElement, hue: number, sat: number, lit: number
     c.beginPath(); c.arc(CX, CX, RING_OUTER, r1, r2); c.arc(CX, CX, RING_INNER, r2, r1, true); c.closePath()
     c.fillStyle = `hsl(${a},100%,50%)`; c.fill()
   }
-  // SL square inside ring (HSV S-V plane for the converted values)
+  // SL square inside ring (HSV S-V plane)
   const gx = CX - SQ_HALF, gy = CX - SQ_HALF, sz = SQ_HALF * 2
   c.fillStyle = '#fff'; c.fillRect(gx, gy, sz, sz)
   const gh = c.createLinearGradient(gx, 0, gx + sz, 0)
-  gh.addColorStop(0, 'rgba(255,255,255,1)'); gh.addColorStop(1, `hsl(${hv},100%,50%)`)
+  gh.addColorStop(0, 'rgba(255,255,255,1)'); gh.addColorStop(1, `hsl(${hue},100%,50%)`)
   c.fillStyle = gh; c.fillRect(gx, gy, sz, sz)
   const gv = c.createLinearGradient(0, gy, 0, gy + sz)
   gv.addColorStop(0, 'rgba(0,0,0,0)'); gv.addColorStop(1, 'rgba(0,0,0,1)')
   c.fillStyle = gv; c.fillRect(gx, gy, sz, sz)
   // Hue marker on ring
-  const hRad = (hv - 90) * Math.PI / 180
+  const hRad = (hue - 90) * Math.PI / 180
   const hR = (RING_OUTER + RING_INNER) / 2
   const hmx = CX + Math.cos(hRad) * hR, hmy = CX + Math.sin(hRad) * hR
   c.beginPath(); c.arc(hmx, hmy, 8, 0, Math.PI * 2)
@@ -320,7 +386,7 @@ function drawWheel(cvs: HTMLCanvasElement, hue: number, sat: number, lit: number
   c.beginPath(); c.arc(hmx, hmy, 6.5, 0, Math.PI * 2)
   c.strokeStyle = '#fff'; c.lineWidth = 2; c.stroke()
   // SL marker (HSV coordinates)
-  const smx = gx + sv * sz, smy = gy + (1 - vv) * sz
+  const smx = gx + sat * sz, smy = gy + (1 - lit) * sz
   c.beginPath(); c.arc(smx, smy, 7, 0, Math.PI * 2)
   c.fillStyle = 'rgba(0,0,0,0.25)'; c.fill()
   c.beginPath(); c.arc(smx, smy, 5.5, 0, Math.PI * 2)
@@ -330,10 +396,10 @@ function drawWheel(cvs: HTMLCanvasElement, hue: number, sat: number, lit: number
 }
 
 function hitTest(x: number, y: number): 'ring' | 'square' | null {
+  if (Math.abs(x - CX) <= SQ_HALF && Math.abs(y - CX) <= SQ_HALF) return 'square'
   const dx = x - CX, dy = y - CX
   const dist = Math.sqrt(dx * dx + dy * dy)
   if (dist >= RING_INNER - 4 && dist <= RING_OUTER + 4) return 'ring'
-  if (Math.abs(x - CX) <= SQ_HALF && Math.abs(y - CX) <= SQ_HALF) return 'square'
   return null
 }
 
@@ -344,10 +410,10 @@ function pickHue(x: number, y: number): number {
 }
 
 function pickSL(x: number, y: number): [number, number] {
-  const gx = CX - SQ_HALF, sz = SQ_HALF * 2
+  const gx = CX - SQ_HALF, gy = CX - SQ_HALF, sz = SQ_HALF * 2
   return [
     Math.max(0, Math.min(1, (x - gx) / sz)),
-    Math.max(0.02, Math.min(0.98, 1 - (y - gx) / sz)),
+    Math.max(0.02, Math.min(0.98, 1 - (y - gy) / sz)),
   ]
 }
 
@@ -356,10 +422,23 @@ function ColorWheel({ hue, sat, lit, onChange }: {
   onChange: (h: number, s: number, l: number) => void
 }) {
   const cvsRef = useRef<HTMLCanvasElement>(null)
-  const st = useRef({ hue, sat, lit })
-  st.current = { hue, sat, lit }
+  // Internal HSV state: the slots host caches injected section props once, so
+  // the canvas must redraw from interaction state instead of from props.
+  const [col, setCol] = useState({ hue, sat, lit })
+  const colRef = useRef(col)
+  colRef.current = col
 
-  useEffect(() => { if (cvsRef.current) drawWheel(cvsRef.current, hue, sat, lit) }, [hue, sat, lit])
+  // Adopt external changes (e.g. section remount after theme restore).
+  useEffect(() => {
+    setCol(c => (c.hue === hue && c.sat === sat && c.lit === lit ? c : { hue, sat, lit }))
+  }, [hue, sat, lit])
+
+  useEffect(() => { if (cvsRef.current) drawWheel(cvsRef.current, col.hue, col.sat, col.lit) }, [col])
+
+  const apply = useCallback((nh: number, ns: number, nl: number) => {
+    setCol({ hue: nh, sat: ns, lit: nl })
+    onChange(nh, ns, nl)
+  }, [onChange])
 
   const onDown = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     const r = cvsRef.current!.getBoundingClientRect()
@@ -367,25 +446,25 @@ function ColorWheel({ hue, sat, lit, onChange }: {
     const region = hitTest(x, y)
     if (!region) return
     if (region === 'ring') {
-      onChange(pickHue(x, y), st.current.sat, st.current.lit)
+      apply(pickHue(x, y), colRef.current.sat, colRef.current.lit)
     } else {
       const [s, l] = pickSL(x, y)
-      onChange(st.current.hue, s, l)
+      apply(colRef.current.hue, s, l)
     }
     const onMove = (ev: MouseEvent) => {
       const rr = cvsRef.current!.getBoundingClientRect()
       const mx = ev.clientX - rr.left, my = ev.clientY - rr.top
       if (region === 'ring') {
         const d = Math.sqrt((mx - CX) ** 2 + (my - CX) ** 2)
-        if (d >= RING_INNER - 10 && d <= RING_OUTER + 10) onChange(pickHue(mx, my), st.current.sat, st.current.lit)
+        if (d >= RING_INNER - 10 && d <= RING_OUTER + 10) apply(pickHue(mx, my), colRef.current.sat, colRef.current.lit)
       } else {
         const [s, l] = pickSL(mx, my)
-        onChange(st.current.hue, s, l)
+        apply(colRef.current.hue, s, l)
       }
     }
     const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp) }
     document.addEventListener('mousemove', onMove); document.addEventListener('mouseup', onUp)
-  }, [onChange])
+  }, [apply])
 
   return <canvas ref={cvsRef} width={WHEEL_SIZE} height={WHEEL_SIZE} style={ST.wheelCanvas} onMouseDown={onDown} />
 }
@@ -420,19 +499,24 @@ const ST = {
   h2: { color: 'var(--dsw-alias-label-primary)', fontSize: '18px', fontWeight: 600, margin: 0 },
   sub: { color: 'var(--dsw-alias-label-tertiary)', fontSize: '13px' },
   hr: { height: '1px', background: 'var(--dsw-alias-border-l2)', border: 'none', margin: '4px 0' },
-  label: { color: 'var(--dsw-alias-label-primary)', fontSize: '14px', fontWeight: 500, marginBottom: '8px' },
+  label: { color: 'var(--dsw-alias-label-primary)', fontSize: '16px', fontWeight: 600, marginBottom: '8px' },
   hint: { color: 'var(--dsw-alias-label-tertiary)', fontSize: '12px', lineHeight: '18px', marginTop: '4px' },
+  colorHint: { color: 'var(--dsw-alias-label-tertiary)', fontSize: '12px', lineHeight: '18px', marginTop: '7px', textAlign: 'center' as const },
   wheelCanvas: { cursor: 'crosshair', borderRadius: '50%' },
+  center: { display: 'flex', justifyContent: 'center' },
+  btnGroup: { display: 'flex', justifyContent: 'center', marginTop: '10px' },
   row: { display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' as const },
+  sliderBlock: { display: 'flex', flexDirection: 'column' as const, gap: '4px' },
   sliderRow: { display: 'flex', alignItems: 'center', gap: '10px' },
-  sliderLabel: { color: 'var(--dsw-alias-label-secondary)', fontSize: '13px', whiteSpace: 'nowrap' as const, width: '52px' },
+  sliderLabel: { color: 'var(--dsw-alias-label-secondary)', fontSize: '13px' },
+  smallHint: { color: 'var(--dsw-alias-label-tertiary)', fontSize: '11px', lineHeight: '16px' },
   slider: { flex: 1, accentColor: 'var(--dsw-alias-brand-primary)', minWidth: '160px' },
   sliderVal: { color: 'var(--dsw-alias-label-secondary)', fontSize: '12px', whiteSpace: 'nowrap' as const, width: '44px', textAlign: 'right' as const },
   btn: { height: '32px', padding: '0 14px', borderRadius: '8px', border: '1px solid var(--dsw-alias-border-l2)', background: 'var(--dsw-alias-button-elevated-fill)', color: 'var(--dsw-alias-label-primary)', cursor: 'pointer', fontSize: '13px', font: 'inherit', boxSizing: 'border-box' as const },
   btnDanger: { color: 'var(--dsw-alias-state-error-primary)' },
   btnPrimary: { background: 'var(--dsw-alias-brand-primary)', color: 'var(--dsw-alias-brand-text)', border: 'none' },
-  preview: { width: '72px', height: '44px', objectFit: 'cover' as const, borderRadius: '6px', border: '1px solid var(--dsw-alias-border-l2)', cursor: 'pointer' },
-  sliders: { display: 'flex', flexDirection: 'column' as const, gap: '8px', marginTop: '12px' },
+  preview: { width: '368px', height: '225px', objectFit: 'cover' as const, borderRadius: '6px', border: '1px solid var(--dsw-alias-border-l2)', cursor: 'pointer' },
+  sliders: { display: 'flex', flexDirection: 'column' as const, gap: '12px', marginTop: '8px' },
   // Modal
   overlay: { position: 'fixed' as const, inset: 0, zIndex: 9999, background: 'rgba(0,0,0,0.7)', display: 'flex', flexDirection: 'column' as const, alignItems: 'center', justifyContent: 'center', gap: '12px' },
   modalTitle: { color: '#fff', fontSize: '16px', fontWeight: 500 },
@@ -444,19 +528,19 @@ const ST = {
 
 // ── Background Editor Modal ────────────────────────────────────────────────────
 
-function BgEditor({ url, onClose, onCommit }: {
-  url: string; onClose: () => void
-  onCommit: (zoom: number, px: number, py: number) => void
+function BgEditor({ url, t, onClose, onCommit }: {
+  url: string; t: (key: string) => string; onClose: () => void
+  onCommit: (zoom: number, x: number, y: number, iw: number, ih: number) => void
 }) {
-  const [zoom, setZoom] = useState(1)
-  const [pos, setPos] = useState({ x: 0, y: 0 })
+  const pw = Math.min(window.innerWidth * 0.75, 860)
+  const ph = Math.round(pw * window.innerHeight / window.innerWidth)
+  const saved = rBgState()
+  const [zoom, setZoom] = useState(saved.iw > 0 ? saved.zoom : 1)
+  const [pos, setPos] = useState(saved.iw > 0 ? { x: saved.x * pw, y: saved.y * ph } : { x: 0, y: 0 })
   const [imgSize, setImgSize] = useState({ w: 0, h: 0 })
   const containerRef = useRef<HTMLDivElement>(null)
   const imgRef = useRef<HTMLImageElement>(null)
   const dragRef = useRef({ active: false, sx: 0, sy: 0, spx: 0, spy: 0 })
-
-  const pw = Math.min(window.innerWidth * 0.75, 860)
-  const ph = Math.round(pw * window.innerHeight / window.innerWidth)
 
   useEffect(() => {
     const img = new Image()
@@ -464,7 +548,17 @@ function BgEditor({ url, onClose, onCommit }: {
       const scale = Math.min(pw / img.width, ph / img.height)
       const w = img.width * scale, h = img.height * scale
       setImgSize({ w, h })
-      setPos({ x: (pw - w) / 2, y: (ph - h) / 2 })
+      const s = rBgState()
+      if (s.iw > 0 && s.iw === img.width && s.ih === img.height) {
+        setZoom(s.zoom)
+        // Saved x, y are CENTER fractions of the preview: the image center
+        // lands at (x·pw, y·ph), so the top-left comes from subtracting half
+        // the displayed (zoom-scaled) image size.
+        setPos({ x: s.x * pw - w * s.zoom / 2, y: s.y * ph - h * s.zoom / 2 })
+      } else {
+        setZoom(1)
+        setPos({ x: (pw - w) / 2, y: (ph - h) / 2 })
+      }
     }
     img.src = url
   }, [url, pw, ph])
@@ -499,26 +593,24 @@ function BgEditor({ url, onClose, onCommit }: {
   }, [onWheelCb])
 
   const resetView = useCallback(() => {
-    if (!imgRef.current) return
-    const scale = Math.min(pw / imgSize.w, ph / imgSize.h)
-    const w = imgSize.w * scale, h = imgSize.h * scale
-    setZoom(1); setPos({ x: (pw - w) / 2, y: (ph - h) / 2 })
+    if (imgSize.w === 0) return
+    setZoom(1); setPos({ x: (pw - imgSize.w) / 2, y: (ph - imgSize.h) / 2 })
   }, [pw, ph, imgSize])
 
   return (
     <div style={ST.overlay} onClick={e => { if (e.target === e.currentTarget) onClose() }}>
-      <div style={ST.modalTitle}>{/* t */ '背景编辑器'}</div>
+      <div style={ST.modalTitle}>{t('editorTitle')}</div>
       <div ref={containerRef} style={{ ...ST.previewRect, width: pw, height: ph }} onMouseDown={onDown}>
         <img ref={imgRef} src={url} alt="" draggable={false} style={{
           ...ST.previewImg, width: imgSize.w, height: imgSize.h,
           transform: `translate(${pos.x}px,${pos.y}px) scale(${zoom})`,
         }} />
       </div>
-      <div style={ST.modalHint}>{/* t */ '拖动移动图片，滚轮缩放大小'}</div>
+      <div style={ST.modalHint}>{t('editorHint')}</div>
       <div style={ST.modalBtns}>
-        <button style={ST.btn} onClick={resetView}>{/* t */ '重置'}</button>
-        <button style={ST.btn} onClick={onClose}>{/* t */ '取消'}</button>
-        <button style={{ ...ST.btn, ...ST.btnPrimary }} onClick={() => onCommit(zoom, pos.x / pw, pos.y / ph)}>{/* t */ '确认'}</button>
+        <button style={ST.btn} onClick={resetView}>{t('editorReset')}</button>
+        <button style={ST.btn} onClick={onClose}>{t('editorCancel')}</button>
+        <button style={{ ...ST.btn, ...ST.btnPrimary }} onClick={() => onCommit(zoom, (pos.x + imgSize.w * zoom / 2) / pw, (pos.y + imgSize.h * zoom / 2) / ph, imgRef.current?.naturalWidth ?? 0, imgRef.current?.naturalHeight ?? 0)}>{t('editorCommit')}</button>
       </div>
     </div>
   )
@@ -526,14 +618,13 @@ function BgEditor({ url, onClose, onCommit }: {
 
 // ── Uncontrolled slider ────────────────────────────────────────────────────────
 
-function LiveSlider({ label, min, max, step, def, fmt, onInput, onChange }: {
-  label: string; min: number; max: number; step: number; def: number
+function LiveSlider({ min, max, step, def, fmt, onInput, onChange }: {
+  min: number; max: number; step: number; def: number
   fmt: (v: number) => string; onInput: (v: number) => void; onChange: (v: number) => void
 }) {
   const valRef = useRef<HTMLSpanElement>(null)
   return (
     <div style={ST.sliderRow}>
-      <span style={ST.sliderLabel}>{label}</span>
       <input type="range" min={min} max={max} step={step} defaultValue={def} style={ST.slider}
         onInput={e => { const v = Number((e.target as HTMLInputElement).value); onInput(v); if (valRef.current) valRef.current.textContent = fmt(v) }}
         onChange={e => onChange(Number((e.target as HTMLInputElement).value))} />
@@ -545,7 +636,7 @@ function LiveSlider({ label, min, max, step, def, fmt, onInput, onChange }: {
 // ── Theme Section ──────────────────────────────────────────────────────────────
 
 function ThemeSection(props: any) {
-  const { t, hue, sat, lit, setColor, url, setWp, setOp, setBl, useStore } = props
+  const { t, hue, sat, lit, setColor, url, setWp, setOp, setWop, setBl, setSop, useStore } = props
   const storeUrl = useStore((s: any) => s.url)
   const fileRef = useRef<HTMLInputElement>(null)
   const [editorOpen, setEditorOpen] = useState(false)
@@ -554,11 +645,36 @@ function ThemeSection(props: any) {
     <div style={ST.root}>
       <div><h2 style={ST.h2}>{t('nav')}</h2><div style={ST.sub}>{t('subtitle')}</div></div>
 
-      {/* Color wheel */}
+      {/* Theme color */}
       <div>
         <div style={ST.label}>{t('colorTitle')}</div>
-        <ColorWheel hue={hue} sat={sat} lit={lit} onChange={setColor} />
-        <div style={ST.hint}>{t('colorHint')}</div>
+        <div style={ST.center}><ColorWheel hue={hue} sat={sat} lit={lit} onChange={setColor} /></div>
+        <div style={ST.colorHint}>{t('colorHint')}</div>
+      </div>
+
+      <hr style={ST.hr} />
+
+      {/* Interface: homepage + settings opacity, each its own slider */}
+      <div>
+        <div style={ST.label}>{t('uiTitle')}</div>
+        <div style={ST.sliders}>
+          <div style={ST.sliderBlock}>
+            <div style={ST.sliderLabel}>{t('uiOpacity')}</div>
+            <div style={ST.smallHint}>{t('uiOpacityHint')}</div>
+            <LiveSlider min={0} max={100} step={1} def={Math.round(rOp() * 100)}
+              fmt={v => `${v}%`}
+              onInput={v => { const op = v / 100; wLS(LS_OP, String(op)); applyCustomTokens(op) }}
+              onChange={v => setOp(v / 100)} />
+          </div>
+          <div style={ST.sliderBlock}>
+            <div style={ST.sliderLabel}>{t('uiSop')}</div>
+            <div style={ST.smallHint}>{t('uiSopHint')}</div>
+            <LiveSlider min={0} max={100} step={1} def={Math.round(rSop() * 100)}
+              fmt={v => `${v}%`}
+              onInput={v => { const op = v / 100; wLS(LS_SOP, String(op)); applySettingsOverrides(op) }}
+              onChange={v => setSop(v / 100)} />
+          </div>
+        </div>
       </div>
 
       <hr style={ST.hr} />
@@ -566,33 +682,41 @@ function ThemeSection(props: any) {
       {/* Background image */}
       <div>
         <div style={ST.label}>{t('bgTitle')}</div>
-        <div style={ST.row}>
-          {storeUrl ? <img src={storeUrl} alt="" style={ST.preview} onClick={() => setEditorOpen(true)} /> : null}
-          <button type="button" style={ST.btn} onClick={() => fileRef.current?.click()}>{t('bgChoose')}</button>
-          {storeUrl ? <button type="button" style={ST.btn} onClick={() => setEditorOpen(true)}>{t('bgEdit')}</button> : null}
-          {storeUrl ? <button type="button" style={{ ...ST.btn, ...ST.btnDanger }} onClick={() => setWp(null)}>{t('bgRemove')}</button> : null}
-          <input ref={fileRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={e => {
-            const f = e.target.files?.[0]; if (!f) return
-            readImg(f, d => { if (d) setWp(d); e.target.value = '' })
-          }} />
+        <div style={ST.center}>{storeUrl ? <img src={storeUrl} alt="" style={ST.preview} onClick={() => setEditorOpen(true)} /> : null}</div>
+        <div style={ST.btnGroup}>
+          <div style={ST.row}>
+            <button type="button" style={ST.btn} onClick={() => fileRef.current?.click()}>{t('bgChoose')}</button>
+            {storeUrl ? <button type="button" style={ST.btn} onClick={() => setEditorOpen(true)}>{t('bgEdit')}</button> : null}
+            {storeUrl ? <button type="button" style={{ ...ST.btn, ...ST.btnDanger }} onClick={() => setWp(null)}>{t('bgRemove')}</button> : null}
+            <input ref={fileRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={e => {
+              const f = e.target.files?.[0]; if (!f) return
+              readImg(f, d => { if (d) setWp(d); e.target.value = '' })
+            }} />
+          </div>
         </div>
         <div style={ST.sliders}>
-          <LiveSlider label={t('bgOpacity')} min={0} max={100} step={1} def={Math.round(rOp() * 100)}
-            fmt={v => `${v}%`}
-            onInput={v => { const op = v / 100; wLS(LS_OP, String(op)); if (wpEl) wpEl.style.opacity = String(op); applyBgOverrides(op) }}
-            onChange={v => setOp(v / 100)} />
-          <LiveSlider label={t('bgBlur')} min={0} max={60} step={1} def={rBl()}
-            fmt={v => `${v}px`}
-            onInput={v => { wLS(LS_BL, String(v)); if (wpEl) wpEl.style.filter = v > 0 ? `blur(${v}px)` : 'none' }}
-            onChange={v => setBl(v)} />
+          <div style={ST.sliderBlock}>
+            <div style={ST.sliderLabel}>{t('wpOpacity')}</div>
+            <LiveSlider min={0} max={100} step={1} def={Math.round(rWop() * 100)}
+              fmt={v => `${v}%`}
+              onInput={v => { const op = v / 100; wLS(LS_WOP, String(op)); if (wpEl) wpEl.style.opacity = String(op) }}
+              onChange={v => setWop(v / 100)} />
+          </div>
+          <div style={ST.sliderBlock}>
+            <div style={ST.sliderLabel}>{t('bgBlur')}</div>
+            <LiveSlider min={0} max={60} step={1} def={rBl()}
+              fmt={v => `${v}px`}
+              onInput={v => { wLS(LS_BL, String(v)); if (wpEl) wpEl.style.filter = v > 0 ? `blur(${v}px)` : 'none' }}
+              onChange={v => setBl(v)} />
+          </div>
         </div>
         <div style={ST.hint}>{t('bgHint')}</div>
       </div>
 
       {/* Background editor modal */}
       {editorOpen && storeUrl ? (
-        <BgEditor url={storeUrl} onClose={() => setEditorOpen(false)}
-          onCommit={(z, px, py) => { wLS(LS_BG, JSON.stringify({ zoom: z, px, py })); applyWp(ctxRef); setEditorOpen(false) }} />
+        <BgEditor url={storeUrl} t={t} onClose={() => setEditorOpen(false)}
+          onCommit={(z, x, y, iw, ih) => { wLS(LS_BG, JSON.stringify({ zoom: z, x, y, iw, ih })); applyWp(ctxRef); setEditorOpen(false) }} />
       ) : null}
     </div>
   )
@@ -603,14 +727,25 @@ function ThemeSection(props: any) {
 export function apply(ctx: Ctx): void {
   ctxRef = ctx
 
-  // 1. Restore custom color and register as a skin.
+  // 1. Restore custom color and register as a skin. The saved color's
+  // lightness decides the scheme — a dark pick gets white text, a light pick
+  // black text — so both the theme color and the dark/light text follow the
+  // picked color.
   const [initH, initS, initL] = rColor()
   let customDispose: (() => void) | null = null
+  // registerCustom takes HSL (the storage/wheel space and genTokens space).
   const registerCustom = (h: number, s: number, l: number) => {
     customDispose?.()
-    const [hh, ss, ll] = hsvToHsl(h, s, l)
-    const { colorScheme, tokens } = genTokens(hh, ss, ll)
-    customDispose = ctx.theme.register({ id: CUSTOM_ID, colorScheme, tokens })
+    try {
+      const { colorScheme, tokens } = genTokens(h, s, l)
+      customDispose = ctx.theme.register({ id: CUSTOM_ID, colorScheme, tokens })
+    } catch {
+      // A live registration from an earlier apply pass (HMR swap that could
+      // not run this fiber's disposer) cannot be torn down here; keep it and
+      // activate it below. Without this the duplicate-id throw would abort
+      // apply and skip the wallpaper/opacity restore.
+      customDispose = null
+    }
     ctx.theme.setTheme(CUSTOM_ID)
   }
   // Restore saved color on boot.
@@ -622,7 +757,7 @@ export function apply(ctx: Ctx): void {
   if (typeof document !== 'undefined') {
     styleEl = document.createElement('style')
     styleEl.dataset.plugin = 'dsh-any-background'
-    styleEl.textContent = `body[data-ds-dark-theme="${CUSTOM_ID}"]::before{content:'';position:fixed;inset:0;z-index:-1;pointer-events:none;background:radial-gradient(ellipse 80% 60% at 50% 0%,rgba(255,255,255,0.03) 0%,transparent 60%)}`
+    styleEl.textContent = `body[data-ds-dark-theme="${CUSTOM_ID}"]::before{content:'';position:fixed;inset:0;z-index:-1;pointer-events:none;background:radial-gradient(ellipse 80% 60% at 50% 0%,rgba(255,255,255,0.03) 0%,transparent 60%)}${SETTINGS_STYLE_RULE}`
     document.head.appendChild(styleEl)
   }
   ctx.effect(() => () => { styleEl?.parentNode?.removeChild(styleEl) }, 'dsh-any-background: gradient')
@@ -639,7 +774,47 @@ export function apply(ctx: Ctx): void {
   // 4. Wallpaper.
   applyWp(ctx); syncBg()
   ctx.effect(() => () => { teardownWp() }, 'dsh-any-background: wp cleanup')
-  ctx.on('theme/change', () => applyWp(ctx))
+  ctx.effect(() => ctx.on('theme/change', () => {
+    // The theme service persists only built-in preferences; the custom theme's
+    // preference lives in memory, so a host-scope adoption can silently reset
+    // it. While a color is saved, re-assert the custom theme so it stays
+    // active. Guard on registry presence — registerCustom disposes the old
+    // skin before re-registering, and during that transient the registry lacks
+    // CUSTOM_ID, so asserting there would throw.
+    if (rLS(LS_COLOR)) {
+      const snapshot = ctx.theme.getTheme()
+      if (snapshot.preference !== CUSTOM_ID && snapshot.themes.some(t => t.id === CUSTOM_ID)) {
+        ctx.theme.setTheme(CUSTOM_ID)
+      }
+    }
+    applyWp(ctx)
+  }), 'dsh-any-background: theme change')
+  // The wallpaper's inline size/position are absolute pixels computed for the
+  // viewport at apply time, so a stale viewport leaves them misplaced.
+  // Watch the viewport itself: a fixed inset:0 sentinel's box always equals
+  // the viewport, so a ResizeObserver on it fires for ANY viewport change
+  // (window resize, moving between monitors, panel splitters, zoom) where
+  // window.resize can be missed; a resolution media query catches DPI-only
+  // moves between differently scaled screens. All re-applies are coalesced to
+  // one per animation frame. Re-running applyWp recomputes the contain-fit
+  // scale and the fractional offsets for the new viewport (the editor's model).
+  let frame = 0
+  const applySoon = (): void => {
+    if (frame !== 0) return
+    frame = requestAnimationFrame(() => { frame = 0; applyWp(ctx) })
+  }
+  const sentinel = document.createElement('div')
+  sentinel.style.cssText = 'position:fixed;inset:0;pointer-events:none;visibility:hidden'
+  document.body.append(sentinel)
+  const viewportObserver = new ResizeObserver(applySoon)
+  viewportObserver.observe(sentinel)
+  const dprQuery = window.matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`)
+  dprQuery.addEventListener('change', applySoon)
+  ctx.effect(() => () => {
+    viewportObserver.disconnect()
+    dprQuery.removeEventListener('change', applySoon)
+    sentinel.remove()
+  }, 'dsh-any-background: viewport watch')
 
   // 5. Locale.
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'dsh-any-background: i18n')
@@ -655,12 +830,14 @@ export function apply(ctx: Ctx): void {
       setColor: (nh: number, ns: number, nl: number) => {
         const [sh, ss, sl] = hsvToHsl(nh, ns, nl)
         wLS(LS_COLOR, JSON.stringify([sh, ss, sl]))
-        registerCustom(nh, ns, nl)
+        registerCustom(sh, ss, sl)
         applyWp(ctx)
       },
-      setWp: (u: string | null) => { wLS(LS_WP, u); applyWp(ctx); syncBg() },
+      setWp: (u: string | null) => { wLS(LS_WP, u); wLS(LS_BG, null); applyWp(ctx); syncBg() },
       setOp: (v: number) => { wLS(LS_OP, String(v)); applyWp(ctx); syncBg() },
+      setWop: (v: number) => { wLS(LS_WOP, String(v)); applyWp(ctx); syncBg() },
       setBl: (v: number) => { wLS(LS_BL, String(v)); applyWp(ctx); syncBg() },
+      setSop: (v: number) => { wLS(LS_SOP, String(v)); applySettingsOverrides(v) },
     }
   }
   ctx.slots.inject('settings.section', () => ctx.slots.register({
@@ -668,4 +845,41 @@ export function apply(ctx: Ctx): void {
     label: () => ctx.locale.bind(NS)('nav'),
     locale: NS, store, inject: sectionInject,
   }, ThemeSection as any))
+
+  // 7. Deferred boot restore: the theme service and the host settings scope
+  // settle asynchronously after this apply, so the synchronous restore can be
+  // observed mid-flight — a late host adoption resets the preference, or the
+  // presenter re-applies over our overrides. Re-running the saved-color and
+  // wallpaper restore a few ticks later guarantees the saved records land.
+  const restoreSaved = (): void => {
+    if (rLS(LS_COLOR)) {
+      const [h, s, l] = rColor()
+      registerCustom(h, s, l)
+    }
+    applyWp(ctx)
+  }
+  const restoreTimers = [300, 1500].map(delay => window.setTimeout(restoreSaved, delay))
+  ctx.effect(() => () => { restoreTimers.forEach(id => window.clearTimeout(id)) }, 'dsh-any-background: boot restore')
+
+  // 8. Theme watchdog: the theme service keeps only built-in preferences in
+  // memory, so ANY host-scope adoption can silently drop the custom theme —
+  // reverting the label colors (white/black) and the inner surfaces to the
+  // system palette. While a color is saved, re-register and re-assert the
+  // custom theme on a slow interval so the theme state always matches the
+  // saved color and the active scheme, independent of which event resets it.
+  const watchdogId = window.setInterval(() => {
+    if (!rLS(LS_COLOR)) return
+    const snapshot = ctx.theme.getTheme()
+    let changed = false
+    if (!snapshot.themes.some(t => t.id === CUSTOM_ID)) {
+      const [h, s, l] = rColor()
+      registerCustom(h, s, l)
+      changed = true
+    } else if (snapshot.preference !== CUSTOM_ID) {
+      ctx.theme.setTheme(CUSTOM_ID)
+      changed = true
+    }
+    if (changed) applyWp(ctx)
+  }, 1000)
+  ctx.effect(() => () => { window.clearInterval(watchdogId) }, 'dsh-any-background: theme watchdog')
 }
