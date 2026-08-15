@@ -8,12 +8,6 @@
 
 一个 **DeepSeek Harness** 外观插件，让你完全自定义 Web 端的主题色、背景壁纸和透明度控制。
 
-<p align="center">
-  <a href="https://star-history.com/#/Tkingxiao/dsh-any-background" target="_blank">
-    <img src="https://api.star-history.com/svg?repos=Tkingxiao/dsh-any-background&type=Date" alt="Star 历史趋势图" width="600" />
-  </a>
-</p>
-
 ---
 
 ## 功能特性
@@ -44,6 +38,7 @@ dsh-any-background/
 │   ├── invariant.js      # 不变量入口
 │   ├── client.js         # 浏览器包（经 __ModuleLoader__ 包装）
 │   └── client.js.map     # 源码映射
+├── example_img/          # 示例截图
 ├── README.md             # 英文版说明
 └── README.zh.md          # 本文件（中文）
 ```
@@ -81,6 +76,20 @@ dsh-any-background/
 - `genTokens()` 根据所选颜色生成 30+ 个 CSS 自定义属性（`--dsw-alias-*`），根据明度自动选择深色或浅色方案。
 - 完整令牌集以内联样式写入 `<body>`，主题色完全不依赖主题服务的时序。
 
+#### 主题色调整
+
+<p align="center">
+  <img src="example_img/image.png" alt="蓝色主题" width="600">
+  <br/>
+  <em>蓝色主题 · 较亮 · 默认深色字体</em>
+</p>
+
+<p align="center">
+  <img src="example_img/image-1.png" alt="粉色主题" width="600">
+  <br/>
+  <em>粉色主题 · 较暗 · 默认浅色字体</em>
+</p>
+
 ### 背景壁纸
 
 - 一个 `position:fixed; z-index:-1` 的 `<div>` 被插入到 `<body>` 最前面。
@@ -88,6 +97,23 @@ dsh-any-background/
 - 编辑器弹窗显示视口比例的矩形区域；拖动平移，滚轮缩放（0.1×–10×）。
 - 提交的位置以分数中心坐标 + 原始图片尺寸存储，布局在视口变化时保持一致。
 - 壁纸透明度直接作用于 `<div>` 元素；背景色透明度通过内联令牌覆盖实现。
+
+#### 背景图片
+
+<p align="center">
+  <img src="example_img/image-2.png" alt="壁纸透明度和模糊调整" width="600">
+  <br/>
+  <em>壁纸透明度和模糊调整</em>
+</p>
+
+#### 编辑器调整
+
+<p align="center">
+  <img src="example_img/image-3.png" alt="编辑器调整" width="400">
+  <img src="example_img/image-4.png" alt="背景实际对应" width="400">
+  <br/>
+  <em>编辑器调整 · 背景实际对应</em>
+</p>
 
 ### 透明度体系
 
@@ -98,6 +124,42 @@ dsh-any-background/
 | 主界面 | `dsh-any-background:opacity` | 85% | `<body>` 上的内联 CSS 变量 |
 | 设置面板 | `dsh-any-background:settings-opacity` | 100% | `<html>` 上的 CSS 变量，通过 `[aria-modal]` 选择器定位 |
 | 壁纸 | `dsh-any-background:wallpaper-opacity` | 100% | 壁纸 `<div>` 上的 `style.opacity` |
+
+#### 设置透明度
+
+<p align="center">
+  <img src="example_img/image-5.png" alt="设置透明度100%" width="400">
+  <img src="example_img/image-6.png" alt="设置透明度49%" width="400">
+  <br/>
+  <em>设置透明度 100% · 设置透明度 49%</em>
+</p>
+
+#### 主界面透明度
+
+<p align="center">
+  <img src="example_img/image-6.png" alt="主界面透明度100%" width="400">
+  <img src="example_img/image-7.png" alt="主界面透明度0%" width="400">
+  <br/>
+  <em>主界面透明度 100% · 主界面透明度 0%</em>
+</p>
+
+#### 壁纸透明度
+
+<p align="center">
+  <img src="example_img/image-8.png" alt="壁纸透明度0%" width="400">
+  <img src="example_img/image-9.png" alt="壁纸透明度100%" width="400">
+  <br/>
+  <em>壁纸透明度 0% · 壁纸透明度 100%</em>
+</p>
+
+#### 壁纸模糊
+
+<p align="center">
+  <img src="example_img/image-10.png" alt="壁纸模糊50%" width="400">
+  <img src="example_img/image-11.png" alt="壁纸模糊0%" width="400">
+  <br/>
+  <em>壁纸模糊 50% · 壁纸模糊 0%</em>
+</p>
 
 ## 安装方式
 
@@ -163,6 +225,16 @@ dsh web
 | `@deepseek-ai/dsh-client-ui-theme` | 主题服务（register/setTheme/overrideTokens） |
 | `@deepseek-ai/dsh-invariants` | 包不变量 companion |
 | `react` ^18.2.0 | UI 渲染 |
+
+## Star History
+
+<a href="https://www.star-history.com/?repos=Tkingxiao%2Fdsh-any-background&type=date&legend=bottom-right">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=Tkingxiao/dsh-any-background&type=date&theme=dark&legend=bottom-right&sealed_token=7GSnWLC53Di99WoOA-OGKn_GLJ-kQ6jgcdGRLS7wUzlwkbtJxLtH9kT3D7gCvxb0HoMF8aZklqQT4ijJ7hcFA2zO43Sfh-ccbqGBtvLundJKPELZ1a2xNA" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=Tkingxiao/dsh-any-background&type=date&legend=bottom-right&sealed_token=7GSnWLC53Di99WoOA-OGKn_GLJ-kQ6jgcdGRLS7wUzlwkbtJxLtH9kT3D7gCvxb0HoMF8aZklqQT4ijJ7hcFA2zO43Sfh-ccbqGBtvLundJKPELZ1a2xNA" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=Tkingxiao/dsh-any-background&type=date&legend=bottom-right&sealed_token=7GSnWLC53Di99WoOA-OGKn_GLJ-kQ6jgcdGRLS7wUzlwkbtJxLtH9kT3D7gCvxb0HoMF8aZklqQT4ijJ7hcFA2zO43Sfh-ccbqGBtvLundJKPELZ1a2xNA" />
+ </picture>
+</a>
 
 ## 许可证
 

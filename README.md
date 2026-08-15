@@ -8,12 +8,6 @@ English | [中文](README.zh.md)
 
 A **DeepSeek Harness** appearance plugin that lets you fully customize the Web UI with a custom theme color, background wallpaper, and fine-grained opacity controls.
 
-<p align="center">
-  <a href="https://star-history.com/#/Tkingxiao/dsh-any-background" target="_blank">
-    <img src="https://api.star-history.com/svg?repos=Tkingxiao/dsh-any-background&type=Date" alt="Star History Chart" width="600" />
-  </a>
-</p>
-
 ---
 
 ## Features
@@ -44,6 +38,7 @@ dsh-any-background/
 │   ├── invariant.js      # Invariant entry
 │   ├── client.js         # Browser bundle (wrapped for __ModuleLoader__)
 │   └── client.js.map     # Source map
+├── example_img/          # Example screenshots
 ├── README.md             # This file (English)
 └── README.zh.md          # 中文版
 ```
@@ -81,6 +76,20 @@ The plugin is a **pure client-side** Cordis plugin. The node half is an empty sh
 - `genTokens()` generates 30+ CSS custom properties (`--dsw-alias-*`) for the picked color, choosing dark or light scheme based on lightness.
 - The full token set is written as inline styles on `<body>`, so the theme color never depends on the theme service's timing.
 
+#### Theme Color Adjustment
+
+<p align="center">
+  <img src="example_img/image.png" alt="Blue theme" width="600">
+  <br/>
+  <em>Blue theme · Light · Default dark font</em>
+</p>
+
+<p align="center">
+  <img src="example_img/image-1.png" alt="Pink theme" width="600">
+  <br/>
+  <em>Pink theme · Dark · Default light font</em>
+</p>
+
 ### Background Wallpaper
 
 - A `<div>` with `position:fixed; z-index:-1` is prepended to `<body>`.
@@ -88,6 +97,23 @@ The plugin is a **pure client-side** Cordis plugin. The node half is an empty sh
 - The editor modal shows a viewport-proportional rectangle; drag to pan, scroll to zoom (0.1×–10×).
 - Committed position is stored as fractional center coordinates + natural image size, so the layout survives viewport changes.
 - Wallpaper opacity is applied directly to the `<div>` element; background color opacity is applied via inline token overrides.
+
+#### Wallpaper Preview
+
+<p align="center">
+  <img src="example_img/image-2.png" alt="Wallpaper opacity and blur adjustment" width="600">
+  <br/>
+  <em>Wallpaper opacity and blur adjustment</em>
+</p>
+
+#### Editor Adjustment
+
+<p align="center">
+  <img src="example_img/image-3.png" alt="Editor adjustment" width="400">
+  <img src="example_img/image-4.png" alt="Background mapping" width="400">
+  <br/>
+  <em>Editor adjustment · Background mapping</em>
+</p>
 
 ### Opacity System
 
@@ -98,6 +124,42 @@ Three independent opacity layers, each with its own slider and `localStorage` ke
 | Main interface | `dsh-any-background:opacity` | 85% | Inline CSS variable on `<body>` |
 | Settings panel | `dsh-any-background:settings-opacity` | 100% | CSS variable on `<html>` via `[aria-modal]` selector |
 | Wallpaper | `dsh-any-background:wallpaper-opacity` | 100% | Direct `style.opacity` on wallpaper `<div>` |
+
+#### Settings Opacity
+
+<p align="center">
+  <img src="example_img/image-5.png" alt="Settings opacity 100%" width="400">
+  <img src="example_img/image-6.png" alt="Settings opacity 49%" width="400">
+  <br/>
+  <em>Settings opacity 100% · Settings opacity 49%</em>
+</p>
+
+#### Main Interface Opacity
+
+<p align="center">
+  <img src="example_img/image-6.png" alt="Main interface opacity 100%" width="400">
+  <img src="example_img/image-7.png" alt="Main interface opacity 0%" width="400">
+  <br/>
+  <em>Main interface opacity 100% · Main interface opacity 0%</em>
+</p>
+
+#### Wallpaper Opacity
+
+<p align="center">
+  <img src="example_img/image-8.png" alt="Wallpaper opacity 0%" width="400">
+  <img src="example_img/image-9.png" alt="Wallpaper opacity 100%" width="400">
+  <br/>
+  <em>Wallpaper opacity 0% · Wallpaper opacity 100%</em>
+</p>
+
+#### Wallpaper Blur
+
+<p align="center">
+  <img src="example_img/image-10.png" alt="Wallpaper blur 50%" width="400">
+  <img src="example_img/image-11.png" alt="Wallpaper blur 0%" width="400">
+  <br/>
+  <em>Wallpaper blur 50% · Wallpaper blur 0%</em>
+</p>
 
 ## Installation
 
@@ -164,6 +226,16 @@ dsh web
 | `@deepseek-ai/dsh-client-ui-theme` | Theme service (register/setTheme/overrideTokens) |
 | `@deepseek-ai/dsh-invariants` | Package invariant companion |
 | `react` ^18.2.0 | UI rendering |
+
+## Star History
+
+<a href="https://www.star-history.com/?repos=Tkingxiao%2Fdsh-any-background&type=date&legend=bottom-right">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=Tkingxiao/dsh-any-background&type=date&theme=dark&legend=bottom-right&sealed_token=7GSnWLC53Di99WoOA-OGKn_GLJ-kQ6jgcdGRLS7wUzlwkbtJxLtH9kT3D7gCvxb0HoMF8aZklqQT4ijJ7hcFA2zO43Sfh-ccbqGBtvLundJKPELZ1a2xNA" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=Tkingxiao/dsh-any-background&type=date&legend=bottom-right&sealed_token=7GSnWLC53Di99WoOA-OGKn_GLJ-kQ6jgcdGRLS7wUzlwkbtJxLtH9kT3D7gCvxb0HoMF8aZklqQT4ijJ7hcFA2zO43Sfh-ccbqGBtvLundJKPELZ1a2xNA" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=Tkingxiao/dsh-any-background&type=date&legend=bottom-right&sealed_token=7GSnWLC53Di99WoOA-OGKn_GLJ-kQ6jgcdGRLS7wUzlwkbtJxLtH9kT3D7gCvxb0HoMF8aZklqQT4ijJ7hcFA2zO43Sfh-ccbqGBtvLundJKPELZ1a2xNA" />
+ </picture>
+</a>
 
 ## License
 
