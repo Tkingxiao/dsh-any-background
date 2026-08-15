@@ -10,6 +10,7 @@ const ID = 'dsh-any-background'
 
 /** Externals resolved from the loader module table at runtime. */
 const EXTERNALS = [
+  '@deepseek-ai/dsh-home-paths',
   'react',
   'react/jsx-runtime',
   '@deepseek-ai/dsh-client-connection',
@@ -33,6 +34,7 @@ const configs: UserConfig[] = [
     format: ['esm'],
     platform: 'node',
     target: 'es2024',
+    external: EXTERNALS,
     dts: false,
     clean: false,
     fixedExtension: false,

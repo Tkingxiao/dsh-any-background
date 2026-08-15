@@ -23,7 +23,7 @@ import { useRef, useState, useEffect, useCallback } from 'react'
 import { defineStore } from '@deepseek-ai/dsh-client-runtime/client'
 
 export const name = 'dsh-any-background'
-export const inject = ['slots', 'locale', 'theme']
+export const inject = ['slots', 'locale', 'theme', 'connection']
 
 // ── Interfaces ─────────────────────────────────────────────────────────────────
 
@@ -46,22 +46,18 @@ interface SlotsService {
   inject(slot: string, register: () => unknown): void
   register(meta: Record<string, unknown>, component: () => unknown): unknown
 }
+interface ConnectionService {
+  rpc: { call(channel: string, endpoint: string, payload: unknown): Promise<unknown> }
+}
 interface Ctx {
   effect(cb: () => unknown, label?: string): void
   on(event: string, cb: (...a: any[]) => void): () => void
-  locale: LocaleService; slots: SlotsService; theme: ThemeService
+  locale: LocaleService; slots: SlotsService; theme: ThemeService; connection: ConnectionService
 }
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
 const NS = 'settings.anyBg'
-const LS_COLOR = 'dsh-any-background:color'
-const LS_WP = 'dsh-any-background:wallpaper'
-const LS_OP = 'dsh-any-background:opacity'
-const LS_WOP = 'dsh-any-background:wallpaper-opacity'
-const LS_BL = 'dsh-any-background:blur'
-const LS_BG = 'dsh-any-background:bgState'
-const LS_SOP = 'dsh-any-background:settings-opacity'
 const DEF_OP = 0.85; const DEF_BL = 0; const DEF_SOP = 1
 const CUSTOM_ID = 'custom-color'
 
@@ -92,31 +88,100 @@ const en: Record<string, string> = {
   editorCommit: 'Confirm', editorCancel: 'Cancel', editorReset: 'Reset',
 }
 
-// ── localStorage ───────────────────────────────────────────────────────────────
+// ── Persistence (file-backed via node half) ───────────────────────────────────
+// The node half owns `.dsh-any-background-data/` on the DSH data home. This
+// module keeps an in-memory ThemeConfig mirror + the wallpaper data URL, and
+// pushes changes to the node half over the shared `/api` RPC channel. Reads
+// fall back to defaults when the connection is unavailable or the file is
+// missing/malformed, so the UI never crashes on a broken store.
 
-function rLS(k: string): string | null {
-  try { const v = localStorage.getItem(k); return typeof v === 'string' ? v : null } catch { return null }
+interface BgState { zoom: number; x: number; y: number; iw: number; ih: number }
+interface ThemeConfig {
+  color: [number, number, number] | null
+  opacity: number
+  settingsOpacity: number
+  wallpaperOpacity: number
+  blur: number
+  bgState: BgState
 }
-function wLS(k: string, v: string | null): void {
-  try { v === null ? localStorage.removeItem(k) : localStorage.setItem(k, v) } catch (e) {
-    // Surface storage failure (private mode, quota, blocked origin) so a
-    // "saved values lost on reload" report is diagnosable from the console.
-    console.warn(`dsh-any-background: localStorage write failed for "${k}"`, e)
+interface RpcResultLike { ok: boolean; value?: any; error?: any }
+
+const DEFAULT_CONFIG: ThemeConfig = {
+  color: null,
+  opacity: 0.85,
+  settingsOpacity: 1,
+  wallpaperOpacity: 1,
+  blur: 0,
+  bgState: { zoom: 1, x: 0, y: 0, iw: 0, ih: 0 },
+}
+
+let cfg: ThemeConfig = { ...DEFAULT_CONFIG, bgState: { ...DEFAULT_CONFIG.bgState } }
+let wpUrl: string | null = null
+let rpcCallFn: ((endpoint: string, payload: unknown) => Promise<RpcResultLike | undefined>) | null = null
+
+const RPC_CHANNEL = '/api'
+const RPC_NS = 'dshAnyBackground'
+const rpcEndpoint = (method: string): string => `${RPC_NS}/${method}`
+
+async function rpcCall(method: string, payload: unknown): Promise<any> {
+  if (!rpcCallFn) return undefined
+  try {
+    const res = await rpcCallFn(rpcEndpoint(method), payload)
+    if (res && res.ok === true) return res.value
+    console.warn(`dsh-any-background: rpc "${method}" failed`, res?.error)
+    return undefined
+  } catch (e) {
+    console.warn(`dsh-any-background: rpc "${method}" threw`, e)
+    return undefined
   }
 }
-function rColor(): [number, number, number] {
-  try { const v = JSON.parse(rLS(LS_COLOR) || ''); if (Array.isArray(v) && v.length === 3) return v as [number, number, number] } catch { /* */ }
-  return [220, 0.55, 0.25]
+
+/** Move a possibly-absent partial config into the shape the UI reads. */
+function adoptConfig(raw: any): void {
+  const c = (raw ?? {}) as Partial<ThemeConfig>
+  const color = Array.isArray(c.color) && c.color.length === 3
+    ? [c.color[0], c.color[1], c.color[2]] as [number, number, number]
+    : null
+  const bg = (c.bgState ?? {}) as Partial<BgState>
+  cfg = {
+    color,
+    opacity: typeof c.opacity === 'number' ? c.opacity : DEFAULT_CONFIG.opacity,
+    settingsOpacity: typeof c.settingsOpacity === 'number' ? c.settingsOpacity : DEFAULT_CONFIG.settingsOpacity,
+    wallpaperOpacity: typeof c.wallpaperOpacity === 'number' ? c.wallpaperOpacity : DEFAULT_CONFIG.wallpaperOpacity,
+    blur: typeof c.blur === 'number' ? c.blur : DEFAULT_CONFIG.blur,
+    bgState: {
+      zoom: typeof bg.zoom === 'number' ? bg.zoom : 1,
+      x: typeof bg.x === 'number' ? bg.x : 0,
+      y: typeof bg.y === 'number' ? bg.y : 0,
+      iw: typeof bg.iw === 'number' && bg.iw > 0 ? bg.iw : 0,
+      ih: typeof bg.ih === 'number' && bg.ih > 0 ? bg.ih : 0,
+    },
+  }
 }
-function rWp(): string | null { const v = rLS(LS_WP); return v?.length ? v : null }
-function rOp(): number { const v = rLS(LS_OP); if (!v) return DEF_OP; const n = +v; return isFinite(n) ? Math.min(1, Math.max(0, n)) : DEF_OP }
-function rWop(): number { const v = rLS(LS_WOP); if (!v) return 1; const n = +v; return isFinite(n) ? Math.min(1, Math.max(0, n)) : 1 }
-function rBl(): number { const v = rLS(LS_BL); if (!v) return DEF_BL; const n = +v; return isFinite(n) ? Math.min(60, Math.max(0, n)) : DEF_BL }
-function rSop(): number { const v = rLS(LS_SOP); if (!v) return DEF_SOP; const n = +v; return isFinite(n) ? Math.min(1, Math.max(0, n)) : DEF_SOP }
-function rBgState(): { zoom: number; x: number; y: number; iw: number; ih: number } {
-  try { const v = JSON.parse(rLS(LS_BG) || ''); if (v && typeof v.zoom === 'number' && typeof v.iw === 'number' && v.iw > 0 && v.ih > 0) return v } catch { /* */ }
-  return { zoom: 1, x: 0, y: 0, iw: 0, ih: 0 }
+
+/** Persist the current in-memory config to the node half (fire-and-forget). */
+function saveConfig(): void {
+  void rpcCall('writeConfig', { config: cfg })
 }
+
+/** Load the persisted theme (config + wallpaper) from the node half. */
+async function loadPersisted(): Promise<void> {
+  const data = await rpcCall('read', {})
+  if (data) {
+    if (data.config) adoptConfig(data.config)
+    if (typeof data.wallpaper === 'string') wpUrl = data.wallpaper
+    else if (data.wallpaper === null) wpUrl = null
+  }
+}
+
+function rHasColor(): boolean { return cfg.color !== null }
+function rColor(): [number, number, number] { return cfg.color ?? [220, 0.55, 0.25] }
+function rWp(): string | null { return wpUrl }
+function rOp(): number { return typeof cfg.opacity === 'number' ? Math.min(1, Math.max(0, cfg.opacity)) : DEF_OP }
+function rWop(): number { return typeof cfg.wallpaperOpacity === 'number' ? Math.min(1, Math.max(0, cfg.wallpaperOpacity)) : 1 }
+function rBl(): number { return typeof cfg.blur === 'number' ? Math.min(60, Math.max(0, cfg.blur)) : DEF_BL }
+function rSop(): number { return typeof cfg.settingsOpacity === 'number' ? Math.min(1, Math.max(0, cfg.settingsOpacity)) : DEF_SOP }
+function rBgState(): BgState { return cfg.bgState }
 
 // ── HSV ↔ HSL ────────────────────────────────────────────────────────────────
 // The wheel works in HSV end to end: props and pickSL are HSV, the canvas
@@ -663,7 +728,7 @@ function ThemeSection(props: any) {
             <div style={ST.smallHint}>{t('uiOpacityHint')}</div>
             <LiveSlider min={0} max={100} step={1} def={Math.round(rOp() * 100)}
               fmt={v => `${v}%`}
-              onInput={v => { const op = v / 100; wLS(LS_OP, String(op)); applyCustomTokens(op) }}
+              onInput={v => { const op = v / 100; cfg.opacity = op; applyCustomTokens(op); saveConfig() }}
               onChange={v => setOp(v / 100)} />
           </div>
           <div style={ST.sliderBlock}>
@@ -671,7 +736,7 @@ function ThemeSection(props: any) {
             <div style={ST.smallHint}>{t('uiSopHint')}</div>
             <LiveSlider min={0} max={100} step={1} def={Math.round(rSop() * 100)}
               fmt={v => `${v}%`}
-              onInput={v => { const op = v / 100; wLS(LS_SOP, String(op)); applySettingsOverrides(op) }}
+              onInput={v => { const op = v / 100; cfg.settingsOpacity = op; applySettingsOverrides(op); saveConfig() }}
               onChange={v => setSop(v / 100)} />
           </div>
         </div>
@@ -699,14 +764,14 @@ function ThemeSection(props: any) {
             <div style={ST.sliderLabel}>{t('wpOpacity')}</div>
             <LiveSlider min={0} max={100} step={1} def={Math.round(rWop() * 100)}
               fmt={v => `${v}%`}
-              onInput={v => { const op = v / 100; wLS(LS_WOP, String(op)); if (wpEl) wpEl.style.opacity = String(op) }}
+              onInput={v => { const op = v / 100; cfg.wallpaperOpacity = op; if (wpEl) wpEl.style.opacity = String(op); saveConfig() }}
               onChange={v => setWop(v / 100)} />
           </div>
           <div style={ST.sliderBlock}>
             <div style={ST.sliderLabel}>{t('bgBlur')}</div>
             <LiveSlider min={0} max={60} step={1} def={rBl()}
               fmt={v => `${v}px`}
-              onInput={v => { wLS(LS_BL, String(v)); if (wpEl) wpEl.style.filter = v > 0 ? `blur(${v}px)` : 'none' }}
+              onInput={v => { cfg.blur = v; if (wpEl) wpEl.style.filter = v > 0 ? `blur(${v}px)` : 'none'; saveConfig() }}
               onChange={v => setBl(v)} />
           </div>
         </div>
@@ -716,7 +781,7 @@ function ThemeSection(props: any) {
       {/* Background editor modal */}
       {editorOpen && storeUrl ? (
         <BgEditor url={storeUrl} t={t} onClose={() => setEditorOpen(false)}
-          onCommit={(z, x, y, iw, ih) => { wLS(LS_BG, JSON.stringify({ zoom: z, x, y, iw, ih })); applyWp(ctxRef); setEditorOpen(false) }} />
+          onCommit={(z, x, y, iw, ih) => { cfg.bgState = { zoom: z, x, y, iw, ih }; applyWp(ctxRef); saveConfig(); setEditorOpen(false) }} />
       ) : null}
     </div>
   )
@@ -726,6 +791,10 @@ function ThemeSection(props: any) {
 
 export function apply(ctx: Ctx): void {
   ctxRef = ctx
+  // Bind the shared `/api` RPC caller so the persistence module can reach the
+  // node half's file-backed store.
+  rpcCallFn = (endpoint: string, payload: unknown) =>
+    ctx.connection.rpc.call(RPC_CHANNEL, endpoint, payload).then((res: any) => res as RpcResultLike | undefined)
 
   // 1. Restore custom color and register as a skin. The saved color's
   // lightness decides the scheme — a dark pick gets white text, a light pick
@@ -749,7 +818,7 @@ export function apply(ctx: Ctx): void {
     ctx.theme.setTheme(CUSTOM_ID)
   }
   // Restore saved color on boot.
-  if (rLS(LS_COLOR)) registerCustom(initH, initS, initL)
+  if (rHasColor()) registerCustom(initH, initS, initL)
   ctx.effect(() => () => { customDispose?.() }, 'dsh-any-background: skin dispose')
 
   // 2. Gradient CSS (for custom dark themes).
@@ -773,6 +842,10 @@ export function apply(ctx: Ctx): void {
 
   // 4. Wallpaper.
   applyWp(ctx); syncBg()
+  // Load the file-backed theme from the node half and re-apply once it lands
+  // (the node store may be absent or unreachable at this instant; defaults are
+  // already applied above, and the deferred restore below re-asserts too).
+  void loadPersisted().then(() => { applyWp(ctx); syncBg() })
   ctx.effect(() => () => { teardownWp() }, 'dsh-any-background: wp cleanup')
   ctx.effect(() => ctx.on('theme/change', () => {
     // The theme service persists only built-in preferences; the custom theme's
@@ -781,7 +854,7 @@ export function apply(ctx: Ctx): void {
     // active. Guard on registry presence — registerCustom disposes the old
     // skin before re-registering, and during that transient the registry lacks
     // CUSTOM_ID, so asserting there would throw.
-    if (rLS(LS_COLOR)) {
+    if (rHasColor()) {
       const snapshot = ctx.theme.getTheme()
       if (snapshot.preference !== CUSTOM_ID && snapshot.themes.some(t => t.id === CUSTOM_ID)) {
         ctx.theme.setTheme(CUSTOM_ID)
@@ -829,15 +902,21 @@ export function apply(ctx: Ctx): void {
       hue: dh, sat: ds, lit: dv,
       setColor: (nh: number, ns: number, nl: number) => {
         const [sh, ss, sl] = hsvToHsl(nh, ns, nl)
-        wLS(LS_COLOR, JSON.stringify([sh, ss, sl]))
+        cfg.color = [sh, ss, sl]
         registerCustom(sh, ss, sl)
         applyWp(ctx)
+        saveConfig()
       },
-      setWp: (u: string | null) => { wLS(LS_WP, u); wLS(LS_BG, null); applyWp(ctx); syncBg() },
-      setOp: (v: number) => { wLS(LS_OP, String(v)); applyWp(ctx); syncBg() },
-      setWop: (v: number) => { wLS(LS_WOP, String(v)); applyWp(ctx); syncBg() },
-      setBl: (v: number) => { wLS(LS_BL, String(v)); applyWp(ctx); syncBg() },
-      setSop: (v: number) => { wLS(LS_SOP, String(v)); applySettingsOverrides(v) },
+      setWp: (u: string | null) => {
+        wpUrl = u
+        cfg.bgState = { ...DEFAULT_CONFIG.bgState }
+        applyWp(ctx); syncBg()
+        void rpcCall('setWallpaper', { dataUrl: u })
+      },
+      setOp: (v: number) => { cfg.opacity = v; applyWp(ctx); syncBg(); saveConfig() },
+      setWop: (v: number) => { cfg.wallpaperOpacity = v; applyWp(ctx); syncBg(); saveConfig() },
+      setBl: (v: number) => { cfg.blur = v; applyWp(ctx); syncBg(); saveConfig() },
+      setSop: (v: number) => { cfg.settingsOpacity = v; applySettingsOverrides(v); saveConfig() },
     }
   }
   ctx.slots.inject('settings.section', () => ctx.slots.register({
@@ -852,7 +931,7 @@ export function apply(ctx: Ctx): void {
   // presenter re-applies over our overrides. Re-running the saved-color and
   // wallpaper restore a few ticks later guarantees the saved records land.
   const restoreSaved = (): void => {
-    if (rLS(LS_COLOR)) {
+    if (rHasColor()) {
       const [h, s, l] = rColor()
       registerCustom(h, s, l)
     }
@@ -868,7 +947,7 @@ export function apply(ctx: Ctx): void {
   // custom theme on a slow interval so the theme state always matches the
   // saved color and the active scheme, independent of which event resets it.
   const watchdogId = window.setInterval(() => {
-    if (!rLS(LS_COLOR)) return
+    if (!rHasColor()) return
     const snapshot = ctx.theme.getTheme()
     let changed = false
     if (!snapshot.themes.some(t => t.id === CUSTOM_ID)) {

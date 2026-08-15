@@ -16,7 +16,7 @@ A **DeepSeek Harness** appearance plugin that lets you fully customize the Web U
 - **Background Wallpaper** — Choose any image as your wallpaper. Drag to pan, scroll to zoom inside a viewport-proportional editor. What you see is what you get.
 - **Opacity Controls** — Separate sliders for main interface background opacity, settings panel opacity, and wallpaper opacity.
 - **Blur Effect** — Adjustable wallpaper blur (0–60 px) for a frosted-glass look.
-- **Persistent** — All settings (color, wallpaper, opacity, blur, editor position) are saved to `localStorage` and restored on next launch.
+- **Persistent** — All settings (color, wallpaper, opacity, blur, editor position) are stored on the **filesystem** under `~/.dsh/.dsh-any-background-data/` via the node half, and restored on next launch. No more `localStorage` quota worries.
 - **Bilingual** — Full Chinese / English UI with automatic locale detection.
 - **Theme Watchdog** — A background watchdog re-asserts the custom theme if the host resets it, so your pick never silently disappears.
 
@@ -29,7 +29,7 @@ dsh-any-background/
 ├── cordis.yml            # Patch overlay for dev usage (pnpm dsh web --patch)
 ├── tsdown.config.ts      # Build config: node-half (ESM) + client-half (CJS browser bundle)
 ├── src/
-│   ├── index.ts          # Node half — empty shell for Cordis loader mount
+│   ├── index.ts          # Node half — file-backed persistence (RPC file store)
 │   ├── invariant.ts      # Invariant companion (registers package ownership)
 │   └── client/
 │       └── index.tsx     # Browser half — ALL UI logic lives here
@@ -45,7 +45,24 @@ dsh-any-background/
 
 ## Implementation
 
-The plugin is a **pure client-side** Cordis plugin. The node half is an empty shell; all behavior lives in `src/client/index.tsx`.
+The plugin is a Cordis plugin split into two halves:
+
+- **Node half** (`src/index.ts`) — owns file-backed persistence. It manages the `.dsh-any-background-data/` store under the DSH data home (`~/.dsh/`) and exposes a small RPC surface over the shared `/api` channel.
+- **Browser half** (`src/client/index.tsx`) — all UI logic lives here. The browser cannot touch the filesystem, so it reads/writes the store through the node half's RPC endpoints.
+
+### Persistence
+
+Since the plugin surfaces in the browser, persisted data is stored on disk by the **node half**:
+
+```
+~/.dsh/.dsh-any-background-data/
+├── theme-config.json   # color, main/settings/wallpaper opacity, blur, bg edit state
+└── wallpaper.jpg       # the chosen background image (deleted when removed)
+```
+
+- On startup the client calls `read`, which returns the config and (if present) the wallpaper as a data URL.
+- Every setting change is written back synchronously to `theme-config.json`; changing the wallpaper writes `wallpaper.jpg`, removing it deletes the file.
+- The store is created automatically if missing; a missing or malformed config falls back to defaults (with a warning), and all writes are error-guarded to avoid data loss.
 
 ### Architecture
 
@@ -93,7 +110,7 @@ The plugin is a **pure client-side** Cordis plugin. The node half is an empty sh
 ### Background Wallpaper
 
 - A `<div>` with `position:fixed; z-index:-1` is prepended to `<body>`.
-- Image is compressed via Canvas API (max 1600px side, JPEG quality 0.75) and stored as base64 in `localStorage`.
+- Image is compressed via Canvas API (max 1600px side, JPEG quality 0.75); the node half writes it to `~/.dsh/.dsh-any-background-data/wallpaper.jpg`, and the client keeps the data URL in memory for display.
 - The editor modal shows a viewport-proportional rectangle; drag to pan, scroll to zoom (0.1×–10×).
 - Committed position is stored as fractional center coordinates + natural image size, so the layout survives viewport changes.
 - Wallpaper opacity is applied directly to the `<div>` element; background color opacity is applied via inline token overrides.
@@ -117,13 +134,13 @@ The plugin is a **pure client-side** Cordis plugin. The node half is an empty sh
 
 ### Opacity System
 
-Three independent opacity layers, each with its own slider and `localStorage` key:
+Three independent opacity layers, each with its own slider and a persisted config field:
 
-| Layer | localStorage key | Default | Mechanism |
-|-------|-----------------|---------|-----------|
-| Main interface | `dsh-any-background:opacity` | 85% | Inline CSS variable on `<body>` |
-| Settings panel | `dsh-any-background:settings-opacity` | 100% | CSS variable on `<html>` via `[aria-modal]` selector |
-| Wallpaper | `dsh-any-background:wallpaper-opacity` | 100% | Direct `style.opacity` on wallpaper `<div>` |
+| Layer | Config field | Default | Mechanism |
+|-------|--------------|---------|-----------|
+| Main interface | `opacity` | 85% | Inline CSS variable on `<body>` |
+| Settings panel | `settingsOpacity` | 100% | CSS variable on `<html>` via `[aria-modal]` selector |
+| Wallpaper | `wallpaperOpacity` | 100% | Direct `style.opacity` on wallpaper `<div>` |
 
 #### Settings Opacity
 
@@ -203,24 +220,33 @@ editing `src/`, run the bundle script (needs Node + pnpm):
 git clone https://github.com/Tkingxiao/dsh-any-background.git
 cd dsh-any-background
 
-# 2. Install the build tool
+# 2. Install the build tool (also pulls the @deepseek-ai/dsh-home-paths runtime dep)
 pnpm install
 
 # 3. Rebuild lib/
 pnpm run bundle
 
-# 4. Install the plugin into the web profile (from the local checkout)
-dsh plugin --profile web add -w .
+# 4. Install the plugin into the web profile from the local checkout
+#    (`dsh plugin add` wraps `pnpm add <dir>`, so point it at this directory)
+dsh plugin --profile web add .
 
 # 5. Launch
 dsh web
 ```
+
+## Compatibility
+
+The plugin works on both the **Web UI** and the **desktop client**:
+
+- **[`dsh web`](https://github.com/deepseek-ai/deepseek-harness)** — Web profile, full support.
+- **[deepseek-harness-desktop](https://github.com/anywhere-labs/deepseek-harness-desktop)** — supported, but there is a known Electron packaging issue: the **left sidebar and the center area opacity are inverted** (the sidebar looks more transparent than the center and vice versa). This is a client-side packaging bug, not a plugin bug — we are waiting for the desktop client to be updated to fix it.
 
 ## Dependencies
 
 | Package | Purpose |
 |---------|---------|
 | `@deepseek-ai/cordis` | Plugin framework (Cordis) |
+| `@deepseek-ai/dsh-home-paths` | Resolve the DSH data home for the persistence store |
 | `@deepseek-ai/dsh-client-runtime` | Client runtime + `defineStore` |
 | `@deepseek-ai/dsh-client-locale` | i18n (Chinese/English) |
 | `@deepseek-ai/dsh-client-ui-theme` | Theme service (register/setTheme/overrideTokens) |

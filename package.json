@@ -1,6 +1,6 @@
 {
   "name": "dsh-any-background",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Appearance plugin for DeepSeek Harness: custom theme color (PS-style color wheel), background wallpaper with opacity/blur controls, and separate main/settings interface opacity.",
   "keywords": [
     "deepseek-harness",
@@ -55,7 +55,11 @@
     "watch": "tsdown --watch"
   },
   "devDependencies": {
+    "@deepseek-ai/dsh-home-paths": "^0.1.0-rc.6",
     "tsdown": "^0.22.2"
+  },
+  "dependencies": {
+    "@deepseek-ai/dsh-home-paths": "^0.1.0-rc.6"
   },
   "peerDependencies": {
     "react": "^18.2.0",
