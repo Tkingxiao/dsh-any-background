@@ -2,12 +2,6 @@
   "name": "dsh-any-background",
   "version": "0.1.0",
   "description": "Appearance plugin for DeepSeek Harness: custom theme color (PS-style color wheel), background wallpaper with opacity/blur controls, and separate main/settings interface opacity.",
-  "license": "MIT",
-  "author": "Tkingxiao",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/Tkingxiao/dsh-any-background.git"
-  },
   "keywords": [
     "deepseek-harness",
     "dsh",
@@ -17,9 +11,17 @@
     "wallpaper",
     "web-ui"
   ],
+  "homepage": "https://github.com/Tkingxiao/dsh-any-background#readme",
+  "bugs": {
+    "url": "https://github.com/Tkingxiao/dsh-any-background/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Tkingxiao/dsh-any-background.git"
+  },
+  "license": "MIT",
+  "author": "Tkingxiao",
   "type": "module",
-  "main": "lib/index.js",
-  "types": "lib/types/index.d.ts",
   "exports": {
     ".": {
       "types": "./lib/types/index.d.ts",
@@ -35,19 +37,10 @@
     },
     "./package.json": "./package.json"
   },
-  "dsh": {
-    "bundle": {
-      "patch": "./cordis.patch.yml"
-    },
-    "client": {
-      "platform": "web",
-      "inject": [
-        "@deepseek-ai/dsh-client-runtime",
-        "@deepseek-ai/dsh-client-locale",
-        "@deepseek-ai/dsh-client-ui-theme"
-      ],
-      "immediately": true
-    }
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
+  "directories": {
+    "lib": "lib"
   },
   "files": [
     "lib/index.js",
@@ -61,6 +54,9 @@
     "bundle": "tsdown",
     "watch": "tsdown --watch"
   },
+  "devDependencies": {
+    "tsdown": "^0.22.2"
+  },
   "peerDependencies": {
     "react": "^18.2.0",
     "@deepseek-ai/cordis": "^4.0.1",
@@ -69,7 +65,26 @@
     "@deepseek-ai/dsh-client-locale": "^0.1.0-rc.6",
     "@deepseek-ai/dsh-invariants": "^0.1.0-rc.6"
   },
-  "devDependencies": {
-    "tsdown": "^0.22.2"
+  "peerDependenciesMeta": {
+    "react": { "optional": true },
+    "@deepseek-ai/cordis": { "optional": true },
+    "@deepseek-ai/dsh-client-runtime": { "optional": true },
+    "@deepseek-ai/dsh-client-ui-theme": { "optional": true },
+    "@deepseek-ai/dsh-client-locale": { "optional": true },
+    "@deepseek-ai/dsh-invariants": { "optional": true }
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-theme"
+      ],
+      "immediately": true
+    }
   }
 }
