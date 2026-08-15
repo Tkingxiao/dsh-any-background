@@ -146,8 +146,8 @@ dsh-any-background/
 #### 壁纸透明度
 
 <p align="center">
-  <img src="example_img/image-8.png" alt="壁纸透明度0%" width="400">
-  <img src="example_img/image-9.png" alt="壁纸透明度100%" width="400">
+  <img src="example_img/image-8.png" alt="壁纸透明度100%" width="400">
+  <img src="example_img/image-9.png" alt="壁纸透明度500%" width="400">
   <br/>
   <em>壁纸透明度 0% · 壁纸透明度 100%</em>
 </p>

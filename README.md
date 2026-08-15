@@ -146,8 +146,8 @@ Three independent opacity layers, each with its own slider and `localStorage` ke
 #### Wallpaper Opacity
 
 <p align="center">
-  <img src="example_img/image-8.png" alt="Wallpaper opacity 0%" width="400">
-  <img src="example_img/image-9.png" alt="Wallpaper opacity 100%" width="400">
+  <img src="example_img/image-8.png" alt="Wallpaper opacity 100%" width="400">
+  <img src="example_img/image-9.png" alt="Wallpaper opacity 50%" width="400">
   <br/>
   <em>Wallpaper opacity 0% · Wallpaper opacity 100%</em>
 </p>
