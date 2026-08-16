@@ -187,7 +187,9 @@ Install the plugin directly from GitHub into your Web profile:
 ```sh
 dsh plugin --profile web add github:Tkingxiao/dsh-any-background
 ```
-
+```sh
+dsh plugin --profile web add dsh-any-background
+```
 Then launch the Web UI:
 
 ```sh
@@ -202,6 +204,9 @@ If you don't have `dsh` installed globally, use `npx`:
 
 ```sh
 npx @deepseek-ai/dsh plugin --profile web add github:Tkingxiao/dsh-any-background
+```
+```sh
+npx @deepseek-ai/dsh plugin --profile web add dsh-any-background
 ```
 
 Then launch:
@@ -228,10 +233,11 @@ pnpm run bundle
 
 # 4. Install the plugin into the web profile from the local checkout
 #    (`dsh plugin add` wraps `pnpm add <dir>`, so point it at this directory)
-dsh plugin --profile web add .
+cd .
+pnpm dsh plugin --profile web add “dsh-any-background”
 
 # 5. Launch
-dsh web
+pnpm dsh web
 ```
 
 ## Compatibility
@@ -255,11 +261,11 @@ The plugin works on both the **Web UI** and the **desktop client**:
 
 ## Star History
 
-<a href="https://www.star-history.com/?repos=Tkingxiao%2Fdsh-any-background&type=date&legend=bottom-right">
+<a href="https://www.star-history.com/?repos=Tkingxiao%2Fdsh-any-background&type=timeline&legend=bottom-right">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=Tkingxiao/dsh-any-background&type=date&theme=dark&legend=bottom-right&sealed_token=7GSnWLC53Di99WoOA-OGKn_GLJ-kQ6jgcdGRLS7wUzlwkbtJxLtH9kT3D7gCvxb0HoMF8aZklqQT4ijJ7hcFA2zO43Sfh-ccbqGBtvLundJKPELZ1a2xNA" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=Tkingxiao/dsh-any-background&type=date&legend=bottom-right&sealed_token=7GSnWLC53Di99WoOA-OGKn_GLJ-kQ6jgcdGRLS7wUzlwkbtJxLtH9kT3D7gCvxb0HoMF8aZklqQT4ijJ7hcFA2zO43Sfh-ccbqGBtvLundJKPELZ1a2xNA" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=Tkingxiao/dsh-any-background&type=date&legend=bottom-right&sealed_token=7GSnWLC53Di99WoOA-OGKn_GLJ-kQ6jgcdGRLS7wUzlwkbtJxLtH9kT3D7gCvxb0HoMF8aZklqQT4ijJ7hcFA2zO43Sfh-ccbqGBtvLundJKPELZ1a2xNA" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=Tkingxiao/dsh-any-background&type=timeline&theme=dark&legend=bottom-right&sealed_token=eWfGjN-Qq27TMTaT_VVvuRZMI72MUHAVfaHws-WOwQE7ld9defq7Bn7Xsgmlg-7iFSCeNoOIhgxFfZM3jazeXnLzldBkMCN3jm4CMxvn6Em0EBEZWWK5pA" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=Tkingxiao/dsh-any-background&type=timeline&legend=bottom-right&sealed_token=eWfGjN-Qq27TMTaT_VVvuRZMI72MUHAVfaHws-WOwQE7ld9defq7Bn7Xsgmlg-7iFSCeNoOIhgxFfZM3jazeXnLzldBkMCN3jm4CMxvn6Em0EBEZWWK5pA" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=Tkingxiao/dsh-any-background&type=timeline&legend=bottom-right&sealed_token=eWfGjN-Qq27TMTaT_VVvuRZMI72MUHAVfaHws-WOwQE7ld9defq7Bn7Xsgmlg-7iFSCeNoOIhgxFfZM3jazeXnLzldBkMCN3jm4CMxvn6Em0EBEZWWK5pA" />
  </picture>
 </a>
 

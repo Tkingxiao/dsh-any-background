@@ -164,7 +164,7 @@ dsh-any-background/
 
 <p align="center">
   <img src="example_img/image-8.png" alt="壁纸透明度100%" width="400">
-  <img src="example_img/image-9.png" alt="壁纸透明度500%" width="400">
+  <img src="example_img/image-9.png" alt="壁纸透明度50%" width="400">
   <br/>
   <em>壁纸透明度 0% · 壁纸透明度 100%</em>
 </p>
@@ -187,7 +187,9 @@ dsh-any-background/
 ```sh
 dsh plugin --profile web add github:Tkingxiao/dsh-any-background
 ```
-
+```sh
+dsh plugin --profile web add dsh-any-background
+```
 然后启动 Web UI：
 
 ```sh
@@ -202,6 +204,9 @@ dsh web
 
 ```sh
 npx @deepseek-ai/dsh plugin --profile web add github:Tkingxiao/dsh-any-background
+```
+```sh
+npx @deepseek-ai/dsh plugin --profile web add dsh-any-background
 ```
 
 然后启动：
@@ -227,10 +232,11 @@ pnpm run bundle
 
 # 4. 从本地安装到 web profile
 #    （`dsh plugin add` 是 `pnpm add <dir>` 的封装，传入本目录即可）
-dsh plugin --profile web add .
+cd .
+pnpm dsh plugin --profile web add "dsh-any-background"
 
 # 5. 启动
-dsh web
+pnpm dsh web
 ```
 
 ## 兼容性
@@ -254,11 +260,11 @@ dsh web
 
 ## Star History
 
-<a href="https://www.star-history.com/?repos=Tkingxiao%2Fdsh-any-background&type=date&legend=bottom-right">
+<a href="https://www.star-history.com/?repos=Tkingxiao%2Fdsh-any-background&type=timeline&legend=bottom-right">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=Tkingxiao/dsh-any-background&type=date&theme=dark&legend=bottom-right&sealed_token=7GSnWLC53Di99WoOA-OGKn_GLJ-kQ6jgcdGRLS7wUzlwkbtJxLtH9kT3D7gCvxb0HoMF8aZklqQT4ijJ7hcFA2zO43Sfh-ccbqGBtvLundJKPELZ1a2xNA" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=Tkingxiao/dsh-any-background&type=date&legend=bottom-right&sealed_token=7GSnWLC53Di99WoOA-OGKn_GLJ-kQ6jgcdGRLS7wUzlwkbtJxLtH9kT3D7gCvxb0HoMF8aZklqQT4ijJ7hcFA2zO43Sfh-ccbqGBtvLundJKPELZ1a2xNA" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=Tkingxiao/dsh-any-background&type=date&legend=bottom-right&sealed_token=7GSnWLC53Di99WoOA-OGKn_GLJ-kQ6jgcdGRLS7wUzlwkbtJxLtH9kT3D7gCvxb0HoMF8aZklqQT4ijJ7hcFA2zO43Sfh-ccbqGBtvLundJKPELZ1a2xNA" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=Tkingxiao/dsh-any-background&type=timeline&theme=dark&legend=bottom-right&sealed_token=eWfGjN-Qq27TMTaT_VVvuRZMI72MUHAVfaHws-WOwQE7ld9defq7Bn7Xsgmlg-7iFSCeNoOIhgxFfZM3jazeXnLzldBkMCN3jm4CMxvn6Em0EBEZWWK5pA" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=Tkingxiao/dsh-any-background&type=timeline&legend=bottom-right&sealed_token=eWfGjN-Qq27TMTaT_VVvuRZMI72MUHAVfaHws-WOwQE7ld9defq7Bn7Xsgmlg-7iFSCeNoOIhgxFfZM3jazeXnLzldBkMCN3jm4CMxvn6Em0EBEZWWK5pA" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=Tkingxiao/dsh-any-background&type=timeline&legend=bottom-right&sealed_token=eWfGjN-Qq27TMTaT_VVvuRZMI72MUHAVfaHws-WOwQE7ld9defq7Bn7Xsgmlg-7iFSCeNoOIhgxFfZM3jazeXnLzldBkMCN3jm4CMxvn6Em0EBEZWWK5pA" />
  </picture>
 </a>
 
