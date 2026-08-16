@@ -3,7 +3,8 @@
  *
  * The browser client cannot touch the filesystem, so this half owns the
  * `.dsh-any-background-data/` store under the DSH data home and exposes a
- * small RPC surface over the shared `/api` channel. The client reads the
+ * small RPC surface over the dedicated `/dsh-any-background` channel (never
+ * the shared `/api`, so slash commands stay intact). The client reads the
  * persisted theme on boot and writes it back on every setting change.
  *
  * Storage layout:
@@ -164,9 +165,10 @@ async function writeWallpaper(dataUrl: string | null): Promise<boolean> {
 const NS = 'dshAnyBackground'
 
 export function apply(ctx: any): void {
-  const dispose = ctx.connection.rpc.intercept(
-    '/api',
-    (ep: string) => ep.startsWith(`${NS}/`),
+  // Use a dedicated RPC channel (never the shared `/api`) so the plugin never
+  // hogs the harness's message channel and breaks DSH slash commands.
+  const dispose = ctx.connection.rpc.handle(
+    '/dsh-any-background',
     async (ep: string, payload: any) => {
       const method = ep.slice(`${NS}/`.length)
       try {

@@ -91,7 +91,8 @@ const en: Record<string, string> = {
 // ── Persistence (file-backed via node half) ───────────────────────────────────
 // The node half owns `.dsh-any-background-data/` on the DSH data home. This
 // module keeps an in-memory ThemeConfig mirror + the wallpaper data URL, and
-// pushes changes to the node half over the shared `/api` RPC channel. Reads
+// pushes changes to the node half over the dedicated `/dsh-any-background`
+// RPC channel (never the shared `/api`, so slash commands stay intact). Reads
 // fall back to defaults when the connection is unavailable or the file is
 // missing/malformed, so the UI never crashes on a broken store.
 
@@ -119,7 +120,7 @@ let cfg: ThemeConfig = { ...DEFAULT_CONFIG, bgState: { ...DEFAULT_CONFIG.bgState
 let wpUrl: string | null = null
 let rpcCallFn: ((endpoint: string, payload: unknown) => Promise<RpcResultLike | undefined>) | null = null
 
-const RPC_CHANNEL = '/api'
+const RPC_CHANNEL = '/dsh-any-background'
 const RPC_NS = 'dshAnyBackground'
 const rpcEndpoint = (method: string): string => `${RPC_NS}/${method}`
 
@@ -228,6 +229,12 @@ function genTokens(hue: number, sat: number, lit: number): { colorScheme: 'light
         '--dsw-alias-label-primary': hsl(0, 0, 1),
         '--dsw-alias-label-secondary': hsl(0, 0, 1),
         '--dsw-alias-label-tertiary': hsl(0, 0, 1),
+        // The harness's dimmer label tiers (placeholder text, model/permission
+        // chevrons, disabled rows) must follow the dark scheme's light font
+        // instead of staying neutral gray, or they read as "always gray".
+        '--dsw-alias-label-caption': hsl(0, 0, 1),
+        '--dsw-alias-label-dimmed': hsl(0, 0, 1),
+        '--dsw-alias-label-quaternary': hsl(0, 0, 1),
         '--dsw-alias-brand-primary': hsl(h(0), s(0.1), Math.max(l(0.2), 0.5)),
         '--dsw-alias-brand-text': l(0.2) > 0.6 ? '#000' : '#fff',
         '--dsw-alias-button-primary-hover': hsl(h(0), s(0.1), Math.max(l(0.28), 0.58)),
@@ -267,6 +274,12 @@ function genTokens(hue: number, sat: number, lit: number): { colorScheme: 'light
       '--dsw-alias-label-primary': hsl(0, 0, 0),
       '--dsw-alias-label-secondary': hsl(0, 0, 0),
       '--dsw-alias-label-tertiary': hsl(0, 0, 0),
+      // Same as above but for the light scheme: dimmer tiers go black so the
+      // placeholder, chevrons, category captions and disabled rows follow the
+      // theme's dark font instead of staying gray.
+      '--dsw-alias-label-caption': hsl(0, 0, 0),
+      '--dsw-alias-label-dimmed': hsl(0, 0, 0),
+      '--dsw-alias-label-quaternary': hsl(0, 0, 0),
       '--dsw-alias-brand-primary': hsl(h(0), s(0.05), Math.min(l(-0.18), 0.45)),
       '--dsw-alias-brand-text': '#fff',
       '--dsw-alias-button-primary-hover': hsl(h(0), s(0.05), Math.min(l(-0.12), 0.5)),
@@ -791,8 +804,8 @@ function ThemeSection(props: any) {
 
 export function apply(ctx: Ctx): void {
   ctxRef = ctx
-  // Bind the shared `/api` RPC caller so the persistence module can reach the
-  // node half's file-backed store.
+  // Bind the dedicated `/dsh-any-background` RPC caller so the persistence
+  // module can reach the node half's file-backed store.
   rpcCallFn = (endpoint: string, payload: unknown) =>
     ctx.connection.rpc.call(RPC_CHANNEL, endpoint, payload).then((res: any) => res as RpcResultLike | undefined)
 
