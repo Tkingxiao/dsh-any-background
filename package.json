@@ -1,6 +1,6 @@
 {
   "name": "dsh-any-background",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "Appearance plugin for DeepSeek Harness: custom theme color (PS-style color wheel), background wallpaper with opacity/blur controls, and separate main/settings interface opacity.",
   "keywords": [
     "deepseek-harness",
@@ -24,21 +24,17 @@
   "type": "module",
   "exports": {
     ".": {
-      "types": "./lib/types/index.d.ts",
       "default": "./lib/index.js"
     },
     "./invariant": {
-      "types": "./lib/types/invariant.d.ts",
       "default": "./lib/invariant.js"
     },
     "./client": {
-      "types": "./lib/types/client/index.d.ts",
       "default": "./lib/client.js"
     },
     "./package.json": "./package.json"
   },
   "main": "lib/index.js",
-  "types": "lib/types/index.d.ts",
   "directories": {
     "lib": "lib"
   },
@@ -47,27 +43,31 @@
     "lib/invariant.js",
     "lib/client.js",
     "lib/client.js.map",
-    "cordis.patch.yml",
-    "lib/types/**/*.d.ts"
+    "cordis.patch.yml"
   ],
   "scripts": {
     "bundle": "tsdown",
-    "watch": "tsdown --watch"
+    "watch": "tsdown --watch",
+    "typecheck": "tsc -p tsconfig.json"
   },
   "devDependencies": {
     "@deepseek-ai/dsh-home-paths": "^0.1.0-rc.6",
-    "tsdown": "^0.22.2"
+    "@types/node": "^26.2.0",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
+    "tsdown": "^0.22.2",
+    "typescript": "^7.0.2"
   },
   "dependencies": {
     "@deepseek-ai/dsh-home-paths": "^0.1.0-rc.6"
   },
   "peerDependencies": {
-    "react": "^18.2.0",
     "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-client-locale": "^0.1.0-rc.6",
     "@deepseek-ai/dsh-client-runtime": "^0.1.0-rc.6",
     "@deepseek-ai/dsh-client-ui-theme": "^0.1.0-rc.6",
-    "@deepseek-ai/dsh-client-locale": "^0.1.0-rc.6",
-    "@deepseek-ai/dsh-invariants": "^0.1.0-rc.6"
+    "@deepseek-ai/dsh-invariants": "^0.1.0-rc.6",
+    "react": "^18.2.0"
   },
   "peerDependenciesMeta": {
     "react": {

@@ -29,11 +29,19 @@ const WALLPAPER_FILE = 'wallpaper.jpg'
 interface BgState {
   zoom: number; x: number; y: number; iw: number; ih: number
 }
+interface PartOpacities {
+  bg: number; sidebar: number; card: number
+}
+interface PartBlurs {
+  bg: number; sidebar: number; card: number; settings: number
+}
 interface ThemeConfig {
   /** Saved HSL theme color; null means "use the system theme". */
   color: [number, number, number] | null
-  /** Main interface opacity (0..1). */
-  opacity: number
+  /** Per-part main interface opacities. */
+  opacities: PartOpacities
+  /** Per-part interface blur (px, 0..60). */
+  blurs: PartBlurs
   /** Settings-panel opacity (0..1). */
   settingsOpacity: number
   /** Wallpaper opacity (0..1). */
@@ -46,7 +54,8 @@ interface ThemeConfig {
 
 const DEFAULT_CONFIG: ThemeConfig = {
   color: null,
-  opacity: 0.85,
+  opacities: { bg: 0.85, sidebar: 0.93, card: 1 },
+  blurs: { bg: 0, sidebar: 0, card: 0, settings: 0 },
   settingsOpacity: 1,
   wallpaperOpacity: 1,
   blur: 0,
@@ -65,16 +74,31 @@ function clamp(n: number, lo: number, hi: number, def: number): number {
 
 /** Coerce an unknown persisted value into a valid ThemeConfig, falling back per-field. */
 function normalizeConfig(raw: unknown): ThemeConfig {
-  const r = (raw ?? {}) as Partial<ThemeConfig>
+  const r = (raw ?? {}) as Partial<ThemeConfig> & { opacity?: unknown }
   const c = r.color
   const color: [number, number, number] | null =
     Array.isArray(c) && c.length === 3 && c.every(x => typeof x === 'number' && isFinite(x))
       ? [clamp(c[0] as number, 0, 360, 220), clamp(c[1] as number, 0, 1, 0.55), clamp(c[2] as number, 0, 1, 0.25)]
       : null
   const bg = (r.bgState ?? {}) as Partial<BgState>
+  // Migration: the old single main-interface opacity becomes per-part, keeping
+  // the sidebar's former +0.08 offset and leaving cards opaque as before.
+  const legacy = typeof r.opacity === 'number' ? r.opacity : null
+  const ops = (r.opacities ?? {}) as Partial<PartOpacities>
+  const bl = (r.blurs ?? {}) as Partial<PartBlurs>
   return {
     color,
-    opacity: clamp(r.opacity as number, 0, 1, DEFAULT_CONFIG.opacity),
+    opacities: {
+      bg: clamp(ops.bg as number, 0, 1, legacy ?? DEFAULT_CONFIG.opacities.bg),
+      sidebar: clamp(ops.sidebar as number, 0, 1, legacy !== null ? Math.min(1, legacy + 0.08) : DEFAULT_CONFIG.opacities.sidebar),
+      card: clamp(ops.card as number, 0, 1, DEFAULT_CONFIG.opacities.card),
+    },
+    blurs: {
+      bg: clamp(bl.bg as number, 0, 60, DEFAULT_CONFIG.blurs.bg),
+      sidebar: clamp(bl.sidebar as number, 0, 60, DEFAULT_CONFIG.blurs.sidebar),
+      card: clamp(bl.card as number, 0, 60, DEFAULT_CONFIG.blurs.card),
+      settings: clamp(bl.settings as number, 0, 60, DEFAULT_CONFIG.blurs.settings),
+    },
     settingsOpacity: clamp(r.settingsOpacity as number, 0, 1, DEFAULT_CONFIG.settingsOpacity),
     wallpaperOpacity: clamp(r.wallpaperOpacity as number, 0, 1, DEFAULT_CONFIG.wallpaperOpacity),
     blur: clamp(r.blur as number, 0, 60, DEFAULT_CONFIG.blur),
