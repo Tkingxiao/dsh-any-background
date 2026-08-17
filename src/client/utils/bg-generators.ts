@@ -1,18 +1,22 @@
 import type { GeneratedBgParams, MeshGradientParams, ShaderParams, PatternParams } from '../types'
 
-export const RENDER_W = 1920
-export const RENDER_H = Math.round(RENDER_W * 9 / 16)
-const RENDER_SIZE = RENDER_W
-
-function createCanvas(w: number, h: number): HTMLCanvasElement {
+function createCanvas(): HTMLCanvasElement {
   const c = document.createElement('canvas')
-  c.width = w; c.height = h
+  c.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;object-fit:cover;'
   return c
 }
 
+function fitCanvas(c: HTMLCanvasElement): void {
+  const dpr = Math.min(window.devicePixelRatio || 1, 2)
+  const w = Math.ceil(window.innerWidth * dpr)
+  const h = Math.ceil(window.innerHeight * dpr)
+  if (c.width !== w || c.height !== h) {
+    c.width = w
+    c.height = h
+  }
+}
+
 // ── Deterministic seeded RNG ─────────────────────────────────────────────────
-// A simple xorshift-based PRNG so the same seed always produces the same
-// background. Used by mesh gradients and geometric patterns.
 function createRng(seed: number) {
   let s = seed > 0 ? seed : 1
   return () => {
@@ -23,69 +27,115 @@ function createRng(seed: number) {
   }
 }
 
-// ── Mesh gradient ────────────────────────────────────────────────────────────
-// Overlapping radial gradients placed on a jittered grid, with a subtle noise
-// overlay for texture. Produces soft, organic wallpapers similar to macOS
-// Sonoma screensavers.
-export function renderMeshGradient(params: MeshGradientParams): string {
-  const w = RENDER_SIZE
-  const h = Math.round(RENDER_SIZE * 9 / 16)
-  const c = createCanvas(w, h)
-  const g = c.getContext('2d')!
+// ── Seeded noise (for canvas 2D animations) ───────────────────────────────────
+// Simplex-ish 2D noise based on a permutation table derived from the seed, so
+// the animation is deterministic but still organic.
+function createNoise(seed: number) {
+  const rng = createRng(seed)
+  const perm: number[] = []
+  for (let i = 0; i < 256; i++) perm[i] = i
+  for (let i = 255; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1))
+    const t = perm[i]!; perm[i] = perm[j]!; perm[j] = t
+  }
+  for (let i = 0; i < 256; i++) perm[i + 256] = perm[i]!
+  function fade(t: number) { return t * t * t * (t * (t * 6 - 15) + 10) }
+  function lerp(a: number, b: number, t: number) { return a + (b - a) * t }
+  function grad(hash: number, x: number, y: number) {
+    const h = hash & 15
+    const u = h < 8 ? x : y
+    const v = h < 4 ? y : h === 12 || h === 14 ? x : 0
+    return ((h & 1) === 0 ? u : -u) + ((h & 2) === 0 ? v : -v)
+  }
+  return (x: number, y: number) => {
+    const X = Math.floor(x) & 255
+    const Y = Math.floor(y) & 255
+    x -= Math.floor(x)
+    y -= Math.floor(y)
+    const u = fade(x)
+    const v = fade(y)
+    const A = perm[X]! + Y
+    return lerp(
+      lerp(grad(perm[A]!, x, y), grad(perm[A! + 1]!, x - 1, y), u),
+      lerp(grad(perm[A! + 256]!, x, y - 1), grad(perm[A! + 257]!, x - 1, y - 1), u),
+      v,
+    )
+  }
+}
+
+// ── Mesh gradient (animated) ──────────────────────────────────────────────────
+// Many soft radial blobs whose centers drift on large noise paths. Colors are
+// chosen from a harmonious triad derived from the seed, giving complex,
+// ever-shifting gradients that always fit the viewport perfectly.
+export function createMeshGradient(params: MeshGradientParams, canvas?: HTMLCanvasElement): { canvas: HTMLCanvasElement; stop: () => void; snapshot: () => string } {
+  const c = canvas ?? createCanvas()
+  fitCanvas(c)
+  const g = c.getContext('2d', { alpha: false })!
   const rng = createRng(params.seed)
-  const scale = params.scale
-  const intensity = params.intensity
-
-  // Base: very dark or very light depending on a deterministic value derived
-  // from the seed. We keep the wallpaper itself relatively neutral so the
-  // extracted palette does not fight with the UI.
+  const noise = createNoise(params.seed)
   const dark = rng() < 0.5
-  g.fillStyle = dark ? '#0b0c10' : '#f4f6f8'
-  g.fillRect(0, 0, w, h)
-
-  const count = Math.round(6 * scale)
+  const baseHue = Math.round(rng() * 360)
+  const count = Math.round(8 + 10 * params.scale * params.intensity)
+  const blobs: { x: number; y: number; r: number; hx: number; hy: number; speed: number; hue: number; sat: number; lit: number }[] = []
   for (let i = 0; i < count; i++) {
-    const cx = rng() * w
-    const cy = rng() * h
-    const r = (0.25 + rng() * 0.55) * Math.min(w, h) * scale
-    const hue = Math.round(rng() * 360)
-    const sat = Math.round(40 + rng() * 50 * intensity)
-    const lit = dark ? Math.round(15 + rng() * 35 * intensity) : Math.round(65 + rng() * 25 * intensity)
-    const rad = g.createRadialGradient(cx, cy, 0, cx, cy, r)
-    const alpha = (0.25 + rng() * 0.35 * intensity).toFixed(2)
-    rad.addColorStop(0, `hsla(${hue},${sat}%,${lit}%,${alpha})`)
-    rad.addColorStop(1, 'hsla(0,0%,0%,0)')
-    g.fillStyle = rad
+    blobs.push({
+      x: rng(), y: rng(),
+      r: (0.2 + rng() * 0.6) * params.scale,
+      hx: rng() * 4 - 2, hy: rng() * 4 - 2,
+      speed: 0.05 + rng() * 0.1,
+      hue: (baseHue + (rng() < 0.5 ? 30 : 180) + rng() * 60) % 360,
+      sat: Math.round(45 + rng() * 50 * params.intensity),
+      lit: dark ? Math.round(18 + rng() * 35 * params.intensity) : Math.round(60 + rng() * 25 * params.intensity),
+    })
+  }
+  let t = 0
+  let running = true
+  const render = () => {
+    if (!running) return
+    const w = c.width, h = c.height
+    g.fillStyle = dark ? '#0a0b0e' : '#f5f7fa'
     g.fillRect(0, 0, w, h)
+    for (const b of blobs) {
+      const phase = t * b.speed
+      const cx = ((b.x + noise(b.hx + phase * 0.3, b.hy) * 0.25 + phase * 0.03) % 1 + 1) % 1 * w
+      const cy = ((b.y + noise(b.hx, b.hy + phase * 0.3) * 0.25 + phase * 0.015) % 1 + 1) % 1 * h
+      const r = b.r * Math.min(w, h) * (0.8 + 0.4 * Math.sin(phase + b.hx))
+      const rad = g.createRadialGradient(cx, cy, 0, cx, cy, r)
+      const alpha = (0.22 + 0.3 * params.intensity).toFixed(3)
+      rad.addColorStop(0, `hsla(${b.hue},${b.sat}%,${b.lit}%,${alpha})`)
+      rad.addColorStop(0.55, `hsla(${b.hue},${Math.round(b.sat * 0.6)}%,${b.lit}%,${(+alpha * 0.35).toFixed(3)})`)
+      rad.addColorStop(1, 'hsla(0,0%,0%,0)')
+      g.fillStyle = rad
+      g.fillRect(0, 0, w, h)
+    }
+    // Subtle animated film grain.
+    const id = g.getImageData(0, 0, w, h)
+    const d = id.data
+    const amt = dark ? 10 : 6
+    for (let i = 0; i < d.length; i += 4) {
+      const n = (Math.random() - 0.5) * amt
+      d[i] = Math.max(0, Math.min(255, d[i]! + n))
+      d[i + 1] = Math.max(0, Math.min(255, d[i + 1]! + n))
+      d[i + 2] = Math.max(0, Math.min(255, d[i + 2]! + n))
+    }
+    g.putImageData(id, 0, 0)
+    t += 0.016
+    requestAnimationFrame(render)
   }
-
-  // Soft noise grain overlay.
-  addNoise(g, w, h, dark ? 12 : 8)
-  return c.toDataURL('image/jpeg', 0.92)
+  requestAnimationFrame(render)
+  return {
+    canvas: c,
+    stop: () => { running = false },
+    snapshot: () => c.toDataURL('image/jpeg', 0.92),
+  }
 }
 
-function addNoise(g: CanvasRenderingContext2D, w: number, h: number, amount: number): void {
-  const id = g.getImageData(0, 0, w, h)
-  const d = id.data
-  for (let i = 0; i < d.length; i += 4) {
-    const n = (Math.random() - 0.5) * amount
-    d[i] = Math.max(0, Math.min(255, d[i]! + n))
-    d[i + 1] = Math.max(0, Math.min(255, d[i + 1]! + n))
-    d[i + 2] = Math.max(0, Math.min(255, d[i + 2]! + n))
-  }
-  g.putImageData(id, 0, 0)
-}
-
-// ── Shader backgrounds (static frame) ────────────────────────────────────────
-// WebGL fragment shaders: aurora, nebula, noise. Each renders one frame at
-// RENDER_SIZE. The `speed` parameter shifts the phase so different presets
-// still look distinct even without animation.
-export function renderShader(params: ShaderParams): string {
-  const w = RENDER_SIZE
-  const h = Math.round(RENDER_SIZE * 9 / 16)
-  const c = createCanvas(w, h)
-  const gl = c.getContext('webgl') || c.getContext('experimental-webgl') as WebGLRenderingContext | null
-  if (!gl) return renderMeshGradient({ type: 'mesh', seed: params.speed * 1000, scale: params.scale, intensity: 0.6 })
+// ── Shader backgrounds (animated WebGL) ───────────────────────────────────────
+export function createShaderBg(params: ShaderParams, canvas?: HTMLCanvasElement): { canvas: HTMLCanvasElement; stop: () => void; snapshot: () => string } {
+  const c = canvas ?? createCanvas()
+  fitCanvas(c)
+  const gl = c.getContext('webgl', { alpha: false }) || c.getContext('experimental-webgl', { alpha: false }) as WebGLRenderingContext | null
+  if (!gl) return createMeshGradient({ type: 'mesh', seed: params.speed * 1000, scale: params.scale, intensity: 0.6 }, c)
 
   const vs = `
     attribute vec2 a_position;
@@ -93,7 +143,7 @@ export function renderShader(params: ShaderParams): string {
   `
   const fs = shaderFragment(params.preset)
   const program = createProgram(gl, vs, fs)
-  if (!program) return renderMeshGradient({ type: 'mesh', seed: params.speed * 1000, scale: params.scale, intensity: 0.6 })
+  if (!program) return createMeshGradient({ type: 'mesh', seed: params.speed * 1000, scale: params.scale, intensity: 0.6 }, c)
 
   const posLoc = gl.getAttribLocation(program, 'a_position')
   const buf = gl.createBuffer()
@@ -101,14 +151,30 @@ export function renderShader(params: ShaderParams): string {
   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1]), gl.STATIC_DRAW)
   gl.enableVertexAttribArray(posLoc)
   gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0)
-
   gl.useProgram(program)
-  gl.viewport(0, 0, w, h)
-  gl.uniform2f(gl.getUniformLocation(program, 'u_resolution'), w, h)
-  gl.uniform1f(gl.getUniformLocation(program, 'u_time'), params.speed * 10)
-  gl.uniform1f(gl.getUniformLocation(program, 'u_scale'), params.scale)
-  gl.drawArrays(gl.TRIANGLES, 0, 6)
-  return c.toDataURL('image/jpeg', 0.95)
+
+  const uRes = gl.getUniformLocation(program, 'u_resolution')
+  const uTime = gl.getUniformLocation(program, 'u_time')
+  const uScale = gl.getUniformLocation(program, 'u_scale')
+  let running = true
+  let t = 0
+  const render = () => {
+    if (!running) return
+    fitCanvas(c)
+    gl.viewport(0, 0, c.width, c.height)
+    gl.uniform2f(uRes, c.width, c.height)
+    gl.uniform1f(uTime, t)
+    gl.uniform1f(uScale, params.scale)
+    gl.drawArrays(gl.TRIANGLES, 0, 6)
+    t += 0.01 * params.speed
+    requestAnimationFrame(render)
+  }
+  requestAnimationFrame(render)
+  return {
+    canvas: c,
+    stop: () => { running = false },
+    snapshot: () => c.toDataURL('image/jpeg', 0.95),
+  }
 }
 
 function createProgram(gl: WebGLRenderingContext, vs: string, fs: string): WebGLProgram | null {
@@ -194,17 +260,20 @@ function shaderFragment(preset: ShaderParams['preset']): string {
     return common + `
       void main() {
         vec2 uv = gl_FragCoord.xy / u_resolution;
-        float t = u_time * 0.1;
-        float n1 = fbm(vec3(uv * 2.0 * u_scale, t));
-        float n2 = fbm(vec3(uv * 3.0 * u_scale + 5.2, t * 1.3));
-        float bands = smoothstep(0.2, 0.8, 0.5 + 0.5 * sin(uv.y * 6.0 + n1 * 2.0));
-        vec3 c1 = vec3(0.05, 0.12, 0.18);
-        vec3 c2 = vec3(0.08, 0.35, 0.35);
-        vec3 c3 = vec3(0.25, 0.65, 0.45);
-        vec3 c4 = vec3(0.55, 0.25, 0.55);
+        float t = u_time;
+        float n1 = fbm(vec3(uv * 2.5 * u_scale, t));
+        float n2 = fbm(vec3(uv * 4.0 * u_scale + 7.0, t * 1.4));
+        float n3 = fbm(vec3(uv * 1.2 * u_scale - 3.0, t * 0.7));
+        float bands = smoothstep(0.15, 0.85, 0.5 + 0.5 * sin((uv.y + n3 * 0.08) * 8.0 + n1 * 1.5));
+        vec3 c1 = vec3(0.03, 0.08, 0.14);
+        vec3 c2 = vec3(0.05, 0.28, 0.32);
+        vec3 c3 = vec3(0.18, 0.62, 0.42);
+        vec3 c4 = vec3(0.55, 0.22, 0.52);
+        vec3 c5 = vec3(0.85, 0.35, 0.25);
         vec3 col = mix(c1, c2, bands);
-        col = mix(col, c3, smoothstep(0.3, 0.7, n1));
-        col = mix(col, c4, smoothstep(0.5, 0.9, n2) * 0.6);
+        col = mix(col, c3, smoothstep(0.25, 0.75, n1));
+        col = mix(col, c4, smoothstep(0.45, 0.85, n2) * 0.75);
+        col = mix(col, c5, smoothstep(0.7, 0.95, n2 + n1 * 0.3) * 0.45);
         gl_FragColor = vec4(col, 1.0);
       }
     `
@@ -213,16 +282,19 @@ function shaderFragment(preset: ShaderParams['preset']): string {
     return common + `
       void main() {
         vec2 uv = gl_FragCoord.xy / u_resolution;
-        float t = u_time * 0.08;
-        float n = fbm(vec3(uv * 1.8 * u_scale, t));
-        float n2 = fbm(vec3(uv * 4.0 * u_scale - 3.0, t * 0.7));
-        vec3 c1 = vec3(0.04, 0.03, 0.12);
-        vec3 c2 = vec3(0.15, 0.05, 0.25);
-        vec3 c3 = vec3(0.35, 0.12, 0.35);
-        vec3 c4 = vec3(0.12, 0.18, 0.45);
-        vec3 col = mix(c1, c2, smoothstep(-0.4, 0.6, n));
-        col = mix(col, c3, smoothstep(0.2, 0.8, n2) * 0.7);
-        col = mix(col, c4, smoothstep(0.4, 0.9, n) * 0.5);
+        float t = u_time * 0.8;
+        float n = fbm(vec3(uv * 2.2 * u_scale, t));
+        float n2 = fbm(vec3(uv * 5.0 * u_scale - 4.0, t * 0.65));
+        float n3 = fbm(vec3(uv * 0.9 * u_scale + 2.0, t * 0.4));
+        vec3 c1 = vec3(0.02, 0.02, 0.08);
+        vec3 c2 = vec3(0.12, 0.04, 0.22);
+        vec3 c3 = vec3(0.32, 0.10, 0.35);
+        vec3 c4 = vec3(0.10, 0.18, 0.42);
+        vec3 c5 = vec3(0.55, 0.30, 0.55);
+        vec3 col = mix(c1, c2, smoothstep(-0.5, 0.6, n));
+        col = mix(col, c3, smoothstep(0.15, 0.8, n2) * 0.75);
+        col = mix(col, c4, smoothstep(0.35, 0.85, n + n3 * 0.3) * 0.55);
+        col = mix(col, c5, smoothstep(0.6, 0.95, n2) * 0.35);
         gl_FragColor = vec4(col, 1.0);
       }
     `
@@ -231,141 +303,232 @@ function shaderFragment(preset: ShaderParams['preset']): string {
   return common + `
     void main() {
       vec2 uv = gl_FragCoord.xy / u_resolution;
-      float t = u_time * 0.05;
-      float n = fbm(vec3(uv * 3.0 * u_scale, t));
-      float n2 = fbm(vec3(uv * 8.0 * u_scale + 12.0, t * 1.5));
-      vec3 c1 = vec3(0.08, 0.08, 0.10);
-      vec3 c2 = vec3(0.18, 0.20, 0.24);
-      vec3 c3 = vec3(0.32, 0.34, 0.38);
-      vec3 col = mix(c1, c2, 0.5 + 0.5 * n);
-      col = mix(col, c3, smoothstep(0.35, 0.85, n2) * 0.4);
+      float t = u_time;
+      float n = fbm(vec3(uv * 3.5 * u_scale, t));
+      float n2 = fbm(vec3(uv * 9.0 * u_scale + 15.0, t * 1.6));
+      float n3 = fbm(vec3(uv * 1.5 * u_scale - 5.0, t * 0.5));
+      vec3 c1 = vec3(0.06, 0.06, 0.08);
+      vec3 c2 = vec3(0.16, 0.18, 0.22);
+      vec3 c3 = vec3(0.30, 0.32, 0.36);
+      vec3 c4 = vec3(0.46, 0.48, 0.52);
+      vec3 col = mix(c1, c2, 0.5 + 0.5 * n + n3 * 0.15);
+      col = mix(col, c3, smoothstep(0.3, 0.8, n2) * 0.45);
+      col = mix(col, c4, smoothstep(0.6, 0.95, n2) * 0.25);
       gl_FragColor = vec4(col, 1.0);
     }
   `
 }
 
-// ── Geometric patterns ───────────────────────────────────────────────────────
-export function renderPattern(params: PatternParams): string {
-  if (params.preset === 'waves') return renderWaves(params)
-  if (params.preset === 'poly') return renderLowPoly(params)
-  return renderDots(params)
+// ── Geometric patterns (animated) ─────────────────────────────────────────────
+export function createPatternBg(params: PatternParams, canvas?: HTMLCanvasElement): { canvas: HTMLCanvasElement; stop: () => void; snapshot: () => string } {
+  if (params.preset === 'waves') return createWaves(params, canvas)
+  if (params.preset === 'poly') return createLowPoly(params, canvas)
+  return createDots(params, canvas)
 }
 
-function renderDots(params: PatternParams): string {
-  const w = RENDER_SIZE
-  const h = Math.round(RENDER_SIZE * 9 / 16)
-  const c = createCanvas(w, h)
-  const g = c.getContext('2d')!
+function createDots(params: PatternParams, canvas?: HTMLCanvasElement): { canvas: HTMLCanvasElement; stop: () => void; snapshot: () => string } {
+  const c = canvas ?? createCanvas()
+  fitCanvas(c)
+  const g = c.getContext('2d', { alpha: false })!
   const rng = createRng(Math.round(params.density * 1000 + params.scale * 100))
   const dark = rng() < 0.5
-  g.fillStyle = dark ? '#0a0b0d' : '#f6f7f9'
-  g.fillRect(0, 0, w, h)
-  const spacing = Math.max(20, 120 * params.scale / (0.3 + params.density))
-  const baseR = spacing * 0.25
-  for (let y = spacing / 2; y < h; y += spacing) {
-    for (let x = spacing / 2; x < w; x += spacing) {
-      const r = baseR * (0.4 + rng() * 0.8)
-      const hue = Math.round(rng() * 360)
-      const sat = Math.round(30 + rng() * 50)
-      const lit = dark ? Math.round(35 + rng() * 35) : Math.round(55 + rng() * 30)
+  const baseHue = Math.round(rng() * 360)
+  const spacing = Math.max(24, 140 * params.scale / (0.25 + params.density))
+  const dots: { bx: number; by: number; r: number; hue: number; sat: number; lit: number; phase: number; speed: number }[] = []
+  const cols = Math.ceil(window.innerWidth / spacing) + 1
+  const rows = Math.ceil(window.innerHeight / spacing) + 1
+  for (let y = 0; y < rows; y++) {
+    for (let x = 0; x < cols; x++) {
+      dots.push({
+        bx: (x + 0.5) * spacing, by: (y + 0.5) * spacing,
+        r: spacing * 0.18 * params.scale * (0.6 + rng() * 0.7),
+        hue: (baseHue + rng() * 80) % 360,
+        sat: Math.round(35 + rng() * 55),
+        lit: dark ? Math.round(30 + rng() * 35) : Math.round(55 + rng() * 30),
+        phase: rng() * Math.PI * 2,
+        speed: 0.5 + rng() * 1.2,
+      })
+    }
+  }
+  let t = 0
+  let running = true
+  const render = () => {
+    if (!running) return
+    fitCanvas(c)
+    const w = c.width, h = c.height
+    const dpr = w / window.innerWidth
+    g.fillStyle = dark ? '#0a0b0d' : '#f6f7f9'
+    g.fillRect(0, 0, w, h)
+    for (const d of dots) {
+      const pulse = 0.75 + 0.35 * Math.sin(t * d.speed + d.phase)
+      const r = d.r * pulse * dpr
+      const x = d.bx * dpr
+      const y = d.by * dpr + Math.sin(t * d.speed * 0.5 + d.phase) * 4 * dpr
       g.beginPath()
-      g.arc(x + (rng() - 0.5) * spacing * 0.3, y + (rng() - 0.5) * spacing * 0.3, r, 0, Math.PI * 2)
-      g.fillStyle = `hsla(${hue},${sat}%,${lit}%,${(0.15 + rng() * 0.35).toFixed(2)})`
+      g.arc(x, y, Math.max(1, r), 0, Math.PI * 2)
+      g.fillStyle = `hsla(${d.hue},${d.sat}%,${d.lit}%,${(0.18 + 0.25 * pulse).toFixed(2)})`
       g.fill()
     }
+    t += 0.016
+    requestAnimationFrame(render)
   }
-  addNoise(g, w, h, dark ? 10 : 6)
-  return c.toDataURL('image/jpeg', 0.94)
+  requestAnimationFrame(render)
+  return { canvas: c, stop: () => { running = false }, snapshot: () => c.toDataURL('image/jpeg', 0.94) }
 }
 
-function renderWaves(params: PatternParams): string {
-  const w = RENDER_SIZE
-  const h = Math.round(RENDER_SIZE * 9 / 16)
-  const c = createCanvas(w, h)
-  const g = c.getContext('2d')!
+function createWaves(params: PatternParams, canvas?: HTMLCanvasElement): { canvas: HTMLCanvasElement; stop: () => void; snapshot: () => string } {
+  const c = canvas ?? createCanvas()
+  fitCanvas(c)
+  const g = c.getContext('2d', { alpha: false })!
   const rng = createRng(Math.round(params.density * 1000 + params.scale * 100))
   const dark = rng() < 0.5
-  g.fillStyle = dark ? '#07080a' : '#f8f9fb'
-  g.fillRect(0, 0, w, h)
   const hue = Math.round(rng() * 360)
-  const layers = Math.round(4 + params.density * 6)
+  const layers = Math.round(5 + params.density * 8)
+  const waves: { yBase: number; amp: number; freq: number; phase: number; speed: number; hue: number; sat: number; lit: number; alpha: number }[] = []
   for (let i = 0; i < layers; i++) {
-    const yBase = h * (0.3 + (i / layers) * 0.6)
-    const amp = 30 * params.scale + rng() * 40
-    const freq = (0.003 + rng() * 0.006) / params.scale
-    const phase = rng() * Math.PI * 2
-    g.beginPath()
-    g.moveTo(0, h)
-    for (let x = 0; x <= w; x += 8) {
-      const y = yBase + Math.sin(x * freq + phase) * amp + Math.sin(x * freq * 2.3 + phase) * amp * 0.5
-      g.lineTo(x, y)
-    }
-    g.lineTo(w, h)
-    g.closePath()
-    const sat = Math.round(40 + rng() * 40)
-    const lit = dark ? Math.round(15 + (i / layers) * 30) : Math.round(70 - (i / layers) * 25)
-    g.fillStyle = `hsla(${hue + i * 15},${sat}%,${lit}%,${(0.25 + rng() * 0.3).toFixed(2)})`
-    g.fill()
+    waves.push({
+      yBase: 0.25 + (i / layers) * 0.55,
+      amp: (25 + rng() * 45) * params.scale,
+      freq: (0.004 + rng() * 0.008) / params.scale,
+      phase: rng() * Math.PI * 2,
+      speed: (0.3 + rng() * 0.7) * (rng() < 0.5 ? 1 : -1),
+      hue: (hue + i * 12) % 360,
+      sat: Math.round(40 + rng() * 45),
+      lit: dark ? Math.round(14 + (i / layers) * 32) : Math.round(72 - (i / layers) * 28),
+      alpha: 0.22 + rng() * 0.32,
+    })
   }
-  addNoise(g, w, h, dark ? 10 : 6)
-  return c.toDataURL('image/jpeg', 0.94)
+  let t = 0
+  let running = true
+  const render = () => {
+    if (!running) return
+    fitCanvas(c)
+    const w = c.width, h = c.height
+    g.fillStyle = dark ? '#07080a' : '#f8f9fb'
+    g.fillRect(0, 0, w, h)
+    for (const wave of waves) {
+      g.beginPath()
+      g.moveTo(0, h)
+      for (let x = 0; x <= w; x += Math.max(4, Math.floor(w / 300))) {
+        const y = h * wave.yBase
+          + Math.sin(x * wave.freq + wave.phase + t * wave.speed) * wave.amp
+          + Math.sin(x * wave.freq * 2.1 + wave.phase * 1.3 - t * wave.speed * 1.5) * wave.amp * 0.5
+        g.lineTo(x, y)
+      }
+      g.lineTo(w, h)
+      g.closePath()
+      g.fillStyle = `hsla(${wave.hue},${wave.sat}%,${wave.lit}%,${wave.alpha.toFixed(2)})`
+      g.fill()
+    }
+    t += 0.016
+    requestAnimationFrame(render)
+  }
+  requestAnimationFrame(render)
+  return { canvas: c, stop: () => { running = false }, snapshot: () => c.toDataURL('image/jpeg', 0.94) }
 }
 
-function renderLowPoly(params: PatternParams): string {
-  const w = RENDER_SIZE
-  const h = Math.round(RENDER_SIZE * 9 / 16)
-  const c = createCanvas(w, h)
-  const g = c.getContext('2d')!
+function createLowPoly(params: PatternParams, canvas?: HTMLCanvasElement): { canvas: HTMLCanvasElement; stop: () => void; snapshot: () => string } {
+  const c = canvas ?? createCanvas()
+  fitCanvas(c)
+  const g = c.getContext('2d', { alpha: false })!
   const rng = createRng(Math.round(params.density * 1000 + params.scale * 100))
   const dark = rng() < 0.5
-  g.fillStyle = dark ? '#08090c' : '#f5f6f8'
-  g.fillRect(0, 0, w, h)
   const hue = Math.round(rng() * 360)
-  const cols = Math.round(8 + params.density * 16)
-  const rows = Math.round(cols * h / w)
-  const points: { x: number; y: number }[][] = []
+  const cols = Math.round(10 + params.density * 20)
+  const rows = Math.max(6, Math.round(cols * window.innerHeight / window.innerWidth))
+  const points: { x: number; y: number; dx: number; dy: number; speed: number }[][] = []
   for (let y = 0; y <= rows; y++) {
-    const row: { x: number; y: number }[] = []
+    const row: { x: number; y: number; dx: number; dy: number; speed: number }[] = []
     for (let x = 0; x <= cols; x++) {
       row.push({
-        x: (x / cols) * w + (rng() - 0.5) * (w / cols) * 0.7,
-        y: (y / rows) * h + (rng() - 0.5) * (h / rows) * 0.7,
+        x: x / cols, y: y / rows,
+        dx: (rng() - 0.5) * 0.02, dy: (rng() - 0.5) * 0.02,
+        speed: 0.2 + rng() * 0.5,
       })
     }
     points.push(row)
   }
+  const cells: { y: number; x: number; hue: number; sat: number; lit: number; phase: number }[] = []
   for (let y = 0; y < rows; y++) {
     for (let x = 0; x < cols; x++) {
-      const p1 = points[y]![x]!, p2 = points[y]![x + 1]!, p3 = points[y + 1]![x]!
-      const cx = (p1.x + p2.x + p3.x) / 3 / w
-      const lit = dark ? Math.round(12 + cx * 35 + rng() * 15) : Math.round(85 - cx * 25 + rng() * 10)
-      g.beginPath()
-      g.moveTo(p1.x, p1.y); g.lineTo(p2.x, p2.y); g.lineTo(p3.x, p3.y)
-      g.closePath()
-      g.fillStyle = `hsla(${hue + cx * 60},${Math.round(35 + rng() * 35)}%,${lit}%,0.9)`
-      g.fill()
-      const p4 = points[y + 1]![x + 1]!
-      g.beginPath()
-      g.moveTo(p2.x, p2.y); g.lineTo(p4.x, p4.y); g.lineTo(p3.x, p3.y)
-      g.closePath()
-      g.fillStyle = `hsla(${hue + cx * 60 + 10},${Math.round(35 + rng() * 35)}%,${Math.max(0, lit - 5)}%,0.9)`
-      g.fill()
+      cells.push({ y, x, hue: (hue + rng() * 60) % 360, sat: Math.round(35 + rng() * 40), lit: dark ? Math.round(12 + rng() * 35) : Math.round(65 + rng() * 25), phase: rng() * Math.PI * 2 })
     }
   }
-  addNoise(g, w, h, dark ? 8 : 5)
-  return c.toDataURL('image/jpeg', 0.94)
+  let t = 0
+  let running = true
+  const render = () => {
+    if (!running) return
+    fitCanvas(c)
+    const w = c.width, h = c.height
+    g.fillStyle = dark ? '#08090c' : '#f5f6f8'
+    g.fillRect(0, 0, w, h)
+    const px = points.map(row => row.map(p => ({
+      x: (p.x + Math.sin(t * p.speed + p.dx * 100) * p.dx) * w,
+      y: (p.y + Math.cos(t * p.speed + p.dy * 100) * p.dy) * h,
+    })))
+    for (const cell of cells) {
+      const p1 = px[cell.y]![cell.x]!, p2 = px[cell.y]![cell.x + 1]!, p3 = px[cell.y + 1]![cell.x]!, p4 = px[cell.y + 1]![cell.x + 1]!
+      const cx = (p1.x + p2.x + p3.x) / 3 / w
+      const litShift = Math.sin(t * 0.4 + cell.phase) * 6
+      const lit = Math.max(0, Math.min(100, cell.lit + litShift))
+      g.beginPath(); g.moveTo(p1.x, p1.y); g.lineTo(p2.x, p2.y); g.lineTo(p3.x, p3.y); g.closePath()
+      g.fillStyle = `hsla(${cell.hue + cx * 40},${cell.sat}%,${lit}%,0.92)`
+      g.fill()
+      g.beginPath(); g.moveTo(p2.x, p2.y); g.lineTo(p4.x, p4.y); g.lineTo(p3.x, p3.y); g.closePath()
+      g.fillStyle = `hsla(${(cell.hue + cx * 40 + 12) % 360},${cell.sat}%,${Math.max(0, lit - 4)}%,0.92)`
+      g.fill()
+    }
+    t += 0.012
+    requestAnimationFrame(render)
+  }
+  requestAnimationFrame(render)
+  return { canvas: c, stop: () => { running = false }, snapshot: () => c.toDataURL('image/jpeg', 0.94) }
 }
 
-/** Dispatch to the right generator based on params type. */
-export function renderGeneratedBg(params: GeneratedBgParams): string {
-  if (params.type === 'mesh') return renderMeshGradient(params)
-  if (params.type === 'shader') return renderShader(params)
-  return renderPattern(params)
+// ── Dispatcher ────────────────────────────────────────────────────────────────
+export function createDynamicBackground(params: GeneratedBgParams, canvas?: HTMLCanvasElement): { canvas: HTMLCanvasElement; stop: () => void; snapshot: () => string } {
+  if (params.type === 'mesh') return createMeshGradient(params, canvas)
+  if (params.type === 'shader') return createShaderBg(params, canvas)
+  return createPatternBg(params, canvas)
 }
 
 /** Build default params for a newly selected background type. */
 export function defaultParamsFor(type: Exclude<GeneratedBgParams['type'], 'image'>): GeneratedBgParams {
-  if (type === 'mesh') return { type: 'mesh', seed: Math.floor(Math.random() * 100000), scale: 1, intensity: 0.6 }
-  if (type === 'shader') return { type: 'shader', preset: 'aurora', speed: 0.3, scale: 1 }
+  if (type === 'mesh') return { type: 'mesh', seed: Math.floor(Math.random() * 1000000), scale: 1.1, intensity: 0.65 }
+  if (type === 'shader') return { type: 'shader', preset: 'aurora', speed: 0.35, scale: 1 }
   return { type: 'pattern', preset: 'dots', density: 0.5, scale: 1 }
+}
+
+// ── Static snapshot fallback (used for export/preview when a canvas is not mounted) ─
+const RENDER_W = 1920
+const RENDER_H = Math.round(RENDER_W * 9 / 16)
+
+function createStaticCanvas(): HTMLCanvasElement {
+  const c = document.createElement('canvas')
+  c.width = RENDER_W; c.height = RENDER_H
+  return c
+}
+
+export function renderMeshGradient(params: MeshGradientParams): string {
+  const { stop, snapshot } = createMeshGradient(params, createStaticCanvas())
+  stop()
+  return snapshot()
+}
+
+export function renderShader(params: ShaderParams): string {
+  const { stop, snapshot } = createShaderBg(params, createStaticCanvas())
+  stop()
+  return snapshot()
+}
+
+export function renderPattern(params: PatternParams): string {
+  const { stop, snapshot } = createPatternBg(params, createStaticCanvas())
+  stop()
+  return snapshot()
+}
+
+export function renderGeneratedBg(params: GeneratedBgParams): string {
+  if (params.type === 'mesh') return renderMeshGradient(params)
+  if (params.type === 'shader') return renderShader(params)
+  return renderPattern(params)
 }

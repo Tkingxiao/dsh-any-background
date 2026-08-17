@@ -1,10 +1,17 @@
 import { rWp, rBgState, rBl, rWop, rOps, rSop, rColor, rBlurs, rPalette, setPalette, cfg, setWpUrl, setBgState, DEFAULT_CONFIG } from './state'
 import type { BackgroundType, GeneratedBgParams, PartOpacities, PartBlurs } from './types'
 import { genTokens, toRgba, extractWallpaperPalette, paletteFromHsl } from './utils/color'
-import { renderGeneratedBg, defaultParamsFor, RENDER_W, RENDER_H } from './utils/bg-generators'
+import { createDynamicBackground, defaultParamsFor } from './utils/bg-generators'
 
 let wpEl: HTMLDivElement | null = null
 let appliedTokenNames: string[] = []
+let wpController: { canvas: HTMLCanvasElement; stop: () => void; snapshot: () => string } | null = null
+
+function clearDynamicBg(): void {
+  wpController?.stop()
+  wpController?.canvas.remove()
+  wpController = null
+}
 
 function clearCustomTokens(): void {
   for (const name of appliedTokenNames) document.body.style.removeProperty(name)
@@ -89,39 +96,46 @@ export function refreshPaletteAndApply(): void {
   }
 }
 
-/** Switch the background source type. For generated types a new data URL is
- *  rendered immediately and the parameters are persisted. */
+/** Switch the background source type. For generated types a new live canvas is
+ *  attached to the wallpaper layer and a snapshot is kept for the store/preview. */
 export function setBackgroundType(type: BackgroundType): void {
   cfg.backgroundType = type
   if (type === 'image') {
-    // Keep the existing image URL (or null) as-is.
+    // Keep the existing image URL (or null) as-is; remove any live canvas.
+    clearDynamicBg()
     refreshPaletteAndApply()
     return
   }
   cfg.generatedBg = defaultParamsFor(type)
-  setBgState({ ...DEFAULT_CONFIG.bgState, iw: RENDER_W, ih: RENDER_H })
-  const url = renderGeneratedBg(cfg.generatedBg)
-  // The URL is set synchronously; palette extraction runs async below.
-  setWpUrl(url)
-  refreshPaletteAndApply()
+  setBgState({ ...DEFAULT_CONFIG.bgState })
+  applyGeneratedBg(cfg.generatedBg)
 }
 
 /** Regenerate the current generated background from its saved parameters. */
 export function regenerateGeneratedBg(): void {
   const params = cfg.generatedBg
   if (!params || cfg.backgroundType === 'image') return
-  const url = renderGeneratedBg(params)
-  setWpUrl(url)
-  refreshPaletteAndApply()
+  applyGeneratedBg(params)
 }
 
 /** Update a generated background's parameters and re-render. */
 export function updateGeneratedBg(params: GeneratedBgParams): void {
   cfg.backgroundType = params.type
   cfg.generatedBg = params
-  setBgState({ ...DEFAULT_CONFIG.bgState, iw: RENDER_W, ih: RENDER_H })
-  const url = renderGeneratedBg(params)
-  setWpUrl(url)
+  setBgState({ ...DEFAULT_CONFIG.bgState })
+  applyGeneratedBg(params)
+}
+
+function applyGeneratedBg(params: GeneratedBgParams): void {
+  clearDynamicBg()
+  ensureWpContainer()
+  wpController = createDynamicBackground(params)
+  if (wpEl) {
+    wpEl.style.backgroundImage = 'none'
+    wpEl.appendChild(wpController.canvas)
+  }
+  // Snapshot is used by the settings preview, color picker and extraction.
+  setWpUrl(wpController.snapshot())
   refreshPaletteAndApply()
 }
 
@@ -198,36 +212,64 @@ export function stopWatchingParts(): void {
   partsObserver = null
 }
 
+function ensureWpContainer(): void {
+  if (!wpEl || !document.body.contains(wpEl)) {
+    wpEl = document.createElement('div')
+    wpEl.style.cssText = 'position:fixed;inset:0;z-index:-1;pointer-events:none;overflow:hidden;'
+    document.body.prepend(wpEl)
+  }
+}
+
+function applyImageWp(url: string): void {
+  clearDynamicBg()
+  ensureWpContainer()
+  const bg = rBgState()
+  wpEl!.style.backgroundImage = `url("${url}")`
+  wpEl!.style.backgroundRepeat = 'no-repeat'
+  if (bg.iw > 0) {
+    // Saved placement: contain-fit at zoom with the image CENTER pinned to
+    // the committed fractional viewport point (x, y are center fractions,
+    // 0.5 = viewport center — the editor commits the same anchor), so the
+    // framed region survives viewport changes: window moves between screens,
+    // aspect-ratio changes, and panel splitters re-derive a consistent view.
+    const fit = Math.min(window.innerWidth / bg.iw, window.innerHeight / bg.ih)
+    const w = bg.iw * fit * bg.zoom
+    const h = bg.ih * fit * bg.zoom
+    wpEl!.style.backgroundSize = `${w}px ${h}px`
+    wpEl!.style.backgroundPosition = `${bg.x * window.innerWidth - w / 2}px ${bg.y * window.innerHeight - h / 2}px`
+  } else {
+    // Fresh image: match the editor's initial centered contain view.
+    wpEl!.style.backgroundSize = 'contain'
+    wpEl!.style.backgroundPosition = 'center'
+  }
+  applyWpEffects()
+}
+
+function applyWpEffects(): void {
+  if (!wpEl) return
+  const blur = rBl()
+  wpEl.style.filter = blur > 0 ? `blur(${blur}px)` : 'none'
+  wpEl.style.opacity = String(rWop())
+}
+
 export function applyWp(): void {
   const url = rWp()
-  // Wallpaper element (only when image exists)
-  if (!url) { wpEl?.remove(); wpEl = null } else {
-    if (!wpEl || !document.body.contains(wpEl)) {
-      wpEl = document.createElement('div')
-      wpEl.style.cssText = 'position:fixed;inset:0;z-index:-1;pointer-events:none;background-repeat:no-repeat;'
-      document.body.prepend(wpEl)
+  if (cfg.backgroundType !== 'image' && cfg.generatedBg) {
+    // Generated backgrounds are live canvases. If one is not active yet,
+    // create it from the saved params (happens on boot or after import).
+    if (!wpController) {
+      applyGeneratedBg(cfg.generatedBg)
+      return
     }
-    const bg = rBgState()
-    wpEl.style.backgroundImage = `url("${url}")`
-    if (bg.iw > 0) {
-      // Saved placement: contain-fit at zoom with the image CENTER pinned to
-      // the committed fractional viewport point (x, y are center fractions,
-      // 0.5 = viewport center — the editor commits the same anchor), so the
-      // framed region survives viewport changes: window moves between screens,
-      // aspect-ratio changes, and panel splitters re-derive a consistent view.
-      const fit = Math.min(window.innerWidth / bg.iw, window.innerHeight / bg.ih)
-      const w = bg.iw * fit * bg.zoom
-      const h = bg.ih * fit * bg.zoom
-      wpEl.style.backgroundSize = `${w}px ${h}px`
-      wpEl.style.backgroundPosition = `${bg.x * window.innerWidth - w / 2}px ${bg.y * window.innerHeight - h / 2}px`
-    } else {
-      // Fresh image: match the editor's initial centered contain view.
-      wpEl.style.backgroundSize = 'contain'
-      wpEl.style.backgroundPosition = 'center'
-    }
-    const blur = rBl()
-    wpEl.style.filter = blur > 0 ? `blur(${blur}px)` : 'none'
-    wpEl.style.opacity = String(rWop())
+    ensureWpContainer()
+    if (wpController.canvas.parentElement !== wpEl) wpEl!.appendChild(wpController.canvas)
+    applyWpEffects()
+  } else if (url) {
+    applyImageWp(url)
+  } else {
+    // No background: tear down the layer but keep tokens/blur intact.
+    clearDynamicBg()
+    wpEl?.remove(); wpEl = null
   }
   // Theme color + per-part opacities: write the full token set inline
   // (self-contained), then the settings panel surface + per-part blur.
@@ -237,6 +279,7 @@ export function applyWp(): void {
 }
 
 export function teardownWp(): void {
+  clearDynamicBg()
   wpEl?.remove(); wpEl = null
   clearCustomTokens()
   document.documentElement.style.removeProperty('--dsh-any-bg-settings-surface')
