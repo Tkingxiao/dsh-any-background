@@ -1,19 +1,45 @@
 import type { GeneratedBgParams, MeshGradientParams, ShaderParams, PatternParams } from '../types'
 
+// The live full-screen canvas renders at a fraction of the CSS size — it sits
+// behind frosted/translucent UI anyway, so ~0.5–0.6px backing keeps it looking
+// sharp while drastically cutting fill/gradient cost per frame.
+const RENDER_SCALE = 0.55
+const FPS = 30
+const FRAME_MS = 1000 / FPS
+
+function newRaf(canvas: HTMLCanvasElement, draw: () => void): { stop: () => void } {
+  canvas.dataset.dshAnyCanvas = '1'
+  let running = true
+  let last = 0
+  // Draw the very first frame synchronously so snapshot() right after creation
+  // already yields a real frame (used by the preview, palette and export).
+  draw()
+  const loop = (ts: number) => {
+    if (!running) return
+    if (ts - last >= FRAME_MS) { last = ts; draw() }
+    requestAnimationFrame(loop)
+  }
+  requestAnimationFrame(loop)
+  return { stop: () => { running = false } }
+}
+
 function createCanvas(): HTMLCanvasElement {
   const c = document.createElement('canvas')
   c.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;object-fit:cover;'
   return c
 }
 
-function fitCanvas(c: HTMLCanvasElement): void {
-  const dpr = Math.min(window.devicePixelRatio || 1, 2)
-  const w = Math.ceil(window.innerWidth * dpr)
-  const h = Math.ceil(window.innerHeight * dpr)
-  if (c.width !== w || c.height !== h) {
-    c.width = w
-    c.height = h
-  }
+function liveSize(): { w: number; h: number } {
+  const dpr = Math.min(window.devicePixelRatio || 1, 1.5)
+  const w = Math.max(320, Math.ceil(window.innerWidth * dpr * RENDER_SCALE))
+  const h = Math.max(180, Math.ceil(window.innerHeight * dpr * RENDER_SCALE))
+  return { w, h }
+}
+
+function fitLiveCanvas(c: HTMLCanvasElement): void {
+  if (c.dataset.dshAnyStatic === '1') return
+  const { w, h } = liveSize()
+  if (c.width !== w || c.height !== h) { c.width = w; c.height = h }
 }
 
 // ── Deterministic seeded RNG ─────────────────────────────────────────────────
@@ -27,9 +53,7 @@ function createRng(seed: number) {
   }
 }
 
-// ── Seeded noise (for canvas 2D animations) ───────────────────────────────────
-// Simplex-ish 2D noise based on a permutation table derived from the seed, so
-// the animation is deterministic but still organic.
+// ── Seeded 2D noise (for canvas mesh / pattern motion) ──────────────────────
 function createNoise(seed: number) {
   const rng = createRng(seed)
   const perm: number[] = []
@@ -44,7 +68,7 @@ function createNoise(seed: number) {
   function grad(hash: number, x: number, y: number) {
     const h = hash & 15
     const u = h < 8 ? x : y
-    const v = h < 4 ? y : h === 12 || h === 14 ? x : 0
+    const v = h < 4 ? y : (h === 12 || h === 14) ? x : 0
     return ((h & 1) === 0 ? u : -u) + ((h & 2) === 0 ? v : -v)
   }
   return (x: number, y: number) => {
@@ -64,23 +88,20 @@ function createNoise(seed: number) {
 }
 
 // ── Mesh gradient (animated) ──────────────────────────────────────────────────
-// Many soft radial blobs whose centers drift on large noise paths. Colors are
-// chosen from a harmonious triad derived from the seed, giving complex,
-// ever-shifting gradients that always fit the viewport perfectly.
 export function createMeshGradient(params: MeshGradientParams, canvas?: HTMLCanvasElement): { canvas: HTMLCanvasElement; stop: () => void; snapshot: () => string } {
   const c = canvas ?? createCanvas()
-  fitCanvas(c)
+  fitLiveCanvas(c)
   const g = c.getContext('2d', { alpha: false })!
   const rng = createRng(params.seed)
   const noise = createNoise(params.seed)
   const dark = rng() < 0.5
   const baseHue = Math.round(rng() * 360)
-  const count = Math.round(8 + 10 * params.scale * params.intensity)
+  const count = Math.round(7 + 9 * params.scale * params.intensity)
   const blobs: { x: number; y: number; r: number; hx: number; hy: number; speed: number; hue: number; sat: number; lit: number }[] = []
   for (let i = 0; i < count; i++) {
     blobs.push({
       x: rng(), y: rng(),
-      r: (0.2 + rng() * 0.6) * params.scale,
+      r: (0.22 + rng() * 0.6) * params.scale,
       hx: rng() * 4 - 2, hy: rng() * 4 - 2,
       speed: 0.05 + rng() * 0.1,
       hue: (baseHue + (rng() < 0.5 ? 30 : 180) + rng() * 60) % 360,
@@ -89,51 +110,34 @@ export function createMeshGradient(params: MeshGradientParams, canvas?: HTMLCanv
     })
   }
   let t = 0
-  let running = true
-  const render = () => {
-    if (!running) return
+  const alpha = (0.22 + 0.3 * params.intensity).toFixed(3)
+  const innerAlpha = (+alpha * 0.35).toFixed(3)
+  const draw = () => {
+    fitLiveCanvas(c)
     const w = c.width, h = c.height
     g.fillStyle = dark ? '#0a0b0e' : '#f5f7fa'
     g.fillRect(0, 0, w, h)
     for (const b of blobs) {
       const phase = t * b.speed
-      const cx = ((b.x + noise(b.hx + phase * 0.3, b.hy) * 0.25 + phase * 0.03) % 1 + 1) % 1 * w
-      const cy = ((b.y + noise(b.hx, b.hy + phase * 0.3) * 0.25 + phase * 0.015) % 1 + 1) % 1 * h
+      const cx = (((b.x + noise(b.hx + phase * 0.3, b.hy) * 0.25 + phase * 0.03) % 1 + 1) % 1) * w
+      const cy = (((b.y + noise(b.hx, b.hy + phase * 0.3) * 0.25 + phase * 0.012) % 1 + 1) % 1) * h
       const r = b.r * Math.min(w, h) * (0.8 + 0.4 * Math.sin(phase + b.hx))
       const rad = g.createRadialGradient(cx, cy, 0, cx, cy, r)
-      const alpha = (0.22 + 0.3 * params.intensity).toFixed(3)
       rad.addColorStop(0, `hsla(${b.hue},${b.sat}%,${b.lit}%,${alpha})`)
-      rad.addColorStop(0.55, `hsla(${b.hue},${Math.round(b.sat * 0.6)}%,${b.lit}%,${(+alpha * 0.35).toFixed(3)})`)
+      rad.addColorStop(0.55, `hsla(${b.hue},${Math.round(b.sat * 0.6)}%,${b.lit}%,${innerAlpha})`)
       rad.addColorStop(1, 'hsla(0,0%,0%,0)')
       g.fillStyle = rad
       g.fillRect(0, 0, w, h)
     }
-    // Subtle animated film grain.
-    const id = g.getImageData(0, 0, w, h)
-    const d = id.data
-    const amt = dark ? 10 : 6
-    for (let i = 0; i < d.length; i += 4) {
-      const n = (Math.random() - 0.5) * amt
-      d[i] = Math.max(0, Math.min(255, d[i]! + n))
-      d[i + 1] = Math.max(0, Math.min(255, d[i + 1]! + n))
-      d[i + 2] = Math.max(0, Math.min(255, d[i + 2]! + n))
-    }
-    g.putImageData(id, 0, 0)
-    t += 0.016
-    requestAnimationFrame(render)
+    t += 0.028
   }
-  requestAnimationFrame(render)
-  return {
-    canvas: c,
-    stop: () => { running = false },
-    snapshot: () => c.toDataURL('image/jpeg', 0.92),
-  }
+  return { canvas: c, ...newRaf(c, draw), snapshot: () => c.toDataURL('image/jpeg', 0.92) }
 }
 
 // ── Shader backgrounds (animated WebGL) ───────────────────────────────────────
 export function createShaderBg(params: ShaderParams, canvas?: HTMLCanvasElement): { canvas: HTMLCanvasElement; stop: () => void; snapshot: () => string } {
   const c = canvas ?? createCanvas()
-  fitCanvas(c)
+  fitLiveCanvas(c)
   const gl = c.getContext('webgl', { alpha: false }) || c.getContext('experimental-webgl', { alpha: false }) as WebGLRenderingContext | null
   if (!gl) return createMeshGradient({ type: 'mesh', seed: params.speed * 1000, scale: params.scale, intensity: 0.6 }, c)
 
@@ -141,8 +145,7 @@ export function createShaderBg(params: ShaderParams, canvas?: HTMLCanvasElement)
     attribute vec2 a_position;
     void main() { gl_Position = vec4(a_position, 0.0, 1.0); }
   `
-  const fs = shaderFragment(params.preset)
-  const program = createProgram(gl, vs, fs)
+  const program = createProgram(gl, vs, shaderFragment(params.preset))
   if (!program) return createMeshGradient({ type: 'mesh', seed: params.speed * 1000, scale: params.scale, intensity: 0.6 }, c)
 
   const posLoc = gl.getAttribLocation(program, 'a_position')
@@ -152,29 +155,23 @@ export function createShaderBg(params: ShaderParams, canvas?: HTMLCanvasElement)
   gl.enableVertexAttribArray(posLoc)
   gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0)
   gl.useProgram(program)
-
   const uRes = gl.getUniformLocation(program, 'u_resolution')
   const uTime = gl.getUniformLocation(program, 'u_time')
   const uScale = gl.getUniformLocation(program, 'u_scale')
-  let running = true
+  const uSeed = gl.getUniformLocation(program, 'u_seed')
+  const seed01 = (params.seed >>> 0) / 0xffffffff
   let t = 0
-  const render = () => {
-    if (!running) return
-    fitCanvas(c)
+  const draw = () => {
+    fitLiveCanvas(c)
     gl.viewport(0, 0, c.width, c.height)
     gl.uniform2f(uRes, c.width, c.height)
     gl.uniform1f(uTime, t)
     gl.uniform1f(uScale, params.scale)
+    gl.uniform1f(uSeed, seed01)
     gl.drawArrays(gl.TRIANGLES, 0, 6)
-    t += 0.01 * params.speed
-    requestAnimationFrame(render)
+    t += 0.32 * params.speed
   }
-  requestAnimationFrame(render)
-  return {
-    canvas: c,
-    stop: () => { running = false },
-    snapshot: () => c.toDataURL('image/jpeg', 0.95),
-  }
+  return { canvas: c, ...newRaf(c, draw), snapshot: () => c.toDataURL('image/jpeg', 0.95) }
 }
 
 function createProgram(gl: WebGLRenderingContext, vs: string, fs: string): WebGLProgram | null {
@@ -200,11 +197,21 @@ function shaderFragment(preset: ShaderParams['preset']): string {
     uniform vec2 u_resolution;
     uniform float u_time;
     uniform float u_scale;
+    uniform float u_seed;
 
     vec3 mod289(vec3 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
     vec4 mod289(vec4 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
     vec4 permute(vec4 x) { return mod289(((x*34.0)+1.0)*x); }
     vec4 taylorInvSqrt(vec4 r) { return 1.79284291400159 - 0.85373472095314 * r; }
+    vec3 hueRotate(vec3 rgb, float angle) {
+      float c = cos(angle), s = sin(angle);
+      mat3 m = mat3(
+        0.299 + 0.701*c + 0.168*s, 0.587 - 0.587*c + 0.330*s, 0.114 - 0.114*c - 0.497*s,
+        0.299 - 0.299*c - 0.328*s, 0.587 + 0.413*c + 0.035*s, 0.114 - 0.114*c + 0.292*s,
+        0.299 - 0.300*c + 1.250*s, 0.587 - 0.588*c - 1.050*s, 0.114 + 0.886*c - 0.203*s
+      );
+      return rgb * m;
+    }
     float snoise(vec3 v) {
       const vec2 C = vec2(1.0/6.0, 1.0/3.0);
       const vec4 D = vec4(0.0, 0.5, 1.0, 2.0);
@@ -274,6 +281,7 @@ function shaderFragment(preset: ShaderParams['preset']): string {
         col = mix(col, c3, smoothstep(0.25, 0.75, n1));
         col = mix(col, c4, smoothstep(0.45, 0.85, n2) * 0.75);
         col = mix(col, c5, smoothstep(0.7, 0.95, n2 + n1 * 0.3) * 0.45);
+        col = hueRotate(col, u_seed * 6.28318530718);
         gl_FragColor = vec4(col, 1.0);
       }
     `
@@ -295,6 +303,7 @@ function shaderFragment(preset: ShaderParams['preset']): string {
         col = mix(col, c3, smoothstep(0.15, 0.8, n2) * 0.75);
         col = mix(col, c4, smoothstep(0.35, 0.85, n + n3 * 0.3) * 0.55);
         col = mix(col, c5, smoothstep(0.6, 0.95, n2) * 0.35);
+        col = hueRotate(col, u_seed * 6.28318530718);
         gl_FragColor = vec4(col, 1.0);
       }
     `
@@ -314,6 +323,7 @@ function shaderFragment(preset: ShaderParams['preset']): string {
       vec3 col = mix(c1, c2, 0.5 + 0.5 * n + n3 * 0.15);
       col = mix(col, c3, smoothstep(0.3, 0.8, n2) * 0.45);
       col = mix(col, c4, smoothstep(0.6, 0.95, n2) * 0.25);
+      col = hueRotate(col, u_seed * 6.28318530718);
       gl_FragColor = vec4(col, 1.0);
     }
   `
@@ -328,20 +338,18 @@ export function createPatternBg(params: PatternParams, canvas?: HTMLCanvasElemen
 
 function createDots(params: PatternParams, canvas?: HTMLCanvasElement): { canvas: HTMLCanvasElement; stop: () => void; snapshot: () => string } {
   const c = canvas ?? createCanvas()
-  fitCanvas(c)
+  fitLiveCanvas(c)
   const g = c.getContext('2d', { alpha: false })!
-  const rng = createRng(Math.round(params.density * 1000 + params.scale * 100))
+  const rng = createRng(params.seed)
   const dark = rng() < 0.5
   const baseHue = Math.round(rng() * 360)
-  const spacing = Math.max(24, 140 * params.scale / (0.25 + params.density))
-  const dots: { bx: number; by: number; r: number; hue: number; sat: number; lit: number; phase: number; speed: number }[] = []
-  const cols = Math.ceil(window.innerWidth / spacing) + 1
-  const rows = Math.ceil(window.innerHeight / spacing) + 1
-  for (let y = 0; y < rows; y++) {
-    for (let x = 0; x < cols; x++) {
+  const spacing = Math.max(26, 150 * params.scale / (0.25 + params.density))
+  const dots: { cx: number; cy: number; r: number; hue: number; sat: number; lit: number; phase: number; speed: number }[] = []
+  for (let y = 0; y < 8; y++) {
+    for (let x = 0; x < 8; x++) {
       dots.push({
-        bx: (x + 0.5) * spacing, by: (y + 0.5) * spacing,
-        r: spacing * 0.18 * params.scale * (0.6 + rng() * 0.7),
+        cx: x / 7, cy: y / 7,
+        r: spacing * 0.16 * params.scale * (0.6 + rng() * 0.7),
         hue: (baseHue + rng() * 80) % 360,
         sat: Math.round(35 + rng() * 55),
         lit: dark ? Math.round(30 + rng() * 35) : Math.round(55 + rng() * 30),
@@ -351,36 +359,31 @@ function createDots(params: PatternParams, canvas?: HTMLCanvasElement): { canvas
     }
   }
   let t = 0
-  let running = true
-  const render = () => {
-    if (!running) return
-    fitCanvas(c)
+  const draw = () => {
+    fitLiveCanvas(c)
     const w = c.width, h = c.height
-    const dpr = w / window.innerWidth
     g.fillStyle = dark ? '#0a0b0d' : '#f6f7f9'
     g.fillRect(0, 0, w, h)
     for (const d of dots) {
       const pulse = 0.75 + 0.35 * Math.sin(t * d.speed + d.phase)
-      const r = d.r * pulse * dpr
-      const x = d.bx * dpr
-      const y = d.by * dpr + Math.sin(t * d.speed * 0.5 + d.phase) * 4 * dpr
+      const r = Math.max(1, d.r * pulse)
+      const x = d.cx * w + (d.r * 0.3) * Math.sin(t * d.speed * 0.5 + d.phase)
+      const y = d.cy * h + (d.r * 0.3) * Math.cos(t * d.speed * 0.7 + d.phase)
       g.beginPath()
-      g.arc(x, y, Math.max(1, r), 0, Math.PI * 2)
+      g.arc(x, y, r, 0, Math.PI * 2)
       g.fillStyle = `hsla(${d.hue},${d.sat}%,${d.lit}%,${(0.18 + 0.25 * pulse).toFixed(2)})`
       g.fill()
     }
-    t += 0.016
-    requestAnimationFrame(render)
+    t += 0.032
   }
-  requestAnimationFrame(render)
-  return { canvas: c, stop: () => { running = false }, snapshot: () => c.toDataURL('image/jpeg', 0.94) }
+  return { canvas: c, ...newRaf(c, draw), snapshot: () => c.toDataURL('image/jpeg', 0.94) }
 }
 
 function createWaves(params: PatternParams, canvas?: HTMLCanvasElement): { canvas: HTMLCanvasElement; stop: () => void; snapshot: () => string } {
   const c = canvas ?? createCanvas()
-  fitCanvas(c)
+  fitLiveCanvas(c)
   const g = c.getContext('2d', { alpha: false })!
-  const rng = createRng(Math.round(params.density * 1000 + params.scale * 100))
+  const rng = createRng(params.seed)
   const dark = rng() < 0.5
   const hue = Math.round(rng() * 360)
   const layers = Math.round(5 + params.density * 8)
@@ -389,7 +392,7 @@ function createWaves(params: PatternParams, canvas?: HTMLCanvasElement): { canva
     waves.push({
       yBase: 0.25 + (i / layers) * 0.55,
       amp: (25 + rng() * 45) * params.scale,
-      freq: (0.004 + rng() * 0.008) / params.scale,
+      freq: (0.006 + rng() * 0.01) / params.scale,
       phase: rng() * Math.PI * 2,
       speed: (0.3 + rng() * 0.7) * (rng() < 0.5 ? 1 : -1),
       hue: (hue + i * 12) % 360,
@@ -399,17 +402,15 @@ function createWaves(params: PatternParams, canvas?: HTMLCanvasElement): { canva
     })
   }
   let t = 0
-  let running = true
-  const render = () => {
-    if (!running) return
-    fitCanvas(c)
+  const draw = () => {
+    fitLiveCanvas(c)
     const w = c.width, h = c.height
     g.fillStyle = dark ? '#07080a' : '#f8f9fb'
     g.fillRect(0, 0, w, h)
     for (const wave of waves) {
       g.beginPath()
       g.moveTo(0, h)
-      for (let x = 0; x <= w; x += Math.max(4, Math.floor(w / 300))) {
+      for (let x = 0; x <= w; x += Math.max(6, Math.floor(w / 180))) {
         const y = h * wave.yBase
           + Math.sin(x * wave.freq + wave.phase + t * wave.speed) * wave.amp
           + Math.sin(x * wave.freq * 2.1 + wave.phase * 1.3 - t * wave.speed * 1.5) * wave.amp * 0.5
@@ -420,22 +421,20 @@ function createWaves(params: PatternParams, canvas?: HTMLCanvasElement): { canva
       g.fillStyle = `hsla(${wave.hue},${wave.sat}%,${wave.lit}%,${wave.alpha.toFixed(2)})`
       g.fill()
     }
-    t += 0.016
-    requestAnimationFrame(render)
+    t += 0.032
   }
-  requestAnimationFrame(render)
-  return { canvas: c, stop: () => { running = false }, snapshot: () => c.toDataURL('image/jpeg', 0.94) }
+  return { canvas: c, ...newRaf(c, draw), snapshot: () => c.toDataURL('image/jpeg', 0.94) }
 }
 
 function createLowPoly(params: PatternParams, canvas?: HTMLCanvasElement): { canvas: HTMLCanvasElement; stop: () => void; snapshot: () => string } {
   const c = canvas ?? createCanvas()
-  fitCanvas(c)
+  fitLiveCanvas(c)
   const g = c.getContext('2d', { alpha: false })!
-  const rng = createRng(Math.round(params.density * 1000 + params.scale * 100))
+  const rng = createRng(params.seed)
   const dark = rng() < 0.5
   const hue = Math.round(rng() * 360)
   const cols = Math.round(10 + params.density * 20)
-  const rows = Math.max(6, Math.round(cols * window.innerHeight / window.innerWidth))
+  const rows = Math.max(6, Math.round(cols * 0.65))
   const points: { x: number; y: number; dx: number; dy: number; speed: number }[][] = []
   for (let y = 0; y <= rows; y++) {
     const row: { x: number; y: number; dx: number; dy: number; speed: number }[] = []
@@ -443,7 +442,7 @@ function createLowPoly(params: PatternParams, canvas?: HTMLCanvasElement): { can
       row.push({
         x: x / cols, y: y / rows,
         dx: (rng() - 0.5) * 0.02, dy: (rng() - 0.5) * 0.02,
-        speed: 0.2 + rng() * 0.5,
+        speed: 0.3 + rng() * 0.5,
       })
     }
     points.push(row)
@@ -451,26 +450,29 @@ function createLowPoly(params: PatternParams, canvas?: HTMLCanvasElement): { can
   const cells: { y: number; x: number; hue: number; sat: number; lit: number; phase: number }[] = []
   for (let y = 0; y < rows; y++) {
     for (let x = 0; x < cols; x++) {
-      cells.push({ y, x, hue: (hue + rng() * 60) % 360, sat: Math.round(35 + rng() * 40), lit: dark ? Math.round(12 + rng() * 35) : Math.round(65 + rng() * 25), phase: rng() * Math.PI * 2 })
+      cells.push({ y, x, hue: (hue + rng() * 60) % 360, sat: Math.round(35 + rng() * 40), lit: dark ? Math.round(12 + rng() * 35) : Math.round(65 - rng() * 10), phase: rng() * Math.PI * 2 })
     }
   }
   let t = 0
-  let running = true
-  const render = () => {
-    if (!running) return
-    fitCanvas(c)
+  const px: { x: number; y: number }[][] = points.map(row => row.map(() => ({ x: 0, y: 0 })))
+  const draw = () => {
+    fitLiveCanvas(c)
     const w = c.width, h = c.height
     g.fillStyle = dark ? '#08090c' : '#f5f6f8'
     g.fillRect(0, 0, w, h)
-    const px = points.map(row => row.map(p => ({
-      x: (p.x + Math.sin(t * p.speed + p.dx * 100) * p.dx) * w,
-      y: (p.y + Math.cos(t * p.speed + p.dy * 100) * p.dy) * h,
-    })))
+    for (let y = 0; y <= rows; y++) {
+      const row = points[y]!
+      const out = px[y]!
+      for (let x = 0; x <= cols; x++) {
+        const p = row[x]!
+        out[x]!.x = (p.x + Math.sin(t * p.speed + p.dx * 100) * p.dx) * w
+        out[x]!.y = (p.y + Math.cos(t * p.speed + p.dy * 100) * p.dy) * h
+      }
+    }
     for (const cell of cells) {
       const p1 = px[cell.y]![cell.x]!, p2 = px[cell.y]![cell.x + 1]!, p3 = px[cell.y + 1]![cell.x]!, p4 = px[cell.y + 1]![cell.x + 1]!
       const cx = (p1.x + p2.x + p3.x) / 3 / w
-      const litShift = Math.sin(t * 0.4 + cell.phase) * 6
-      const lit = Math.max(0, Math.min(100, cell.lit + litShift))
+      const lit = Math.max(0, Math.min(100, cell.lit + Math.sin(t * 0.6 + cell.phase) * 6))
       g.beginPath(); g.moveTo(p1.x, p1.y); g.lineTo(p2.x, p2.y); g.lineTo(p3.x, p3.y); g.closePath()
       g.fillStyle = `hsla(${cell.hue + cx * 40},${cell.sat}%,${lit}%,0.92)`
       g.fill()
@@ -478,11 +480,9 @@ function createLowPoly(params: PatternParams, canvas?: HTMLCanvasElement): { can
       g.fillStyle = `hsla(${(cell.hue + cx * 40 + 12) % 360},${cell.sat}%,${Math.max(0, lit - 4)}%,0.92)`
       g.fill()
     }
-    t += 0.012
-    requestAnimationFrame(render)
+    t += 0.03
   }
-  requestAnimationFrame(render)
-  return { canvas: c, stop: () => { running = false }, snapshot: () => c.toDataURL('image/jpeg', 0.94) }
+  return { canvas: c, ...newRaf(c, draw), snapshot: () => c.toDataURL('image/jpeg', 0.94) }
 }
 
 // ── Dispatcher ────────────────────────────────────────────────────────────────
@@ -492,20 +492,25 @@ export function createDynamicBackground(params: GeneratedBgParams, canvas?: HTML
   return createPatternBg(params, canvas)
 }
 
-/** Build default params for a newly selected background type. */
-export function defaultParamsFor(type: Exclude<GeneratedBgParams['type'], 'image'>): GeneratedBgParams {
-  if (type === 'mesh') return { type: 'mesh', seed: Math.floor(Math.random() * 1000000), scale: 1.1, intensity: 0.65 }
-  if (type === 'shader') return { type: 'shader', preset: 'aurora', speed: 0.35, scale: 1 }
-  return { type: 'pattern', preset: 'dots', density: 0.5, scale: 1 }
+function randomSeed(): number {
+  return Math.floor(Math.random() * 0x7fffffff)
 }
 
-// ── Static snapshot fallback (used for export/preview when a canvas is not mounted) ─
-const RENDER_W = 1920
-const RENDER_H = Math.round(RENDER_W * 9 / 16)
+/** Build default params for a newly selected background type. */
+export function defaultParamsFor(type: Exclude<GeneratedBgParams['type'], 'image'>): GeneratedBgParams {
+  if (type === 'mesh') return { type: 'mesh', seed: randomSeed(), scale: 1.1, intensity: 0.65 }
+  if (type === 'shader') return { type: 'shader', preset: 'aurora', speed: 0.35, scale: 1, seed: randomSeed() }
+  return { type: 'pattern', preset: 'dots', density: 0.5, scale: 1, seed: randomSeed() }
+}
+
+// ── Static snapshot helpers ───────────────────────────────────────────────────
+const STATIC_W = 1280
+const STATIC_H = Math.round(STATIC_W * 9 / 16)
 
 function createStaticCanvas(): HTMLCanvasElement {
   const c = document.createElement('canvas')
-  c.width = RENDER_W; c.height = RENDER_H
+  c.width = STATIC_W; c.height = STATIC_H
+  c.dataset.dshAnyStatic = '1'
   return c
 }
 

@@ -1,11 +1,13 @@
-import { rWp, rBgState, rBl, rWop, rOps, rSop, rColor, rBlurs, rPalette, setPalette, cfg, setWpUrl, setBgState, DEFAULT_CONFIG } from './state'
+import { rWp, rWpImage, rBgState, rBl, rWop, rOps, rSop, rColor, rHasColor, rBlurs, cfg, setWpUrl, rBgDark, setBgDark } from './state'
 import type { BackgroundType, GeneratedBgParams, PartOpacities, PartBlurs } from './types'
-import { genTokens, toRgba, extractWallpaperPalette, paletteFromHsl } from './utils/color'
+import { genTokens, toRgba, extractWallpaperColor, analyzeFrameDark } from './utils/color'
 import { createDynamicBackground, defaultParamsFor } from './utils/bg-generators'
 
 let wpEl: HTMLDivElement | null = null
 let appliedTokenNames: string[] = []
 let wpController: { canvas: HTMLCanvasElement; stop: () => void; snapshot: () => string } | null = null
+let snapshotListener: (() => void) | null = null
+let tokenStyleEl: HTMLStyleElement | null = null
 
 function clearDynamicBg(): void {
   wpController?.stop()
@@ -13,7 +15,22 @@ function clearDynamicBg(): void {
   wpController = null
 }
 
+/** Register a callback fired once a generated snapshot is ready (so the caller
+ *  can re-sync the settings preview / store). */
+export function onGeneratedSnapshot(cb: () => void): void {
+  snapshotListener = cb
+}
+
+function ensureTokenStyle(): HTMLStyleElement {
+  if (tokenStyleEl?.isConnected) return tokenStyleEl
+  tokenStyleEl = document.createElement('style')
+  tokenStyleEl.dataset.plugin = 'dsh-any-background-tokens'
+  document.head.appendChild(tokenStyleEl)
+  return tokenStyleEl
+}
+
 function clearCustomTokens(): void {
+  if (tokenStyleEl) tokenStyleEl.textContent = ''
   for (const name of appliedTokenNames) document.body.style.removeProperty(name)
   appliedTokenNames = []
 }
@@ -27,25 +44,61 @@ function clearCustomTokens(): void {
  * brand) is written verbatim. No reads: nothing can observe a stale or reset
  * theme value and leave the homepage on the system color.
  */
+/** Label tokens flipped by the generated-background brightness verdict. */
+const LABEL_TOKENS = [
+  '--dsw-alias-label-primary',
+  '--dsw-alias-label-secondary',
+  '--dsw-alias-label-tertiary',
+  '--dsw-alias-label-caption',
+  '--dsw-alias-label-dimmed',
+  '--dsw-alias-label-quaternary',
+]
+
 export function applyCustomTokens(ops: PartOpacities): void {
   const [h, s, l] = rColor()
-  const { tokens } = genTokens(h, s, l, rPalette())
-  clearCustomTokens()
-  // Drive the base-palette switch ourselves so tokens the plugin does not
-  // override (the input surface, masks, static tokens) follow the picked
-  // color's dark/light scheme even while the theme service preference is
-  // being adopted/reset.
-  // Use a plugin-specific value so the gradient rule does not accidentally
-  // match a dark-mode flag set by the host harness.
-  if (l < 0.55) document.body.setAttribute('data-ds-dark-theme', 'dsh-any-background')
-  else document.body.removeAttribute('data-ds-dark-theme')
-  for (const [name, value] of Object.entries(tokens)) {
-    let v = value
-    if (name === '--dsw-alias-bg-base') v = toRgba(value, ops.bg)
-    else if (name === '--dsw-specific-sidebar-fill') v = toRgba(value, ops.sidebar)
-    else if (name === '--dsw-alias-bg-layer-1' || name === '--dsw-alias-bg-layer-2' || name === '--dsw-alias-bg-layer-3') v = toRgba(value, ops.card)
-    document.body.style.setProperty(name, v)
-    appliedTokenNames.push(name)
+  let { tokens } = genTokens(h, s, l)
+  try {
+    // A generated background carries its own brightness verdict (analyzed once
+    // per switch from a captured frame — never per-frame). It overrides ONLY
+    // the font direction (dark frame → white labels, light frame → black) so
+    // text stays readable over the animated background; every other token
+    // keeps following the picked color. genTokens' result is cached and shared,
+    // so clone before overriding.
+    const dark = rBgDark()
+    if (dark !== null) {
+      tokens = { ...tokens }
+      const font = dark ? '#fff' : '#000'
+      for (const name of LABEL_TOKENS) tokens[name] = font
+    }
+    // Drive the base-palette switch ourselves so tokens the plugin does not
+    // override (the input surface, masks, static tokens) follow the picked
+    // color's dark/light scheme even while the theme service preference is
+    // being adopted/reset.
+    // Use a plugin-specific value so the gradient rule does not accidentally
+    // match a dark-mode flag set by the host harness.
+    if (dark ?? l < 0.55) document.body.setAttribute('data-ds-dark-theme', 'dsh-any-background')
+    else document.body.removeAttribute('data-ds-dark-theme')
+    // Write the tokens as a stylesheet rule with !important instead of inline
+    // on body. The host's theme presenter clears body inline styles when it
+    // adopts a built-in preference (observed on boot), which wipes inline
+    // tokens for ~150ms and flashes the interface back to the system palette.
+    // A stylesheet rule survives that clearing and, being !important, also
+    // outranks the host's own non-important inline token writes.
+    const decls: string[] = []
+    for (const [name, value] of Object.entries(tokens)) {
+      let v = value
+      if (name === '--dsw-alias-bg-base') v = toRgba(value, ops.bg)
+      else if (name === '--dsw-specific-sidebar-fill') v = toRgba(value, ops.sidebar)
+      else if (name === '--dsw-alias-bg-layer-1' || name === '--dsw-alias-bg-layer-2' || name === '--dsw-alias-bg-layer-3') v = toRgba(value, ops.card)
+      decls.push(`${name}:${v}!important`)
+    }
+    ensureTokenStyle().textContent = `body{${decls.join(';')}}`
+    // Drop any inline tokens left by earlier builds so the stylesheet is the
+    // single source of truth.
+    for (const name of appliedTokenNames) document.body.style.removeProperty(name)
+    appliedTokenNames = Object.keys(tokens)
+  } catch (e) {
+    // ignore
   }
 }
 
@@ -67,11 +120,13 @@ export function applySettingsOverrides(op: number): void {
     document.documentElement.style.removeProperty('--dsh-any-bg-settings-surface')
     return
   }
+  // No saved color → the panel keeps the host surface; nothing to tint.
+  if (!rHasColor()) return
   // Derive the panel surface from the saved color's layer-2 token (not a
   // computed-style read), so the settings panel matches the homepage tint
   // without depending on the presenter or theme state.
   const [h, s, l] = rColor()
-  const layer2 = genTokens(h, s, l, rPalette()).tokens['--dsw-alias-bg-layer-2']
+  const layer2 = genTokens(h, s, l).tokens['--dsw-alias-bg-layer-2']
   if (layer2 !== undefined) {
     document.documentElement.style.setProperty('--dsh-any-bg-settings-surface', toRgba(layer2, op))
   }
@@ -79,19 +134,35 @@ export function applySettingsOverrides(op: number): void {
 
 // ── Generated backgrounds & palette refresh ───────────────────────────────────
 
-/** Derive a Material-You-style palette from the current wallpaper/color and
- *  re-apply so the generated tokens pick it up. Called whenever the wallpaper
- *  source changes (image upload, generated bg switch/regeneration). */
+/** Apply only the wallpaper layer (position, scale, opacity, blur) without
+ *  touching the theme color palette. Used when generated background parameters
+ *  change so the visual keeps updating without shifting the picked theme color. */
+function applyWallpaper(): void {
+  applyWp()
+}
+
+/** Re-apply the current theme/wallpaper state. Since genTokens now derives
+ *  everything directly from the saved HSL pick, no palette refresh is needed. */
 export function refreshPaletteAndApply(): void {
+  applyWp()
+}
+
+/** Apply the theme color. If the user has an explicit saved pick we use it
+ *  directly; otherwise we fall back to extracting a dominant color from the
+ *  current wallpaper (one HSL sample, no palette), so new uploads still get a
+ *  matching theme automatically. */
+export function applyThemeColor(): void {
+  if (rHasColor()) {
+    applyWp()
+    return
+  }
   const url = rWp()
-  const color = rColor()
   if (url) {
-    void extractWallpaperPalette(url, rBgState()).then(palette => {
-      setPalette(palette ?? paletteFromHsl(color))
+    void extractWallpaperColor(url, rBgState()).then(hsl => {
+      if (hsl) cfg.color = hsl
       applyWp()
     })
   } else {
-    setPalette(paletteFromHsl(color))
     applyWp()
   }
 }
@@ -101,28 +172,44 @@ export function refreshPaletteAndApply(): void {
 export function setBackgroundType(type: BackgroundType): void {
   cfg.backgroundType = type
   if (type === 'image') {
-    // Keep the existing image URL (or null) as-is; remove any live canvas.
+    // Restore the previously uploaded image (it is retained separately), remove
+    // the live canvas, and point the display URL back at the image. The
+    // generated-background brightness verdict no longer applies.
     clearDynamicBg()
-    refreshPaletteAndApply()
+    setBgDark(null)
+    setWpUrl(rWpImage())
+    applyThemeColor()
     return
   }
-  cfg.generatedBg = defaultParamsFor(type)
-  setBgState({ ...DEFAULT_CONFIG.bgState })
+  // If we already have params for this generated type, keep them so switching
+  // between generated sub-types does not wipe user adjustments.
+  if (!cfg.generatedBg || cfg.generatedBg.type !== type) {
+    cfg.generatedBg = defaultParamsFor(type)
+  }
   applyGeneratedBg(cfg.generatedBg)
 }
 
-/** Regenerate the current generated background from its saved parameters. */
+function randomSeed(): number {
+  return Math.floor(Math.random() * 0x7fffffff)
+}
+
+/** Regenerate the current generated background with a new visual seed while
+ *  preserving the user's scale/intensity/speed/density/preset choices. */
 export function regenerateGeneratedBg(): void {
   const params = cfg.generatedBg
   if (!params || cfg.backgroundType === 'image') return
-  applyGeneratedBg(params)
+  const next: GeneratedBgParams =
+    params.type === 'mesh'
+      ? { ...params, seed: randomSeed() }
+      : { ...params, seed: randomSeed() }
+  cfg.generatedBg = next
+  applyGeneratedBg(next)
 }
 
 /** Update a generated background's parameters and re-render. */
 export function updateGeneratedBg(params: GeneratedBgParams): void {
   cfg.backgroundType = params.type
   cfg.generatedBg = params
-  setBgState({ ...DEFAULT_CONFIG.bgState })
   applyGeneratedBg(params)
 }
 
@@ -134,22 +221,65 @@ function applyGeneratedBg(params: GeneratedBgParams): void {
     wpEl.style.backgroundImage = 'none'
     wpEl.appendChild(wpController.canvas)
   }
-  // Snapshot is used by the settings preview, color picker and extraction.
-  setWpUrl(wpController.snapshot())
-  refreshPaletteAndApply()
+  // The canvas paints its first frame on the next animation tick; only then is
+  // the snapshot meaningful for the settings preview and color picker. Capture
+  // it after that frame and re-sync dependents. Do NOT refresh the palette here:
+  // generated backgrounds should not overwrite the user's picked theme color.
+  requestAnimationFrame(() => {
+    if (!wpController) return
+    const controller = wpController
+    const frame = controller.snapshot()
+    setWpUrl(frame)
+    applyWallpaper()
+    snapshotListener?.()
+    // One-shot brightness verdict from the just-captured frame: decode +
+    // average luma on a 32×32 canvas, then flip the font direction. Runs only
+    // on switches — never in the animation loop — so there is zero per-frame
+    // cost. While pending, the picked color's lightness keeps deciding fonts.
+    setBgDark(null)
+    void analyzeFrameDark(frame).then(dark => {
+      if (dark === null || wpController !== controller) return
+      setBgDark(dark)
+      applyCustomTokens(rOps())
+    })
+  })
 }
 
 // ── Per-part interface blur ───────────────────────────────────────────────────
 // The three-column AppFrame (ui-layout) styles its columns with hashed
 // CSS-module classes, so the parts are located structurally instead: the shell
 // overlay carries a stable data attribute, and the sidebar/center/details
-// columns are its three preceding siblings inside the frame. The frame fills
-// the viewport (html/body/#root are 100% tall), so making it a backdrop root
-// does not move or clip the fixed settings overlay it contains.
+// columns are its three preceding siblings inside the frame.
+//
+// backdrop-filter must NEVER be written directly onto a host part: any element
+// with a non-none backdrop-filter becomes the containing block for its
+// fixed-positioned descendants, and the host mounts the settings dialog inside
+// the AppFrame subtree (observed inside the sidebar column) — a direct blur
+// would lock that fixed dialog into the column box ("settings window stuck in
+// the sidebar"). Each blurred part instead carries an isolated ::before
+// underlay that holds the backdrop-filter, so the part itself never traps
+// fixed-positioned host UI.
 let frameEl: HTMLElement | null = null
 let sidebarEl: HTMLElement | null = null
 let centerEl: HTMLElement | null = null
 let detailsEl: HTMLElement | null = null
+
+const PART_BLUR_CLASS = 'dab-part-blur'
+const PART_UNDERLAY_CLASS = 'dab-part-underlay'
+const PART_BLUR_RULE =
+  `${PART_BLUR_CLASS}{isolation:isolate}` +
+  `.${PART_UNDERLAY_CLASS}{position:absolute;inset:0;z-index:-1;pointer-events:none;border-radius:inherit;` +
+  `backdrop-filter:var(--dsh-any-part-blur,none);-webkit-backdrop-filter:var(--dsh-any-part-blur,none)}`
+
+let partBlurStyleEl: HTMLStyleElement | null = null
+
+function ensurePartBlurStyle(): void {
+  if (partBlurStyleEl?.isConnected) return
+  partBlurStyleEl = document.createElement('style')
+  partBlurStyleEl.dataset.plugin = 'dsh-any-background-parts'
+  partBlurStyleEl.textContent = PART_BLUR_RULE
+  document.head.appendChild(partBlurStyleEl)
+}
 
 function discoverParts(): void {
   const overlay = document.querySelector<HTMLElement>('[data-shell-overlay]')
@@ -165,8 +295,32 @@ function discoverParts(): void {
 
 function setBlur(el: HTMLElement | null, px: number): void {
   if (el === null) return
-  if (px > 0) el.style.backdropFilter = `blur(${px}px)`
-  else el.style.removeProperty('backdrop-filter')
+  const underlay = el.querySelector<HTMLDivElement>(`:scope > .${PART_UNDERLAY_CLASS}`)
+  if (px > 0) {
+    ensurePartBlurStyle()
+    // The underlay is position:absolute and needs a positioned host: static
+    // columns get relative (a layout no-op for flex items) that is restored on
+    // clear; parts the host already positions keep their own scheme.
+    if (!el.classList.contains(PART_BLUR_CLASS) && getComputedStyle(el).position === 'static') {
+      el.style.position = 'relative'
+      el.setAttribute('data-dab-pos-patched', '1')
+    }
+    el.classList.add(PART_BLUR_CLASS)
+    if (underlay === null) {
+      const node = document.createElement('div')
+      node.className = PART_UNDERLAY_CLASS
+      el.prepend(node)
+    }
+    el.style.setProperty('--dsh-any-part-blur', `blur(${px}px)`)
+  } else {
+    el.classList.remove(PART_BLUR_CLASS)
+    el.style.removeProperty('--dsh-any-part-blur')
+    underlay?.remove()
+    if (el.getAttribute('data-dab-pos-patched') === '1') {
+      el.style.removeProperty('position')
+      el.removeAttribute('data-dab-pos-patched')
+    }
+  }
 }
 
 function applySettingsBlur(px: number): void {
@@ -224,8 +378,14 @@ function applyImageWp(url: string): void {
   clearDynamicBg()
   ensureWpContainer()
   const bg = rBgState()
-  wpEl!.style.backgroundImage = `url("${url}")`
-  wpEl!.style.backgroundRepeat = 'no-repeat'
+  const next = `url("${url}")`
+  // Skip re-setting the background image when it is already in place. Re-setting
+  // the same data URL makes the browser re-decode the image, which flashes the
+  // wallpaper blank for a frame on boot re-applies.
+  if (wpEl!.style.backgroundImage !== next) {
+    wpEl!.style.backgroundImage = next
+    wpEl!.style.backgroundRepeat = 'no-repeat'
+  }
   if (bg.iw > 0) {
     // Saved placement: contain-fit at zoom with the image CENTER pinned to
     // the committed fractional viewport point (x, y are center fractions,
@@ -273,15 +433,25 @@ export function applyWp(): void {
   }
   // Theme color + per-part opacities: write the full token set inline
   // (self-contained), then the settings panel surface + per-part blur.
-  applyCustomTokens(rOps())
-  applySettingsOverrides(rSop())
+  // Only write tokens when there is a color to derive them from (a saved pick,
+  // or a generated background whose brightness verdict is known). On boot the
+  // persisted state has not loaded yet, so rColor() falls back to the default
+  // blue and would flash the whole interface before the saved color lands.
+  if (rHasColor() || rBgDark() !== null) {
+    applyCustomTokens(rOps())
+  }
+  if (rHasColor()) {
+    applySettingsOverrides(rSop())
+  }
   applyPartBlurs(rBlurs())
 }
 
 export function teardownWp(): void {
   clearDynamicBg()
+  setBgDark(null)
   wpEl?.remove(); wpEl = null
   clearCustomTokens()
+  tokenStyleEl?.remove(); tokenStyleEl = null
   document.documentElement.style.removeProperty('--dsh-any-bg-settings-surface')
   document.documentElement.style.removeProperty('--dsh-any-blur-settings')
   setBlur(frameEl, 0); setBlur(sidebarEl, 0); setBlur(centerEl, 0); setBlur(detailsEl, 0)

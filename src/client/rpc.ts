@@ -1,5 +1,5 @@
 import type { RpcResultLike } from './types'
-import { cfg, adoptConfig, setWpUrl } from './state'
+import { cfg, adoptConfig, setWpUrl, setWpImageUrl } from './state'
 
 export const RPC_CHANNEL = '/dsh-any-background'
 const RPC_NS = 'dshAnyBackground'
@@ -59,8 +59,12 @@ export async function loadPersisted(): Promise<void> {
   if (data && typeof data === 'object') {
     const d = data as { config?: unknown; wallpaper?: unknown }
     if (d.config) adoptConfig(d.config)
-    if (typeof d.wallpaper === 'string') setWpUrl(d.wallpaper)
-    else if (d.wallpaper === null) setWpUrl(null)
+    // The uploaded image is always its own slot so switching background types
+    // never discards it. When in image mode the caller points wpUrl at it.
+    if (typeof d.wallpaper === 'string') setWpImageUrl(d.wallpaper)
+    else if (d.wallpaper === null) setWpImageUrl(null)
+    // The display URL is determined by the active type; if image mode, restore it.
+    if (cfg.backgroundType === 'image') setWpUrl(d.wallpaper === null ? null : d.wallpaper as string | null)
   }
 }
 

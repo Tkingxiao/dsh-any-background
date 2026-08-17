@@ -38,8 +38,8 @@ interface PartBlurs {
 type BackgroundType = 'image' | 'mesh' | 'shader' | 'pattern'
 type GeneratedBgParams =
   | { type: 'mesh'; seed: number; scale: number; intensity: number }
-  | { type: 'shader'; preset: 'aurora' | 'nebula' | 'noise'; speed: number; scale: number }
-  | { type: 'pattern'; preset: 'dots' | 'waves' | 'poly'; density: number; scale: number }
+  | { type: 'shader'; preset: 'aurora' | 'nebula' | 'noise'; speed: number; scale: number; seed: number }
+  | { type: 'pattern'; preset: 'dots' | 'waves' | 'poly'; density: number; scale: number; seed: number }
 
 interface ThemeConfig {
   /** Saved HSL theme color; null means "use the system theme". */
@@ -60,6 +60,8 @@ interface ThemeConfig {
   backgroundType: BackgroundType
   /** Parameters for generated backgrounds (not used for images). */
   generatedBg: GeneratedBgParams | null
+  /** Whether to regenerate generated backgrounds on page reload. */
+  regenerateOnReload: boolean
 }
 
 const DEFAULT_CONFIG: ThemeConfig = {
@@ -72,6 +74,7 @@ const DEFAULT_CONFIG: ThemeConfig = {
   bgState: { zoom: 1, x: 0, y: 0, iw: 0, ih: 0 },
   backgroundType: 'image',
   generatedBg: null,
+  regenerateOnReload: false,
 }
 
 const dataDir = (): string => dshHomePath(DATA_DIR)
@@ -132,6 +135,7 @@ function normalizeConfig(raw: unknown): ThemeConfig {
     },
     backgroundType: bgType,
     generatedBg,
+    regenerateOnReload: typeof r.regenerateOnReload === 'boolean' ? r.regenerateOnReload : DEFAULT_CONFIG.regenerateOnReload,
   }
 }
 
@@ -150,6 +154,7 @@ function normalizeGeneratedBg(p: GeneratedBgParams): GeneratedBgParams | null {
       preset: ['aurora', 'nebula', 'noise'].includes(p.preset) ? p.preset : 'aurora',
       speed: clamp(p.speed, 0, 2, 0.3),
       scale: clamp(p.scale, 0.3, 3, 1),
+      seed: typeof p.seed === 'number' ? Math.floor(p.seed) : 0,
     }
   }
   if (p.type === 'pattern') {
@@ -158,6 +163,7 @@ function normalizeGeneratedBg(p: GeneratedBgParams): GeneratedBgParams | null {
       preset: ['dots', 'waves', 'poly'].includes(p.preset) ? p.preset : 'dots',
       density: clamp(p.density, 0, 1, 0.5),
       scale: clamp(p.scale, 0.3, 3, 1),
+      seed: typeof p.seed === 'number' ? Math.floor(p.seed) : 0,
     }
   }
   return null

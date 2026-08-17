@@ -17,16 +17,16 @@
  *   rpc.ts         file-backed persistence over the /dsh-any-background channel
  *   wallpaper.ts   wallpaper DOM layer + inline token writes
  *   utils/         color math, token generation, image compression
- *   components/    ColorWheel, BgEditor, LiveSlider, ThemeSection
+ *   components/    ThemeSection shell + pages/, ColorWheel, BgEditor, LiveSlider
  *   i18n.ts        zh/en dictionaries
- *   styles.ts      shared inline styles
+ *   ui.css.ts      scoped design-system stylesheet (classes + keyframes)
  */
 import { defineStore } from '@deepseek-ai/dsh-client-runtime/client'
-import type { Ctx, RpcResultLike, BoundActions, ThemeSectionProps, PartOpacities, PartBlurs } from './types'
+import type { Ctx, RpcResultLike, BoundActions, ThemeSectionProps, PartOpacities, PartBlurs, BackgroundType, GeneratedBgParams } from './types'
 import { NS, zh, en } from './i18n'
-import { cfg, rHasColor, rColor, rWp, rBgState, setWpUrl, setBgState, adoptConfig, DEFAULT_CONFIG } from './state'
+import { cfg, rHasColor, rColor, rWp, rBgState, setWpUrl, setWpImageUrl, setBgState, adoptConfig, DEFAULT_CONFIG, setBgDark } from './state'
 import { RPC_CHANNEL, initRpc, saveConfig, flushSave, loadPersisted, persistWallpaper, persistConfig } from './rpc'
-import { applyWp, teardownWp, applySettingsOverrides, SETTINGS_STYLE_RULE, watchParts, regenerateGeneratedBg, setBackgroundType, updateGeneratedBg, refreshPaletteAndApply } from './wallpaper'
+import { applyWp, teardownWp, applySettingsOverrides, SETTINGS_STYLE_RULE, watchParts, regenerateGeneratedBg, setBackgroundType, updateGeneratedBg, applyThemeColor, onGeneratedSnapshot } from './wallpaper'
 import { genTokens, hslToHsv, hsvToHsl, extractWallpaperColor } from './utils/color'
 import { ThemeSection } from './components/ThemeSection'
 import { SUN_PATHS } from './components/icons'
@@ -71,7 +71,10 @@ export function apply(ctx: Ctx): void {
   }
   // Restore saved color on boot.
   if (rHasColor()) registerCustom(initH, initS, initL)
-  ctx.effect(() => () => { customDispose?.() }, 'dsh-any-background: skin dispose')
+  ctx.effect(() => () => {
+    customDispose?.()
+    if (colorTimerRef.current !== null) window.clearTimeout(colorTimerRef.current)
+  }, 'dsh-any-background: skin dispose')
 
   // 2. Gradient CSS (for custom dark themes).
   let styleEl: HTMLStyleElement | undefined
@@ -89,15 +92,36 @@ export function apply(ctx: Ctx): void {
   // 3. State store.
   let rev = 0
   let colorRev = 0
+  let bgRev = 0
+  const colorTimerRef: { current: number | null } = { current: null }
   const store = defineStore({
-    init: () => ({ url: null as string | null, rev: -1, colorRev: -1, color: null as [number, number, number] | null }),
+    init: () => ({
+      url: null as string | null,
+      rev: -1,
+      colorRev: -1,
+      color: null as [number, number, number] | null,
+      backgroundType: cfg.backgroundType,
+      generatedBg: cfg.generatedBg,
+      bgRev: -1,
+      regenerateOnReload: cfg.regenerateOnReload,
+    }),
     actions: {
-      syncBg: (d: any, url: string | null, r: number) => { if (r <= d.rev) return; d.url = url; d.rev = r },
-      syncColor: (d: any, hsv: [number, number, number], r: number) => { if (r <= d.colorRev) return; d.color = hsv; d.colorRev = r },
+      syncBg: (d: any, url: string | null, r: number, bgType?: BackgroundType, genBg?: GeneratedBgParams | null, bgr?: number, reload?: boolean) => {
+        if (r > d.rev) { d.url = url; d.rev = r }
+        if (bgr !== undefined && bgr > d.bgRev) { d.backgroundType = bgType!; d.generatedBg = genBg ?? null; d.bgRev = bgr }
+        if (reload !== undefined) { d.regenerateOnReload = reload }
+      },
+      syncColor: (d: any, hsv: [number, number, number], r: number) => { if (r > d.colorRev) { d.color = hsv; d.colorRev = r } },
     },
   })
   let bound: BoundActions | null = null
-  const syncBg = () => { rev++; bound?.syncBg(rWp(), rev) }
+  const syncBg = () => {
+    rev++; bgRev++
+    bound?.syncBg(rWp(), rev, cfg.backgroundType, cfg.generatedBg, bgRev, cfg.regenerateOnReload)
+  }
+  // When a generated background finishes its first frame, its snapshot becomes
+  // the display/preview URL — re-sync the store so the preview follows.
+  onGeneratedSnapshot(syncBg)
 
   // 4. Wallpaper.
   applyWp(); syncBg()
@@ -115,14 +139,25 @@ export function apply(ctx: Ctx): void {
       const [h, s, l] = rColor()
       registerCustom(h, s, l)
     }
-    // If the user last used a generated background, regenerate the data URL
-    // from the saved parameters (the image itself is not persisted).
+    // If the user last used a generated background, either regenerate it on
+    // reload (when regenerateOnReload is enabled) or reconstruct the same
+    // snapshot from the saved parameters so the wallpaper stays stable.
     if (cfg.backgroundType !== 'image') {
-      regenerateGeneratedBg()
+      if (cfg.regenerateOnReload) {
+        regenerateGeneratedBg()
+      } else if (cfg.generatedBg) {
+        updateGeneratedBg(cfg.generatedBg)
+      }
+      // Persist the normalized config so the seed (and regenerateOnReload flag)
+      // are written back to disk. Old configs created before the seed field
+      // existed will get a deterministic seed=0 saved, so subsequent reloads
+      // are stable without requiring user interaction.
+      persistConfig()
     } else {
-      // For an uploaded image, derive the palette from the wallpaper so the
-      // token colors match it even when no explicit theme color is saved.
-      refreshPaletteAndApply()
+      // Apply the theme color: when a color is saved this synchronously derives
+      // the palette from it (so the saved pick wins); otherwise it falls back
+      // to extracting a palette from the uploaded wallpaper.
+      applyThemeColor()
     }
     syncBg()
     if (rHasColor()) { colorRev++; bound?.syncColor(hslToHsv(...rColor()), colorRev) }
@@ -181,14 +216,22 @@ export function apply(ctx: Ctx): void {
     return {
       t: ctx.locale.bind(NS),
       hue: dh, sat: ds, lit: dv,
-      backgroundType: cfg.backgroundType,
-      generatedBg: cfg.generatedBg,
       setColor: (nh: number, ns: number, nl: number) => {
         const [sh, ss, sl] = hsvToHsl(nh, ns, nl)
         cfg.color = [sh, ss, sl]
-        registerCustom(sh, ss, sl)
-        refreshPaletteAndApply()
-        saveConfig()
+        // Wheel dragging produces a flood of events. Updating the preview UI
+        // (orb/hex/wheel marker) must stay synchronous so it feels instant, but
+        // registering a new theme + writing 40+ CSS variables + persisting the
+        // config is expensive. Debounce that work by 80ms: while the user drags
+        // rapidly we only update in-memory state/UI; once they pause or release
+        // the mouse the theme is applied once.
+        if (colorTimerRef.current !== null) window.clearTimeout(colorTimerRef.current)
+        colorTimerRef.current = window.setTimeout(() => {
+          colorTimerRef.current = null
+          registerCustom(sh, ss, sl)
+          applyWp()
+          saveConfig()
+        }, 80)
         // Keep the wheel's canonical color in the store so programmatic
         // changes (wallpaper extraction) and remounts share one source.
         colorRev++
@@ -196,17 +239,21 @@ export function apply(ctx: Ctx): void {
       },
       setWp: (u: string | null) => {
         cfg.backgroundType = 'image'
+        // Retain the uploaded image in its own slot so switching to a generated
+        // background and back never loses it. persisted to wallpaper.jpg too.
+        // The generated-background brightness verdict stops applying here.
+        setBgDark(null)
+        setWpImageUrl(u)
         setWpUrl(u)
         setBgState({ ...DEFAULT_CONFIG.bgState })
         persistWallpaper(u)
-        refreshPaletteAndApply()
+        applyThemeColor()
         syncBg()
       },
-      setBgType: (type: ThemeSectionProps['backgroundType']) => {
+      setBgType: (type: BackgroundType) => {
         setBackgroundType(type)
-        // Generated backgrounds are reconstructed from params; drop the old
-        // uploaded image from disk so the store does not keep stale wallpaper.jpg.
-        if (type !== 'image') persistWallpaper(null)
+        // Keep the uploaded wallpaper on disk so it can be restored when the
+        // user returns to the image type; it is only removed via setWp(null).
         saveConfig()
         syncBg()
       },
@@ -217,7 +264,16 @@ export function apply(ctx: Ctx): void {
       },
       regenerateBg: () => {
         regenerateGeneratedBg()
-        saveConfig()
+        // Immediate (non-debounced) write so the new seed survives a refresh
+        // fired right after the click.
+        persistConfig()
+        syncBg()
+      },
+      setRegenerateOnReload: (v: boolean) => {
+        cfg.regenerateOnReload = v
+        // Immediate (non-debounced) write: a debounced save can be cut off by
+        // page unload, which would revert the toggle on the next refresh.
+        persistConfig()
         syncBg()
       },
       setOps: (ops: PartOpacities) => { cfg.opacities = ops; applyWp(); syncBg(); saveConfig() },
@@ -234,7 +290,7 @@ export function apply(ctx: Ctx): void {
         if (!hsl) return false
         cfg.color = hsl
         registerCustom(hsl[0], hsl[1], hsl[2])
-        refreshPaletteAndApply()
+        applyWp()
         saveConfig()
         const hsv = hslToHsv(hsl[0], hsl[1], hsl[2])
         colorRev++
@@ -273,13 +329,20 @@ export function apply(ctx: Ctx): void {
           adoptConfig(d.config)
           if (cfg.backgroundType === 'image') {
             const wallpaper = typeof d.wallpaper === 'string' && /^data:image\//.test(d.wallpaper) ? d.wallpaper : null
+            setWpImageUrl(wallpaper)
             setWpUrl(wallpaper)
             persistWallpaper(wallpaper)
-            refreshPaletteAndApply()
+            applyThemeColor()
           } else {
+            setWpImageUrl(null)
             setWpUrl(null)
             persistWallpaper(null)
-            regenerateGeneratedBg()
+            // Reconstruct the imported dynamic background from its saved params.
+            // Import means "restore what I exported", so the seed/params must be
+            // preserved exactly; only regenerate a fresh look when the user has
+            // that preference enabled — mirroring the boot-restore branch.
+            if (cfg.regenerateOnReload) regenerateGeneratedBg()
+            else if (cfg.generatedBg) updateGeneratedBg(cfg.generatedBg)
           }
           persistConfig()
           if (rHasColor()) {
@@ -362,8 +425,17 @@ export function apply(ctx: Ctx): void {
   // wallpaper restore a few ticks later guarantees the saved records land.
   const restoreSaved = (): void => {
     if (rHasColor()) {
-      const [h, s, l] = rColor()
-      registerCustom(h, s, l)
+      const snapshot = ctx.theme.getTheme()
+      if (!snapshot.themes.some(t => t.id === CUSTOM_ID)) {
+        // Theme missing (host adoption dropped it): re-register + activate.
+        const [h, s, l] = rColor()
+        registerCustom(h, s, l)
+      } else if (snapshot.preference !== CUSTOM_ID) {
+        // Theme present but inactive: just re-assert the preference. Calling
+        // registerCustom here would dispose + re-create the skin, flashing the
+        // interface back to the system theme for a frame on every boot.
+        ctx.theme.setTheme(CUSTOM_ID)
+      }
     }
     applyWp()
   }

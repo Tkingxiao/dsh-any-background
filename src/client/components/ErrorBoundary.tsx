@@ -1,5 +1,4 @@
 import { Component, type ReactNode } from 'react'
-import { ST } from '../styles'
 
 interface Props {
   t: (key: string) => string
@@ -37,10 +36,10 @@ export class ErrorBoundary extends Component<Props, State> {
   override render() {
     if (this.state.error) {
       return (
-        <div style={ST.crashBox}>
-          <div style={ST.crashTitle}>{this.props.t('crashTitle')}</div>
-          <div style={ST.crashDesc}>{this.props.t('crashDesc')}</div>
-          <button type="button" style={ST.btn} onClick={this.reset}>{this.props.t('crashReset')}</button>
+        <div className="dab-crash">
+          <div className="dab-crash-title">{this.props.t('crashTitle')}</div>
+          <div className="dab-crash-desc">{this.props.t('crashDesc')}</div>
+          <button type="button" className="dab-btn" onClick={this.reset}>{this.props.t('crashReset')}</button>
         </div>
       )
     }

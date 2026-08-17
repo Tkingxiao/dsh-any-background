@@ -29,23 +29,20 @@ let tokensCache: { colorScheme: 'light' | 'dark'; tokens: Record<string, string>
  * this repeatedly (slider drags, viewport re-applies), so cache the last result
  * and skip the 30+ hsl() string builds when nothing changed.
  *
- * When a Material-You-style palette is provided, primary/secondary/tertiary
- * hues are used for brand and accent tokens; the surface and label colors still
- * follow the primary hue so the scheme stays readable.
+ * This is the simple, pre-Material-You version: dark/light is decided only by
+ * lit < 0.55, and all tokens are derived directly from the picked hue/sat/lit.
+ * The optional palette argument is kept for API compatibility but ignored here,
+ * so saved picks never get rewritten by a wallpaper-derived palette.
  */
-export function genTokens(hue: number, sat: number, lit: number, palette?: ColorPalette | null): { colorScheme: 'light' | 'dark'; tokens: Record<string, string> } {
-  const key = `${hue}|${sat}|${lit}|${palette ? hslKey(palette.primary) + '/' + hslKey(palette.secondary) + '/' + hslKey(palette.tertiary) + '/' + hslKey(palette.surface) : ''}`
+export function genTokens(hue: number, sat: number, lit: number, _palette?: ColorPalette | null): { colorScheme: 'light' | 'dark'; tokens: Record<string, string> } {
+  const key = `${hue}|${sat}|${lit}`
   if (tokensCacheKey === key && tokensCache) return tokensCache
   tokensCacheKey = key
-  tokensCache = buildTokens(hue, sat, lit, palette)
+  tokensCache = buildTokens(hue, sat, lit)
   return tokensCache
 }
 
-function hslKey([h, s, l]: [number, number, number]): string {
-  return `${Math.round(h)}:${Math.round(s * 100)}:${Math.round(l * 100)}`
-}
-
-function buildTokens(hue: number, sat: number, lit: number, palette?: ColorPalette | null): { colorScheme: 'light' | 'dark'; tokens: Record<string, string> } {
+function buildTokens(hue: number, sat: number, lit: number): { colorScheme: 'light' | 'dark'; tokens: Record<string, string> } {
   const dark = lit < 0.55
   const h = (d: number) => ((hue + d) % 360 + 360) % 360
   const s = (d: number) => Math.max(0, Math.min(1, sat + d))
@@ -54,94 +51,79 @@ function buildTokens(hue: number, sat: number, lit: number, palette?: ColorPalet
   const rgba = (hh: number, ss: number, ll: number, a: number) =>
     `hsla(${Math.round(hh)},${Math.round(ss * 100)}%,${Math.round(ll * 100)}%,${a})`
 
-  // Material-You-style accent hues from the extracted/generated palette.
-  const accentHue = palette ? palette.tertiary[0] : h(180)
-  const secondaryHue = palette ? palette.secondary[0] : h(30)
-  const surfaceHue = palette ? palette.surface[0] : hue
-  const surfaceSat = palette ? Math.min(0.08, palette.surface[1]) : 0
-
   if (dark) {
     return {
       colorScheme: 'dark',
       tokens: {
-        '--dsw-alias-bg-base': hsl(surfaceHue, surfaceSat, l(-0.04)),
-        '--dsw-alias-bg-layer-1': hsl(surfaceHue, surfaceSat, l(0.02)),
-        '--dsw-alias-bg-layer-2': hsl(surfaceHue, Math.min(1, surfaceSat + 0.03), l(0.07)),
-        '--dsw-alias-bg-layer-3': hsl(surfaceHue, Math.min(1, surfaceSat + 0.05), l(0.12)),
-        '--dsw-alias-bg-overlay': hsl(surfaceHue, Math.min(1, surfaceSat + 0.05), l(0.12)),
-        '--dsw-alias-border-l1': rgba(surfaceHue, s(-0.1), l(0.18), 0.12),
-        '--dsw-alias-border-l2': rgba(surfaceHue, s(-0.1), l(0.22), 0.22),
+        '--dsw-alias-bg-base': hsl(h(0), s(0), l(-0.04)),
+        '--dsw-alias-bg-layer-1': hsl(h(0), s(0), l(0.02)),
+        '--dsw-alias-bg-layer-2': hsl(h(0), s(0), l(0.07)),
+        '--dsw-alias-bg-layer-3': hsl(h(0), s(-0.05), l(0.12)),
+        '--dsw-alias-bg-overlay': hsl(h(0), s(-0.05), l(0.12)),
+        '--dsw-alias-border-l1': rgba(h(0), s(-0.1), l(0.18), 0.12),
+        '--dsw-alias-border-l2': rgba(h(0), s(-0.1), l(0.22), 0.22),
         '--dsw-alias-label-primary': hsl(0, 0, 1),
         '--dsw-alias-label-secondary': hsl(0, 0, 1),
         '--dsw-alias-label-tertiary': hsl(0, 0, 1),
-        // The harness's dimmer label tiers (placeholder text, model/permission
-        // chevrons, disabled rows) must follow the dark scheme's light font
-        // instead of staying neutral gray, or they read as "always gray".
         '--dsw-alias-label-caption': hsl(0, 0, 1),
         '--dsw-alias-label-dimmed': hsl(0, 0, 1),
         '--dsw-alias-label-quaternary': hsl(0, 0, 1),
-        '--dsw-alias-brand-primary': hsl(secondaryHue, Math.min(1, s(0.15) + 0.05), Math.max(l(0.15), 0.5)),
-        '--dsw-alias-brand-text': l(0.15) > 0.6 ? '#000' : '#fff',
-        '--dsw-alias-button-primary-hover': hsl(secondaryHue, Math.min(1, s(0.15) + 0.05), Math.max(l(0.25), 0.58)),
-        '--dsw-alias-button-primary-dimmed': hsl(secondaryHue, Math.min(1, s(0.05) + 0.02), l(0.07)),
-        '--dsw-alias-button-elevated-fill': hsl(surfaceHue, surfaceSat, l(0.04)),
-        '--dsw-alias-interactive-bg-hover': rgba(accentHue, Math.min(1, s(0.05) + 0.05), Math.max(l(0.15), 0.4), 0.12),
-        '--dsw-alias-interactive-bg-active': rgba(accentHue, Math.min(1, s(0.05) + 0.05), Math.max(l(0.15), 0.4), 0.2),
+        '--dsw-alias-brand-primary': hsl(h(0), s(0.1), Math.max(l(0.2), 0.5)),
+        '--dsw-alias-brand-text': l(0.2) > 0.6 ? '#000' : '#fff',
+        '--dsw-alias-button-primary-hover': hsl(h(0), s(0.1), Math.max(l(0.28), 0.58)),
+        '--dsw-alias-button-primary-dimmed': hsl(h(0), s(0), l(0.07)),
+        '--dsw-alias-button-elevated-fill': hsl(h(0), s(0), l(0.04)),
+        '--dsw-alias-interactive-bg-hover': rgba(h(0), s(0), Math.max(l(0.15), 0.4), 0.12),
+        '--dsw-alias-interactive-bg-active': rgba(h(0), s(0), Math.max(l(0.15), 0.4), 0.2),
         '--dsw-alias-markdown-code-block': hsl(h(0), s(0), l(-0.06)),
         '--dsw-alias-markdown-inline-code': hsl(h(0), s(0), l(0.04)),
         '--dsw-alias-state-error-primary': '#ff5c72',
         '--dsw-alias-state-success-primary': '#3ddc84',
         '--dsw-alias-state-warn-primary': '#ffb347',
-        '--dsw-specific-sidebar-fill': hsl(surfaceHue, surfaceSat, l(-0.06)),
-        '--dsw-specific-sidebar-nav-item-active': hsl(surfaceHue, Math.min(1, surfaceSat + 0.02), l(0.04)),
-        '--dsw-specific-sidebar-nav-item-hover': hsl(surfaceHue, surfaceSat, l(0)),
-        '--dsw-specific-input-major': hsl(surfaceHue, surfaceSat, l(0.02)),
-        '--dsw-alias-scrollbar-bg-l1': hsl(surfaceHue, Math.min(1, surfaceSat + 0.02), l(0.12)),
-        '--dsw-alias-scrollbar-bg-l2': hsl(surfaceHue, Math.min(1, surfaceSat + 0.04), l(0.16)),
-        '--dsw-alias-scrollbar-hover-l1': hsl(surfaceHue, Math.min(1, surfaceSat + 0.04), l(0.22)),
-        '--dsw-alias-scrollbar-hover-l2': hsl(surfaceHue, Math.min(1, surfaceSat + 0.06), l(0.22)),
+        '--dsw-specific-sidebar-fill': hsl(h(0), s(0), l(-0.06)),
+        '--dsw-specific-sidebar-nav-item-active': hsl(h(0), s(0), l(0.04)),
+        '--dsw-specific-sidebar-nav-item-hover': hsl(h(0), s(0), l(0)),
+        '--dsw-specific-input-major': hsl(h(0), s(0), l(0.02)),
+        '--dsw-alias-scrollbar-bg-l1': hsl(h(0), s(-0.05), l(0.12)),
+        '--dsw-alias-scrollbar-bg-l2': hsl(h(0), s(-0.05), l(0.16)),
+        '--dsw-alias-scrollbar-hover-l1': hsl(h(0), s(-0.05), l(0.22)),
+        '--dsw-alias-scrollbar-hover-l2': hsl(h(0), s(-0.05), l(0.22)),
       },
     }
   }
   return {
     colorScheme: 'light',
     tokens: {
-      // Backgrounds track the picked color at its lightness — theme-colored,
-      // with only mild desaturation so the surfaces stay readable.
-      '--dsw-alias-bg-base': hsl(surfaceHue, surfaceSat, l(0.03)),
-      '--dsw-alias-bg-layer-1': hsl(surfaceHue, Math.min(1, surfaceSat + 0.03), l(0.07)),
-      '--dsw-alias-bg-layer-2': hsl(surfaceHue, Math.min(1, surfaceSat + 0.05), l(-0.03)),
-      '--dsw-alias-bg-layer-3': hsl(surfaceHue, Math.min(1, surfaceSat + 0.08), l(-0.09)),
-      '--dsw-alias-bg-overlay': hsl(surfaceHue, surfaceSat, l(0.08)),
-      '--dsw-alias-border-l1': rgba(surfaceHue, s(-0.15), l(-0.35), 0.18),
-      '--dsw-alias-border-l2': rgba(surfaceHue, s(-0.15), l(-0.35), 0.3),
-      // Text is pure black on light surfaces, pure white on dark.
+      '--dsw-alias-bg-base': hsl(h(0), s(-0.08), l(0.03)),
+      '--dsw-alias-bg-layer-1': hsl(h(0), s(-0.12), l(0.07)),
+      '--dsw-alias-bg-layer-2': hsl(h(0), s(-0.1), l(-0.03)),
+      '--dsw-alias-bg-layer-3': hsl(h(0), s(-0.08), l(-0.09)),
+      '--dsw-alias-bg-overlay': hsl(h(0), s(-0.12), l(0.08)),
+      '--dsw-alias-border-l1': rgba(h(0), s(-0.15), l(-0.35), 0.18),
+      '--dsw-alias-border-l2': rgba(h(0), s(-0.15), l(-0.35), 0.3),
       '--dsw-alias-label-primary': hsl(0, 0, 0),
       '--dsw-alias-label-secondary': hsl(0, 0, 0),
       '--dsw-alias-label-tertiary': hsl(0, 0, 0),
-      // Same as above but for the light scheme: dimmer tiers go black so the
-      // placeholder, chevrons, category captions and disabled rows follow the
-      // theme's dark font instead of staying gray.
       '--dsw-alias-label-caption': hsl(0, 0, 0),
       '--dsw-alias-label-dimmed': hsl(0, 0, 0),
       '--dsw-alias-label-quaternary': hsl(0, 0, 0),
-      '--dsw-alias-brand-primary': hsl(secondaryHue, Math.min(1, s(0.1) + 0.05), Math.min(l(-0.18), 0.45)),
+      '--dsw-alias-brand-primary': hsl(h(0), s(0.05), Math.min(l(-0.18), 0.45)),
       '--dsw-alias-brand-text': '#fff',
-      '--dsw-alias-button-primary-hover': hsl(secondaryHue, Math.min(1, s(0.1) + 0.05), Math.min(l(-0.12), 0.5)),
-      '--dsw-alias-button-primary-dimmed': hsl(secondaryHue, Math.min(1, s(0.05) + 0.02), l(-0.03)),
-      '--dsw-alias-button-elevated-fill': hsl(surfaceHue, Math.min(1, surfaceSat + 0.02), l(0.1)),
-      '--dsw-alias-interactive-bg-hover': rgba(accentHue, Math.min(1, s(0.05) + 0.05), l(-0.3), 0.08),
-      '--dsw-alias-interactive-bg-active': rgba(accentHue, Math.min(1, s(0.05) + 0.05), l(-0.3), 0.14),
+      '--dsw-alias-button-primary-hover': hsl(h(0), s(0.05), Math.min(l(-0.12), 0.5)),
+      '--dsw-alias-button-primary-dimmed': hsl(h(0), s(-0.1), l(-0.03)),
+      '--dsw-alias-button-elevated-fill': hsl(h(0), s(-0.1), l(0.1)),
+      '--dsw-alias-interactive-bg-hover': rgba(h(0), s(0), l(-0.3), 0.08),
+      '--dsw-alias-interactive-bg-active': rgba(h(0), s(0), l(-0.3), 0.14),
       '--dsw-alias-markdown-code-block': hsl(h(0), s(-0.1), l(-0.03)),
       '--dsw-alias-markdown-inline-code': hsl(h(0), s(-0.08), l(0.04)),
-      '--dsw-specific-sidebar-fill': hsl(surfaceHue, Math.min(1, surfaceSat + 0.02), l(-0.03)),
-      '--dsw-specific-sidebar-nav-item-active': hsl(surfaceHue, Math.min(1, surfaceSat + 0.05), l(0.05)),
-      '--dsw-specific-sidebar-nav-item-hover': hsl(surfaceHue, surfaceSat, l(0)),
-      '--dsw-specific-input-major': hsl(surfaceHue, Math.min(1, surfaceSat + 0.02), l(0.1)),
-      '--dsw-alias-scrollbar-bg-l1': hsl(surfaceHue, Math.min(1, surfaceSat + 0.02), l(-0.08)),
-      '--dsw-alias-scrollbar-bg-l2': hsl(surfaceHue, Math.min(1, surfaceSat + 0.04), l(-0.12)),
-      '--dsw-alias-scrollbar-hover-l1': hsl(surfaceHue, Math.min(1, surfaceSat + 0.04), l(-0.16)),
-      '--dsw-alias-scrollbar-hover-l2': hsl(surfaceHue, Math.min(1, surfaceSat + 0.06), l(-0.16)),
+      '--dsw-specific-sidebar-fill': hsl(h(0), s(-0.1), l(-0.03)),
+      '--dsw-specific-sidebar-nav-item-active': hsl(h(0), s(-0.08), l(0.05)),
+      '--dsw-specific-sidebar-nav-item-hover': hsl(h(0), s(-0.12), l(0)),
+      '--dsw-specific-input-major': hsl(h(0), s(-0.12), l(0.1)),
+      '--dsw-alias-scrollbar-bg-l1': hsl(h(0), s(-0.1), l(-0.08)),
+      '--dsw-alias-scrollbar-bg-l2': hsl(h(0), s(-0.08), l(-0.12)),
+      '--dsw-alias-scrollbar-hover-l1': hsl(h(0), s(-0.08), l(-0.16)),
+      '--dsw-alias-scrollbar-hover-l2': hsl(h(0), s(-0.08), l(-0.16)),
     },
   }
 }
@@ -291,16 +273,22 @@ export function extractWallpaperPalette(dataUrl: string, bgState: BgState): Prom
   })
 }
 
-/** Fallback palette when only a seed HSL color is known (no wallpaper). */
+/** Fallback palette when only a seed HSL color is known (no wallpaper).
+ *
+ * CRITICAL: the primary color MUST equal the user's pick. Previously the
+ * lightness was clamped into a 0.2–0.44 / 0.6–0.82 band, which turned a pure
+ * red (#FA000F, L≈0.49) into a washed-out #746768-like color. We now keep the
+ * user's HSL exactly and only sanitize saturation into a readable range. The
+ * secondary/tertiary hues are derived for accents, while surface stays neutral.
+ */
 export function paletteFromHsl([h, s, l]: [number, number, number]): ColorPalette {
-  const autoDark = l < 0.55
-  const lc = autoDark ? Math.min(0.44, Math.max(0.2, l)) : Math.max(0.6, Math.min(0.82, l))
   const hue = ((h % 360) + 360) % 360
+  const sat = Math.min(1, Math.max(0, s))
   return {
-    primary: [hue, Math.min(0.9, Math.max(0.15, s)), lc],
-    secondary: [((hue + 30) % 360), Math.min(0.8, Math.max(0.2, s)), Math.min(0.75, Math.max(0.35, l))],
-    tertiary: [((hue + 180) % 360), Math.min(0.7, Math.max(0.2, s)), Math.min(0.7, Math.max(0.35, l))],
-    surface: [hue, Math.min(0.06, s * 0.3), l],
+    primary: [hue, sat, l],
+    secondary: [((hue + 30) % 360), Math.min(0.85, Math.max(0.2, sat)), Math.min(0.75, Math.max(0.35, l))],
+    tertiary: [((hue + 180) % 360), Math.min(0.7, Math.max(0.2, sat)), Math.min(0.7, Math.max(0.35, l))],
+    surface: [hue, Math.min(0.05, sat * 0.3), l],
     luminance: l,
   }
 }
@@ -309,6 +297,42 @@ export function paletteFromHsl([h, s, l]: [number, number, number]): ColorPalett
 export async function extractWallpaperColor(dataUrl: string, bgState: BgState): Promise<[number, number, number] | null> {
   const palette = await extractWallpaperPalette(dataUrl, bgState)
   return palette ? palette.primary : null
+}
+
+// ── One-shot frame brightness analysis ────────────────────────────────────────
+// Called only when a generated background is switched (from its captured
+// snapshot), never from the animation loop: decode the frame, downsample to a
+// 32×32 canvas, average Rec.709 luma. Dark frame → light fonts, light frame →
+// dark fonts. The whole pass costs one small ImageData read per switch.
+
+const ANALYZE_SIDE = 32
+
+/** Analyze a captured frame's average luminance. Resolves true when the frame
+ *  reads dark (use white fonts), false when light (use black fonts), or null
+ *  when the frame cannot be decoded. */
+export function analyzeFrameDark(dataUrl: string): Promise<boolean | null> {
+  return new Promise(resolve => {
+    const img = new Image()
+    img.onerror = () => resolve(null)
+    img.onload = () => {
+      try {
+        const c = document.createElement('canvas')
+        c.width = ANALYZE_SIDE; c.height = ANALYZE_SIDE
+        const g = c.getContext('2d', { willReadFrequently: true })!
+        g.drawImage(img, 0, 0, ANALYZE_SIDE, ANALYZE_SIDE)
+        const px = g.getImageData(0, 0, ANALYZE_SIDE, ANALYZE_SIDE).data
+        let lum = 0
+        const count = px.length / 4
+        for (let i = 0; i < px.length; i += 4) {
+          lum += 0.2126 * px[i]! + 0.7152 * px[i + 1]! + 0.0722 * px[i + 2]!
+        }
+        resolve(lum / count / 255 < 0.5)
+      } catch {
+        resolve(null)
+      }
+    }
+    img.src = dataUrl
+  })
 }
 
 /** HSL (h 0-360, s/l 0-1) → RGB (0-255 integers). */

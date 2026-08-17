@@ -1,8 +1,10 @@
 import { useState, useEffect, useRef } from 'react'
-import { ST } from '../styles'
+import type { CSSProperties } from 'react'
 import { hsvToHsl, hslToRgb, rgbToHsl, hslToHsv } from '../utils/color'
 
 type Mode = 'hsl' | 'rgb'
+
+const SEG_W = 66
 
 function clamp(v: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, v))
@@ -27,13 +29,13 @@ function NumField({ label, value, min, max, step, onChange }: {
   }, [value])
 
   return (
-    <label style={ST.inputField}>
-      <span style={ST.inputLabel}>{label}</span>
+    <label className="dab-field">
+      <span className="dab-field-label">{label}</span>
       <input
         type="number"
         min={min} max={max} step={step}
         value={text}
-        style={ST.input}
+        className="dab-num"
         onFocus={() => { focused.current = true }}
         onBlur={() => { focused.current = false; setText(String(value)) }}
         onChange={e => {
@@ -47,7 +49,7 @@ function NumField({ label, value, min, max, step, onChange }: {
 }
 
 /**
- * Precise color entry next to the wheel: a HSL/RGB mode toggle plus three
+ * Precise color entry next to the wheel: a HSL/RGB segmented toggle plus three
  * numeric channel fields and a live swatch. The wheel is HSV end-to-end, so
  * this panel converts at the boundary — HSL fields map straight onto the
  * stored HSL, RGB fields round-trip through rgbToHsl — and both emit HSV via
@@ -68,12 +70,13 @@ export function ColorInputs({ hue, sat, lit, onChange }: {
   }
 
   return (
-    <div style={ST.inputPanel}>
-      <div style={ST.inputTabs}>
-        <button type="button" style={{ ...ST.inputTab, ...(mode === 'hsl' ? ST.inputTabActive : {}) }} onClick={() => setMode('hsl')}>HSL</button>
-        <button type="button" style={{ ...ST.inputTab, ...(mode === 'rgb' ? ST.inputTabActive : {}) }} onClick={() => setMode('rgb')}>RGB</button>
+    <div className="dab-inputs">
+      <div className="dab-seg" style={{ '--w': `${SEG_W}px` } as CSSProperties}>
+        <div className="dab-seg-thumb" style={{ transform: `translateX(${mode === 'hsl' ? 0 : SEG_W}px)` }} />
+        <button type="button" className={`dab-seg-item${mode === 'hsl' ? ' is-active' : ''}`} onClick={() => setMode('hsl')}>HSL</button>
+        <button type="button" className={`dab-seg-item${mode === 'rgb' ? ' is-active' : ''}`} onClick={() => setMode('rgb')}>RGB</button>
       </div>
-      <div style={ST.inputGrid}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
         {mode === 'hsl' ? (
           <>
             <NumField label="H" value={Math.round(h)} min={0} max={360} step={1} onChange={v => setHsl(v, s, l)} />
@@ -88,7 +91,7 @@ export function ColorInputs({ hue, sat, lit, onChange }: {
           </>
         )}
       </div>
-      <div style={{ ...ST.swatch, background: `hsl(${Math.round(h)} ${Math.round(s * 100)}% ${Math.round(l * 100)}%)` }} />
+      <div className="dab-swatch-lg" style={{ background: `hsl(${Math.round(h)} ${Math.round(s * 100)}% ${Math.round(l * 100)}%)` }} />
     </div>
   )
 }

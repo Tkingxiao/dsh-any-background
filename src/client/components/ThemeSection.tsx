@@ -1,307 +1,88 @@
-import { useRef, useState, useEffect } from 'react'
-import { ST } from '../styles'
-import { cfg, rOps, rSop, rWop, rBl, rBlurs } from '../state'
-import { saveConfig } from '../rpc'
-import { applyWp, applyCustomTokens, applySettingsOverrides, setWpOpacity, setWpBlur, setPartBlur } from '../wallpaper'
-import { readImg } from '../utils/image'
-import type { ThemeSectionProps, PartOpacities, PartBlurs, BackgroundType, GeneratedBgParams } from '../types'
-import { ColorWheel } from './ColorWheel'
-import { ColorInputs } from './ColorInputs'
-import { ColorPicker } from './ColorPicker'
-import { BgEditor } from './BgEditor'
-import { LiveSlider } from './LiveSlider'
+/**
+ * dsh-any-background — settings section shell.
+ *
+ * The host renders this section only while the settings dialog is open and the
+ * section is the active nav entry, so mounting IS being visible. The section is
+ * rendered INLINE inside the host settings dialog's content column (the host
+ * provides the modal chrome); the shell is a left nav rail + page body. Only
+ * the transient toast escapes through a Portal (the shell's container-type
+ * containment would otherwise capture its fixed positioning).
+ */
+import { useEffect, useRef, useState } from 'react'
+import type { ThemeSectionProps } from '../types'
+import { ensureUiCss, NAV_ITEM_H, NAV_GAP } from './ui.css'
+import { SunIcon, DropletIcon, LayersIcon, PhotoIcon, SlidersIcon, CheckIcon, AlertIcon } from './icons'
 import { ErrorBoundary } from './ErrorBoundary'
-
-const BG_TYPES: BackgroundType[] = ['image', 'mesh', 'shader', 'pattern']
+import { Portal } from './Portal'
+import { ColorPage } from './pages/ColorPage'
+import { InterfacePage } from './pages/InterfacePage'
+import { BackgroundPage } from './pages/BackgroundPage'
+import { ProfilePage } from './pages/ProfilePage'
 
 export function ThemeSection(props: ThemeSectionProps) {
-  const { t, hue, sat, lit, setColor, setWp, setOps, setBlurs, setWop, setBl, setSop,
-    backgroundType, generatedBg, setBgType, setGeneratedBg, regenerateBg,
-    useStore, extractColor, exportTheme, importTheme } = props
-  const storeUrl = useStore(s => s.url)
-  const storeColor = useStore(s => s.color)
-  const fileRef = useRef<HTMLInputElement>(null)
-  const importRef = useRef<HTMLInputElement>(null)
-  const [editorOpen, setEditorOpen] = useState(false)
-  const [pickerOpen, setPickerOpen] = useState(false)
-  const [extracting, setExtracting] = useState(false)
-  const [extractMsg, setExtractMsg] = useState<string | null>(null)
-  const [importMsg, setImportMsg] = useState<string | null>(null)
-  const msgTimer = useRef<number | undefined>(undefined)
-  useEffect(() => () => window.clearTimeout(msgTimer.current), [])
-  const showMsg = (setter: (v: string | null) => void, key: string) => {
-    setter(t(key))
-    window.clearTimeout(msgTimer.current)
-    msgTimer.current = window.setTimeout(() => setter(null), 2500)
-  }
-  const onExtract = async () => {
-    if (!storeUrl || extracting) return
-    setExtracting(true)
-    try {
-      showMsg(setExtractMsg, await extractColor() ? 'extractDone' : 'extractFail')
-    } catch {
-      showMsg(setExtractMsg, 'extractFail')
-    } finally {
-      setExtracting(false)
-    }
-  }
-  const onImport = async (file: File) => {
-    try {
-      showMsg(setImportMsg, await importTheme(file) ? 'importDone' : 'importFail')
-    } catch {
-      showMsg(setImportMsg, 'importFail')
-    }
-  }
-  const wheel = (storeColor ?? [hue, sat, lit]) as [number, number, number]
+  ensureUiCss()
+  const { t } = props
+  const [page, setPage] = useState(0)
+  const [toast, setToast] = useState<{ msg: string; ok: boolean } | null>(null)
+  const toastTimer = useRef<number | undefined>(undefined)
 
-  const blurSlider = (part: keyof PartBlurs) => (
-    <LiveSlider label={t('uiBlur')} min={0} max={60} step={1} def={rBlurs()[part]}
-      fmt={v => `${v}px`}
-      onInput={v => {
-        const blurs = { ...rBlurs() }
-        blurs[part] = v
-        cfg.blurs = blurs
-        setPartBlur(part, v)
-        saveConfig()
-      }}
-      onChange={v => {
-        const blurs = { ...rBlurs() }
-        blurs[part] = v
-        setBlurs(blurs)
-      }} />
-  )
+  useEffect(() => () => window.clearTimeout(toastTimer.current), [])
 
-  const partSlider = (labelKey: string, part: keyof PartOpacities) => (
-    <div style={ST.sliderBlock}>
-      <div style={ST.sliderLabel}>{t(labelKey)}</div>
-      <LiveSlider label={t('uiOpacity')} min={0} max={100} step={1} def={Math.round(rOps()[part] * 100)}
-        fmt={v => `${v}%`}
-        onInput={v => {
-          const ops = { ...rOps() }
-          ops[part] = v / 100
-          cfg.opacities = ops
-          applyCustomTokens(ops)
-          saveConfig()
-        }}
-        onChange={v => {
-          const ops = { ...rOps() }
-          ops[part] = v / 100
-          setOps(ops)
-        }} />
-      {blurSlider(part)}
-    </div>
-  )
-
-  const typeLabel = (type: BackgroundType) => {
-    switch (type) {
-      case 'image': return t('bgTypeImage')
-      case 'mesh': return t('bgTypeMesh')
-      case 'shader': return t('bgTypeShader')
-      case 'pattern': return t('bgTypePattern')
-    }
+  const notify = (msg: string, ok = true): void => {
+    setToast({ msg, ok })
+    window.clearTimeout(toastTimer.current)
+    toastTimer.current = window.setTimeout(() => setToast(null), 2600)
   }
 
-  const presetLabel = (key: string) => {
-    if (key === 'aurora') return t('presetAurora')
-    if (key === 'nebula') return t('presetNebula')
-    if (key === 'noise') return t('presetNoise')
-    if (key === 'dots') return t('presetDots')
-    if (key === 'waves') return t('presetWaves')
-    if (key === 'poly') return t('presetPoly')
-    return key
-  }
-
-  const updateGenerated = (patch: Partial<GeneratedBgParams>) => {
-    if (!generatedBg) return
-    setGeneratedBg({ ...generatedBg, ...patch } as GeneratedBgParams)
-  }
+  const pages = [
+    { label: t('pageColor'), Icon: DropletIcon, node: <ColorPage p={props} notify={notify} /> },
+    { label: t('pageInterface'), Icon: LayersIcon, node: <InterfacePage p={props} /> },
+    { label: t('pageBackground'), Icon: PhotoIcon, node: <BackgroundPage p={props} /> },
+    { label: t('pageProfile'), Icon: SlidersIcon, node: <ProfilePage p={props} notify={notify} /> },
+  ]
 
   return (
     <ErrorBoundary t={t}>
-      <div style={ST.root}>
-        <div style={ST.headerRow}>
-          <div><h2 style={ST.h2}>{t('nav')}</h2><div style={ST.sub}>{t('subtitle')}</div></div>
-          <div style={ST.row}>
-            <button type="button" style={ST.btn} onClick={exportTheme}>{t('exportTheme')}</button>
-            <button type="button" style={ST.btn} onClick={() => importRef.current?.click()}>{t('importTheme')}</button>
-            <input ref={importRef} type="file" accept="application/json,.json" style={{ display: 'none' }} onChange={e => {
-              const f = e.target.files?.[0]; if (!f) return
-              void onImport(f); e.target.value = ''
-            }} />
-          </div>
-        </div>
-        {importMsg ? <div style={ST.colorHint}>{importMsg}</div> : null}
-
-        {/* Theme color: wheel on the left, precise HSL/RGB entry on the right */}
-        <div>
-          <div style={ST.label}>{t('colorTitle')}</div>
-          <div style={ST.wheelRow}>
-            <ColorWheel hue={wheel[0]} sat={wheel[1]} lit={wheel[2]} onChange={setColor} />
-            <ColorInputs hue={wheel[0]} sat={wheel[1]} lit={wheel[2]} onChange={setColor} />
-          </div>
-          <div style={ST.colorHint}>{t('colorHint')}</div>
-          <div style={ST.btnGroup}>
-            <button type="button"
-              style={{ ...ST.btn, opacity: !storeUrl || extracting ? 0.55 : 1 }}
-              title={!storeUrl ? t('extractNoWp') : undefined}
-              disabled={!storeUrl || extracting}
-              onClick={onExtract}>
-              {extracting ? t('extracting') : t('extractColor')}
-            </button>
-            <button type="button"
-              style={{ ...ST.btn, opacity: !storeUrl ? 0.55 : 1 }}
-              title={!storeUrl ? t('extractNoWp') : undefined}
-              disabled={!storeUrl}
-              onClick={() => setPickerOpen(true)}>
-              {t('eyedropper')}
-            </button>
-          </div>
-          {extractMsg ? <div style={ST.colorHint}>{extractMsg}</div> : null}
-        </div>
-
-        <hr style={ST.hr} />
-
-        {/* Interface: per-part homepage opacities + settings panel opacity */}
-        <div>
-          <div style={ST.label}>{t('uiTitle')}</div>
-          <div style={ST.sliders}>
-            {partSlider('uiOpacityBg', 'bg')}
-            {partSlider('uiOpacitySide', 'sidebar')}
-            {partSlider('uiOpacityCard', 'card')}
-            <div style={ST.sliderBlock}>
-              <div style={ST.sliderLabel}>{t('uiSop')}</div>
-              <LiveSlider label={t('uiOpacity')} min={0} max={100} step={1} def={Math.round(rSop() * 100)}
-                fmt={v => `${v}%`}
-                onInput={v => { const op = v / 100; cfg.settingsOpacity = op; applySettingsOverrides(op); saveConfig() }}
-                onChange={v => setSop(v / 100)} />
-              {blurSlider('settings')}
-            </div>
-          </div>
-        </div>
-
-        <hr style={ST.hr} />
-
-        {/* Background source + preview */}
-        <div>
-          <div style={ST.label}>{t('bgTitle')}</div>
-          <div style={ST.center}>{storeUrl ? <img src={storeUrl} alt="" style={ST.preview} onClick={() => setEditorOpen(true)} /> : null}</div>
-
-          {/* Source type tabs */}
-          <div style={{ ...ST.row, justifyContent: 'center', marginTop: '10px' }}>
-            {BG_TYPES.map(type => (
-              <button
-                key={type}
-                type="button"
-                style={{ ...ST.btn, ...(backgroundType === type ? ST.btnPrimary : {}) }}
-                onClick={() => setBgType(type)}>
-                {typeLabel(type)}
-              </button>
-            ))}
-          </div>
-
-          {/* Image controls */}
-          {backgroundType === 'image' ? (
-            <div style={ST.btnGroup}>
-              <div style={ST.row}>
-                <button type="button" style={ST.btn} onClick={() => fileRef.current?.click()}>{t('bgChoose')}</button>
-                {storeUrl ? <button type="button" style={ST.btn} onClick={() => setEditorOpen(true)}>{t('bgEdit')}</button> : null}
-                {storeUrl ? <button type="button" style={{ ...ST.btn, ...ST.btnDanger }} onClick={() => setWp(null)}>{t('bgRemove')}</button> : null}
-                <input ref={fileRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={e => {
-                  const f = e.target.files?.[0]; if (!f) return
-                  readImg(f, d => { if (d) setWp(d); e.target.value = '' })
-                }} />
+      <div className="dab-root">
+        <div className="dab-shell">
+          <nav className="dab-nav">
+            <div className="dab-brand">
+              <div className="dab-brand-tile"><SunIcon size={15} /></div>
+              <div>
+                <div className="dab-brand-name">{t('nav')}</div>
+                <div className="dab-brand-tag">{t('brandTag')}</div>
               </div>
             </div>
-          ) : (
-            <div style={ST.btnGroup}>
-              <button type="button" style={{ ...ST.btn, ...ST.btnPrimary }} onClick={regenerateBg}>{t('bgRegenerate')}</button>
-              {storeUrl ? <button type="button" style={{ ...ST.btn, ...ST.btnDanger }} onClick={() => setWp(null)}>{t('bgRemove')}</button> : null}
+            <div className="dab-nav-list">
+              <div className="dab-nav-ind" style={{ transform: `translateY(${page * (NAV_ITEM_H + NAV_GAP)}px)` }} />
+              {pages.map((pg, i) => (
+                <button
+                  key={pg.label} type="button"
+                  className={`dab-nav-item${i === page ? ' is-active' : ''}`}
+                  onClick={() => setPage(i)}>
+                  <pg.Icon size={16} />
+                  <span>{pg.label}</span>
+                </button>
+              ))}
             </div>
-          )}
+          </nav>
 
-          {/* Generated background parameter controls */}
-          {backgroundType === 'mesh' && generatedBg?.type === 'mesh' ? (
-            <div style={ST.sliders}>
-              <LiveSlider label={t('bgMeshScale')} min={30} max={300} step={1} def={Math.round(generatedBg.scale * 100)}
-                fmt={v => `${v}%`}
-                onInput={() => {}}
-                onChange={v => updateGenerated({ scale: v / 100 })} />
-              <LiveSlider label={t('bgMeshIntensity')} min={0} max={100} step={1} def={Math.round(generatedBg.intensity * 100)}
-                fmt={v => `${v}%`}
-                onInput={() => {}}
-                onChange={v => updateGenerated({ intensity: v / 100 })} />
-            </div>
-          ) : null}
-
-          {backgroundType === 'shader' && generatedBg?.type === 'shader' ? (
-            <div style={ST.sliders}>
-              <div style={ST.row}>
-                {(['aurora', 'nebula', 'noise'] as const).map(p => (
-                  <button key={p} type="button" style={{ ...ST.btn, ...(generatedBg.preset === p ? ST.btnPrimary : {}) }}
-                    onClick={() => updateGenerated({ preset: p })}>{presetLabel(p)}</button>
-                ))}
-              </div>
-              <LiveSlider label={t('bgShaderSpeed')} min={0} max={200} step={1} def={Math.round(generatedBg.speed * 100)}
-                fmt={v => `${v}%`}
-                onInput={() => {}}
-                onChange={v => updateGenerated({ speed: v / 100 })} />
-              <LiveSlider label={t('bgShaderScale')} min={30} max={300} step={1} def={Math.round(generatedBg.scale * 100)}
-                fmt={v => `${v}%`}
-                onInput={() => {}}
-                onChange={v => updateGenerated({ scale: v / 100 })} />
-            </div>
-          ) : null}
-
-          {backgroundType === 'pattern' && generatedBg?.type === 'pattern' ? (
-            <div style={ST.sliders}>
-              <div style={ST.row}>
-                {(['dots', 'waves', 'poly'] as const).map(p => (
-                  <button key={p} type="button" style={{ ...ST.btn, ...(generatedBg.preset === p ? ST.btnPrimary : {}) }}
-                    onClick={() => updateGenerated({ preset: p })}>{presetLabel(p)}</button>
-                ))}
-              </div>
-              <LiveSlider label={t('bgPatternDensity')} min={0} max={100} step={1} def={Math.round(generatedBg.density * 100)}
-                fmt={v => `${v}%`}
-                onInput={() => {}}
-                onChange={v => updateGenerated({ density: v / 100 })} />
-              <LiveSlider label={t('bgPatternScale')} min={30} max={300} step={1} def={Math.round(generatedBg.scale * 100)}
-                fmt={v => `${v}%`}
-                onInput={() => {}}
-                onChange={v => updateGenerated({ scale: v / 100 })} />
-            </div>
-          ) : null}
-
-          <div style={ST.sliders}>
-            <div style={ST.sliderBlock}>
-              <div style={ST.sliderLabel}>{t('wpOpacity')}</div>
-              <LiveSlider min={0} max={100} step={1} def={Math.round(rWop() * 100)}
-                fmt={v => `${v}%`}
-                onInput={v => { const op = v / 100; cfg.wallpaperOpacity = op; setWpOpacity(op); saveConfig() }}
-                onChange={v => setWop(v / 100)} />
-            </div>
-            <div style={ST.sliderBlock}>
-              <div style={ST.sliderLabel}>{t('bgBlur')}</div>
-              <LiveSlider min={0} max={60} step={1} def={rBl()}
-                fmt={v => `${v}px`}
-                onInput={v => { cfg.blur = v; setWpBlur(v); saveConfig() }}
-                onChange={v => setBl(v)} />
-            </div>
+          <div className="dab-page" key={page}>
+            {pages[page].node}
           </div>
-          <div style={ST.hint}>{t('bgHint')}</div>
         </div>
-
-        {/* Eyedropper modal */}
-        {pickerOpen && storeUrl ? (
-          <ColorPicker url={storeUrl} t={t} onClose={() => setPickerOpen(false)}
-            onPick={hsv => { setColor(hsv[0], hsv[1], hsv[2]); setPickerOpen(false) }} />
-        ) : null}
-
-        {/* Background editor modal */}
-        {editorOpen && storeUrl ? (
-          <BgEditor url={storeUrl} t={t} onClose={() => setEditorOpen(false)}
-            onCommit={(z, x, y, iw, ih) => { cfg.bgState = { zoom: z, x, y, iw, ih }; applyWp(); saveConfig(); setEditorOpen(false) }} />
-        ) : null}
       </div>
+
+      {toast ? (
+        <Portal>
+          <div className="dab-toast" role="status">
+            <span className={toast.ok ? 'dab-toast-ok' : 'dab-toast-err'}>
+              {toast.ok ? <CheckIcon size={14} /> : <AlertIcon size={14} />}
+            </span>
+            <span>{toast.msg}</span>
+          </div>
+        </Portal>
+      ) : null}
     </ErrorBoundary>
   )
 }

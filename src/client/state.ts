@@ -10,6 +10,7 @@ export const DEFAULT_CONFIG: ThemeConfig = {
   bgState: { zoom: 1, x: 0, y: 0, iw: 0, ih: 0 },
   backgroundType: 'image',
   generatedBg: null,
+  regenerateOnReload: false,
 }
 
 // Derived Material-You-style palette. It is recomputed from the active
@@ -23,14 +24,29 @@ export function rPalette(): ColorPalette | null { return palette }
 // module is the single source of truth the UI reads from and mutates, synced
 // to disk via the RPC layer.
 export let cfg: ThemeConfig = { ...DEFAULT_CONFIG, opacities: { ...DEFAULT_CONFIG.opacities }, blurs: { ...DEFAULT_CONFIG.blurs }, bgState: { ...DEFAULT_CONFIG.bgState } }
+export let wpImageUrl: string | null = null
+// The uploaded image is retained across background-type switches so coming back
+// to the "image" type restores the original picture (see issue: switching to a
+// generated bg overwrote the image URL and lost it).
 export let wpUrl: string | null = null
 
+export function setWpImageUrl(url: string | null): void { wpImageUrl = url }
 export function setWpUrl(url: string | null): void { wpUrl = url }
 export function setBgState(s: BgState): void { cfg.bgState = s }
 
+// Brightness verdict of the active generated background, analyzed ONCE per
+// switch from a captured frame (never per-frame). null = no generated
+// background active or analysis pending, so the picked color's lightness
+// keeps deciding the font direction as before.
+export let bgDark: boolean | null = null
+export function setBgDark(v: boolean | null): void { bgDark = v }
+export function rBgDark(): boolean | null { return bgDark }
+
 export function rHasColor(): boolean { return cfg.color !== null }
 export function rColor(): [number, number, number] { return cfg.color ?? [220, 0.55, 0.25] }
-export function rWp(): string | null { return wpUrl }
+export function rWpImage(): string | null { return wpImageUrl }
+/** Display URL: the uploaded image when in image mode, else the generated snapshot. */
+export function rWp(): string | null { return cfg.backgroundType === 'image' ? wpImageUrl : wpUrl }
 export function rOps(): PartOpacities {
   const o = cfg.opacities ?? {}
   return {
@@ -96,6 +112,7 @@ export function adoptConfig(raw: unknown): void {
     },
     backgroundType: bgType,
     generatedBg: generatedBg ? normalizeGeneratedBg(generatedBg) : null,
+    regenerateOnReload: typeof c.regenerateOnReload === 'boolean' ? c.regenerateOnReload : DEFAULT_CONFIG.regenerateOnReload,
   }
 }
 
@@ -115,6 +132,7 @@ function normalizeGeneratedBg(p: ThemeConfig['generatedBg']): ThemeConfig['gener
       preset: ['aurora', 'nebula', 'noise'].includes(p.preset) ? p.preset : 'aurora',
       speed: typeof p.speed === 'number' ? Math.min(2, Math.max(0, p.speed)) : 0.3,
       scale: typeof p.scale === 'number' ? Math.min(3, Math.max(0.3, p.scale)) : 1,
+      seed: typeof p.seed === 'number' ? Math.floor(p.seed) : 0,
     }
   }
   return {
@@ -122,5 +140,6 @@ function normalizeGeneratedBg(p: ThemeConfig['generatedBg']): ThemeConfig['gener
     preset: ['dots', 'waves', 'poly'].includes(p.preset) ? p.preset : 'dots',
     density: typeof p.density === 'number' ? Math.min(1, Math.max(0, p.density)) : 0.5,
     scale: typeof p.scale === 'number' ? Math.min(3, Math.max(0.3, p.scale)) : 1,
+    seed: typeof p.seed === 'number' ? Math.floor(p.seed) : 0,
   }
 }

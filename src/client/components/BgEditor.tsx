@@ -1,6 +1,6 @@
 import { useRef, useState, useEffect, useCallback } from 'react'
-import { ST } from '../styles'
 import { rBgState } from '../state'
+import { Portal } from './Portal'
 
 export function BgEditor({ url, t, onClose, onCommit }: {
   url: string; t: (key: string) => string; onClose: () => void
@@ -56,7 +56,8 @@ export function BgEditor({ url, t, onClose, onCommit }: {
     // Anchor the zoom at the preview center so the mouse position never
     // steers where the image grows/shrinks — the current view stays centered.
     const mx = rect.width / 2, my = rect.height / 2
-    const factor = e.deltaY > 0 ? 0.92 : 1.08
+    // 3% per wheel step (0.97 zoom-out / 1.03 zoom-in).
+    const factor = e.deltaY > 0 ? 0.97 : 1.03
     const nz = Math.max(0.1, Math.min(10, zoom * factor))
     const nx = mx - (mx - pos.x) * (nz / zoom)
     const ny = my - (my - pos.y) * (nz / zoom)
@@ -76,20 +77,26 @@ export function BgEditor({ url, t, onClose, onCommit }: {
   }, [pw, ph, imgSize])
 
   return (
-    <div style={ST.overlay} onClick={e => { if (e.target === e.currentTarget) onClose() }}>
-      <div style={ST.modalTitle}>{t('editorTitle')}</div>
-      <div ref={containerRef} style={{ ...ST.previewRect, width: pw, height: ph }} onMouseDown={onDown}>
-        <img ref={imgRef} src={url} alt="" draggable={false} style={{
-          ...ST.previewImg, width: imgSize.w, height: imgSize.h,
-          transform: `translate(${pos.x}px,${pos.y}px) scale(${zoom})`,
-        }} />
+    <Portal>
+      <div className="dab-overlay" onClick={e => { if (e.target === e.currentTarget) onClose() }}>
+        <div className="dab-overlay-title">{t('editorTitle')}</div>
+        <div ref={containerRef} className="dab-modal-card" style={{
+          position: 'relative', overflow: 'hidden', border: '2px solid rgba(255,255,255,0.3)',
+          borderRadius: 12, background: '#000', cursor: 'grab', width: pw, height: ph,
+        }} onMouseDown={onDown}>
+          <img ref={imgRef} src={url} alt="" draggable={false} style={{
+            position: 'absolute', transformOrigin: '0 0', pointerEvents: 'none',
+            width: imgSize.w, height: imgSize.h,
+            transform: `translate(${pos.x}px,${pos.y}px) scale(${zoom})`,
+          }} />
+        </div>
+        <div className="dab-overlay-hint">{t('editorHint')}</div>
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button type="button" className="dab-btn" onClick={resetView}>{t('editorReset')}</button>
+          <button type="button" className="dab-btn" onClick={onClose}>{t('editorCancel')}</button>
+          <button type="button" className="dab-btn dab-btn-primary" onClick={() => onCommit(zoom, (pos.x + imgSize.w * zoom / 2) / pw, (pos.y + imgSize.h * zoom / 2) / ph, imgRef.current?.naturalWidth ?? 0, imgRef.current?.naturalHeight ?? 0)}>{t('editorCommit')}</button>
+        </div>
       </div>
-      <div style={ST.modalHint}>{t('editorHint')}</div>
-      <div style={ST.modalBtns}>
-        <button style={ST.btn} onClick={resetView}>{t('editorReset')}</button>
-        <button style={ST.btn} onClick={onClose}>{t('editorCancel')}</button>
-        <button style={{ ...ST.btn, ...ST.btnPrimary }} onClick={() => onCommit(zoom, (pos.x + imgSize.w * zoom / 2) / pw, (pos.y + imgSize.h * zoom / 2) / ph, imgRef.current?.naturalWidth ?? 0, imgRef.current?.naturalHeight ?? 0)}>{t('editorCommit')}</button>
-      </div>
-    </div>
+    </Portal>
   )
 }

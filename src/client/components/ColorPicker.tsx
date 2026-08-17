@@ -1,6 +1,6 @@
 import { useRef, useState, useEffect, useCallback } from 'react'
-import { ST } from '../styles'
 import { rgbToHsl, hslToHsv } from '../utils/color'
+import { Portal } from './Portal'
 
 const MAG_SIZE = 96
 const MAG_ZOOM = 8
@@ -96,24 +96,34 @@ export function ColorPicker({ url, t, onPick, onClose }: {
   }
 
   return (
-    <div style={ST.overlay}>
-      <div style={ST.modalTitle}>{t('pickerTitle')}</div>
-      <div style={ST.modalHint}>{t('pickerHint')}</div>
-      <div style={ST.pickerBox}>
-        <canvas ref={canvasRef} style={ST.pickerCanvas}
-          onMouseMove={onMove}
-          onMouseLeave={() => { setHover(null); setMag(null) }}
-          onClick={onClick} />
+    <Portal>
+      <div className="dab-overlay">
+        <div className="dab-overlay-title">{t('pickerTitle')}</div>
+        <div className="dab-overlay-hint">{t('pickerHint')}</div>
+        <div className="dab-modal-card" style={{
+          maxWidth: 'min(90vw, 720px)', maxHeight: '60vh', overflow: 'hidden',
+          borderRadius: 12, border: '2px solid rgba(255,255,255,0.3)', background: '#000', cursor: 'crosshair',
+        }}>
+          <canvas ref={canvasRef} style={{ display: 'block', maxWidth: '100%', maxHeight: '60vh', objectFit: 'contain' }}
+            onMouseMove={onMove}
+            onMouseLeave={() => { setHover(null); setMag(null) }}
+            onClick={onClick} />
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 260 }}>
+          <div style={{ width: 28, height: 28, borderRadius: 8, border: '1px solid rgba(255,255,255,0.4)', background: hover ? toHex(hover.rgb) : 'transparent' }} />
+          <div style={{ color: '#fff', fontSize: 13, fontFamily: 'var(--dab-mono, monospace)' }}>{hover ? `${toHex(hover.rgb)} · rgb(${hover.rgb.join(', ')})` : '—'}</div>
+        </div>
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button type="button" className="dab-btn" onClick={onClose}>{t('pickerClose')}</button>
+        </div>
+        <canvas ref={magRef} width={MAG_SIZE} height={MAG_SIZE}
+          style={{
+            position: 'fixed', width: MAG_SIZE, height: MAG_SIZE, borderRadius: '50%',
+            border: '2px solid rgba(255,255,255,0.7)', boxShadow: '0 4px 16px rgba(0,0,0,0.5)',
+            zIndex: 10000, background: '#000', pointerEvents: 'none', transition: 'opacity 0.08s',
+            left: mag?.x ?? 0, top: mag?.y ?? 0, opacity: mag ? 1 : 0,
+          }} />
       </div>
-      <div style={ST.pickerBar}>
-        <div style={{ ...ST.pickerSwatch, background: hover ? toHex(hover.rgb) : 'transparent' }} />
-        <div style={ST.pickerValue}>{hover ? `${toHex(hover.rgb)} · rgb(${hover.rgb.join(', ')})` : '—'}</div>
-      </div>
-      <div style={ST.modalBtns}>
-        <button type="button" style={ST.btn} onClick={onClose}>{t('pickerClose')}</button>
-      </div>
-      <canvas ref={magRef} width={MAG_SIZE} height={MAG_SIZE}
-        style={{ ...ST.magnifier, left: mag?.x ?? 0, top: mag?.y ?? 0, opacity: mag ? 1 : 0 }} />
-    </div>
+    </Portal>
   )
 }

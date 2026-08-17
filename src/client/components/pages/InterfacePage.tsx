@@ -1,0 +1,95 @@
+import type { CSSProperties, ComponentType } from 'react'
+import type { ThemeSectionProps, PartOpacities, PartBlurs } from '../../types'
+import { cfg, rOps, rSop, rBlurs } from '../../state'
+import { saveConfig } from '../../rpc'
+import { applyCustomTokens, applySettingsOverrides, setPartBlur } from '../../wallpaper'
+import { LiveSlider } from '../LiveSlider'
+import { CanvasIcon, SidebarIcon, ChatIcon, GearIcon } from '../icons'
+
+interface PartDef {
+  labelKey: string
+  Icon: ComponentType<{ size?: number }>
+  /** Homepage part key; absent for the settings-panel part. */
+  opKey?: keyof PartOpacities
+  isSettings?: boolean
+}
+
+const PARTS: PartDef[] = [
+  { opKey: 'bg', labelKey: 'uiOpacityBg', Icon: CanvasIcon },
+  { opKey: 'sidebar', labelKey: 'uiOpacitySide', Icon: SidebarIcon },
+  { opKey: 'card', labelKey: 'uiOpacityCard', Icon: ChatIcon },
+  { isSettings: true, labelKey: 'uiSop', Icon: GearIcon },
+]
+
+export function InterfacePage({ p }: { p: ThemeSectionProps }) {
+  const { t, setOps, setBlurs, setSop } = p
+
+  return (
+    <>
+      <header className="dab-head dab-rise" style={{ '--d': 0 } as CSSProperties}>
+        <div className="dab-overline">Surfaces</div>
+        <h2 className="dab-h1">{t('uiTitle')}</h2>
+        <p className="dab-desc">{t('descInterface')}</p>
+      </header>
+
+      <div className="dab-grid-parts">
+        {PARTS.map((part, i) => {
+          const { labelKey, Icon, isSettings } = part
+          const opKey = part.opKey
+          const blurKey: keyof PartBlurs = opKey ?? 'settings'
+          const opacity = isSettings ? rSop() : rOps()[opKey!]
+          return (
+            <section key={blurKey} className="dab-card dab-card-hover dab-rise" style={{ '--d': i + 1 } as CSSProperties}>
+              <div className="dab-part-head">
+                <div className="dab-part-ico"><Icon size={16} /></div>
+                <div className="dab-part-name">{t(labelKey)}</div>
+                <span className="dab-part-badge">{Math.round(opacity * 100)}%</span>
+              </div>
+
+              <LiveSlider label={t('uiOpacity')} min={0} max={100} step={1} def={Math.round(opacity * 100)}
+                fmt={v => `${v}%`}
+                onInput={v => {
+                  const op = v / 100
+                  if (isSettings) {
+                    cfg.settingsOpacity = op
+                    applySettingsOverrides(op)
+                  } else {
+                    const ops = { ...rOps() }
+                    ops[opKey!] = op
+                    cfg.opacities = ops
+                    applyCustomTokens(ops)
+                  }
+                  saveConfig()
+                }}
+                onChange={v => {
+                  const op = v / 100
+                  if (isSettings) {
+                    setSop(op)
+                  } else {
+                    const ops = { ...rOps() }
+                    ops[opKey!] = op
+                    setOps(ops)
+                  }
+                }} />
+
+              <LiveSlider label={t('uiBlur')} min={0} max={60} step={1} def={rBlurs()[blurKey]}
+                fmt={v => `${v}px`}
+                onInput={v => {
+                  const blurs = { ...rBlurs() }
+                  blurs[blurKey] = v
+                  cfg.blurs = blurs
+                  setPartBlur(blurKey, v)
+                  saveConfig()
+                }}
+                onChange={v => {
+                  const blurs = { ...rBlurs() }
+                  blurs[blurKey] = v
+                  setBlurs(blurs)
+                }} />
+            </section>
+          )
+        })}
+      </div>
+    </>
+  )
+}

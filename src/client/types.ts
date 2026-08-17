@@ -64,6 +64,8 @@ export interface ShaderParams {
   preset: 'aurora' | 'nebula' | 'noise'
   speed: number
   scale: number
+  /** Visual random seed; changing it regenerates the same preset with new variation. */
+  seed: number
 }
 
 export interface PatternParams {
@@ -71,6 +73,8 @@ export interface PatternParams {
   preset: 'dots' | 'waves' | 'poly'
   density: number
   scale: number
+  /** Visual random seed; changing it regenerates the same preset with new variation. */
+  seed: number
 }
 
 export type GeneratedBgParams = MeshGradientParams | ShaderParams | PatternParams
@@ -108,14 +112,20 @@ export interface ThemeConfig {
   backgroundType: BackgroundType
   /** Parameters for generated backgrounds (not used for images). */
   generatedBg: GeneratedBgParams | null
+  /** Whether to regenerate generated backgrounds on page reload. */
+  regenerateOnReload: boolean
 }
 
-/** State shape of the section's store (wallpaper URL + programmatic color). */
+/** State shape of the section's reactive store (URL, color, background type). */
 export interface ThemeStoreState {
   url: string | null
   rev: number
   colorRev: number
   color: [number, number, number] | null
+  backgroundType: BackgroundType
+  generatedBg: GeneratedBgParams | null
+  bgRev: number
+  regenerateOnReload: boolean
 }
 
 /** Props the slots host injects into the theme section. */
@@ -133,11 +143,10 @@ export interface ThemeSectionProps {
   setWop: (v: number) => void
   setBl: (v: number) => void
   setSop: (v: number) => void
-  backgroundType: BackgroundType
-  generatedBg: GeneratedBgParams | null
   setBgType: (type: BackgroundType) => void
   setGeneratedBg: (params: GeneratedBgParams) => void
   regenerateBg: () => void
+  setRegenerateOnReload: (v: boolean) => void
   extractColor: () => Promise<boolean>
   /** Download the current theme (config + wallpaper data URL) as JSON. */
   exportTheme: () => void
@@ -148,7 +157,7 @@ export interface ThemeSectionProps {
 
 /** The store's bound actions the slots host hands to sectionInject. */
 export interface BoundActions {
-  syncBg: (url: string | null, rev: number) => void
+  syncBg: (url: string | null, rev: number, backgroundType?: BackgroundType, generatedBg?: GeneratedBgParams | null, bgRev?: number, regenerateOnReload?: boolean) => void
   syncColor: (hsv: [number, number, number], rev: number) => void
 }
 

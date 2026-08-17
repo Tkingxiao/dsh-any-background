@@ -12,6 +12,7 @@ const ID = 'dsh-any-background'
 const EXTERNALS = [
   '@deepseek-ai/dsh-home-paths',
   'react',
+  'react-dom',
   'react/jsx-runtime',
   '@deepseek-ai/dsh-client-connection',
   '@deepseek-ai/dsh-client-runtime',
