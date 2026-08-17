@@ -1,4 +1,4 @@
-import type { BgState, ThemeConfig, PartOpacities, PartBlurs } from './types'
+import type { BgState, ThemeConfig, PartOpacities, PartBlurs, ColorPalette } from './types'
 
 export const DEFAULT_CONFIG: ThemeConfig = {
   color: null,
@@ -8,7 +8,16 @@ export const DEFAULT_CONFIG: ThemeConfig = {
   wallpaperOpacity: 1,
   blur: 0,
   bgState: { zoom: 1, x: 0, y: 0, iw: 0, ih: 0 },
+  backgroundType: 'image',
+  generatedBg: null,
 }
+
+// Derived Material-You-style palette. It is recomputed from the active
+// wallpaper/generated background whenever the background changes, and used by
+// genTokens to map brand/accent/surface colors more harmoniously.
+export let palette: ColorPalette | null = null
+export function setPalette(p: ColorPalette | null): void { palette = p }
+export function rPalette(): ColorPalette | null { return palette }
 
 // In-memory mirror of the file-backed store. The node half owns the disk; this
 // module is the single source of truth the UI reads from and mutates, synced
@@ -56,6 +65,12 @@ export function adoptConfig(raw: unknown): void {
   const legacy = typeof c.opacity === 'number' ? c.opacity : null
   const ops = (c.opacities ?? {}) as Partial<PartOpacities>
   const bl = (c.blurs ?? {}) as Partial<PartBlurs>
+  const bgType = (c.backgroundType === 'mesh' || c.backgroundType === 'shader' || c.backgroundType === 'pattern') ? c.backgroundType : DEFAULT_CONFIG.backgroundType
+  const gen = c.generatedBg && typeof c.generatedBg === 'object'
+    ? (c.generatedBg as { type?: string })
+    : null
+  const generatedBg = gen && gen.type === bgType ? (c.generatedBg as ThemeConfig['generatedBg']) : null
+
   cfg = {
     color,
     opacities: {
@@ -79,5 +94,33 @@ export function adoptConfig(raw: unknown): void {
       iw: typeof bg.iw === 'number' && bg.iw > 0 ? bg.iw : 0,
       ih: typeof bg.ih === 'number' && bg.ih > 0 ? bg.ih : 0,
     },
+    backgroundType: bgType,
+    generatedBg: generatedBg ? normalizeGeneratedBg(generatedBg) : null,
+  }
+}
+
+function normalizeGeneratedBg(p: ThemeConfig['generatedBg']): ThemeConfig['generatedBg'] {
+  if (!p) return null
+  if (p.type === 'mesh') {
+    return {
+      type: 'mesh',
+      seed: typeof p.seed === 'number' ? p.seed : 0,
+      scale: typeof p.scale === 'number' ? Math.min(3, Math.max(0.3, p.scale)) : 1,
+      intensity: typeof p.intensity === 'number' ? Math.min(1, Math.max(0, p.intensity)) : 0.6,
+    }
+  }
+  if (p.type === 'shader') {
+    return {
+      type: 'shader',
+      preset: ['aurora', 'nebula', 'noise'].includes(p.preset) ? p.preset : 'aurora',
+      speed: typeof p.speed === 'number' ? Math.min(2, Math.max(0, p.speed)) : 0.3,
+      scale: typeof p.scale === 'number' ? Math.min(3, Math.max(0.3, p.scale)) : 1,
+    }
+  }
+  return {
+    type: 'pattern',
+    preset: ['dots', 'waves', 'poly'].includes(p.preset) ? p.preset : 'dots',
+    density: typeof p.density === 'number' ? Math.min(1, Math.max(0, p.density)) : 0.5,
+    scale: typeof p.scale === 'number' ? Math.min(3, Math.max(0.3, p.scale)) : 1,
   }
 }

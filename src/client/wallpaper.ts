@@ -1,6 +1,7 @@
-import { rWp, rBgState, rBl, rWop, rOps, rSop, rColor, rBlurs } from './state'
-import type { PartOpacities, PartBlurs } from './types'
-import { genTokens, toRgba } from './utils/color'
+import { rWp, rBgState, rBl, rWop, rOps, rSop, rColor, rBlurs, rPalette, setPalette, cfg, setWpUrl, setBgState, DEFAULT_CONFIG } from './state'
+import type { BackgroundType, GeneratedBgParams, PartOpacities, PartBlurs } from './types'
+import { genTokens, toRgba, extractWallpaperPalette, paletteFromHsl } from './utils/color'
+import { renderGeneratedBg, defaultParamsFor, RENDER_W, RENDER_H } from './utils/bg-generators'
 
 let wpEl: HTMLDivElement | null = null
 let appliedTokenNames: string[] = []
@@ -21,7 +22,7 @@ function clearCustomTokens(): void {
  */
 export function applyCustomTokens(ops: PartOpacities): void {
   const [h, s, l] = rColor()
-  const { tokens } = genTokens(h, s, l)
+  const { tokens } = genTokens(h, s, l, rPalette())
   clearCustomTokens()
   // Drive the base-palette switch ourselves so tokens the plugin does not
   // override (the input surface, masks, static tokens) follow the picked
@@ -63,10 +64,65 @@ export function applySettingsOverrides(op: number): void {
   // computed-style read), so the settings panel matches the homepage tint
   // without depending on the presenter or theme state.
   const [h, s, l] = rColor()
-  const layer2 = genTokens(h, s, l).tokens['--dsw-alias-bg-layer-2']
+  const layer2 = genTokens(h, s, l, rPalette()).tokens['--dsw-alias-bg-layer-2']
   if (layer2 !== undefined) {
     document.documentElement.style.setProperty('--dsh-any-bg-settings-surface', toRgba(layer2, op))
   }
+}
+
+// ── Generated backgrounds & palette refresh ───────────────────────────────────
+
+/** Derive a Material-You-style palette from the current wallpaper/color and
+ *  re-apply so the generated tokens pick it up. Called whenever the wallpaper
+ *  source changes (image upload, generated bg switch/regeneration). */
+export function refreshPaletteAndApply(): void {
+  const url = rWp()
+  const color = rColor()
+  if (url) {
+    void extractWallpaperPalette(url, rBgState()).then(palette => {
+      setPalette(palette ?? paletteFromHsl(color))
+      applyWp()
+    })
+  } else {
+    setPalette(paletteFromHsl(color))
+    applyWp()
+  }
+}
+
+/** Switch the background source type. For generated types a new data URL is
+ *  rendered immediately and the parameters are persisted. */
+export function setBackgroundType(type: BackgroundType): void {
+  cfg.backgroundType = type
+  if (type === 'image') {
+    // Keep the existing image URL (or null) as-is.
+    refreshPaletteAndApply()
+    return
+  }
+  cfg.generatedBg = defaultParamsFor(type)
+  setBgState({ ...DEFAULT_CONFIG.bgState, iw: RENDER_W, ih: RENDER_H })
+  const url = renderGeneratedBg(cfg.generatedBg)
+  // The URL is set synchronously; palette extraction runs async below.
+  setWpUrl(url)
+  refreshPaletteAndApply()
+}
+
+/** Regenerate the current generated background from its saved parameters. */
+export function regenerateGeneratedBg(): void {
+  const params = cfg.generatedBg
+  if (!params || cfg.backgroundType === 'image') return
+  const url = renderGeneratedBg(params)
+  setWpUrl(url)
+  refreshPaletteAndApply()
+}
+
+/** Update a generated background's parameters and re-render. */
+export function updateGeneratedBg(params: GeneratedBgParams): void {
+  cfg.backgroundType = params.type
+  cfg.generatedBg = params
+  setBgState({ ...DEFAULT_CONFIG.bgState, iw: RENDER_W, ih: RENDER_H })
+  const url = renderGeneratedBg(params)
+  setWpUrl(url)
+  refreshPaletteAndApply()
 }
 
 // ── Per-part interface blur ───────────────────────────────────────────────────

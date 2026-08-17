@@ -1,4 +1,4 @@
-import type { BgState } from '../types'
+import type { BgState, ColorPalette } from '../types'
 
 // ── HSV ↔ HSL ────────────────────────────────────────────────────────────────
 // The wheel works in HSV end to end: props and pickSL are HSV, the canvas
@@ -28,16 +28,24 @@ let tokensCache: { colorScheme: 'light' | 'dark'; tokens: Record<string, string>
  * same token set, and applyWp / applyCustomTokens / applySettingsOverrides call
  * this repeatedly (slider drags, viewport re-applies), so cache the last result
  * and skip the 30+ hsl() string builds when nothing changed.
+ *
+ * When a Material-You-style palette is provided, primary/secondary/tertiary
+ * hues are used for brand and accent tokens; the surface and label colors still
+ * follow the primary hue so the scheme stays readable.
  */
-export function genTokens(hue: number, sat: number, lit: number): { colorScheme: 'light' | 'dark'; tokens: Record<string, string> } {
-  const key = `${hue}|${sat}|${lit}`
+export function genTokens(hue: number, sat: number, lit: number, palette?: ColorPalette | null): { colorScheme: 'light' | 'dark'; tokens: Record<string, string> } {
+  const key = `${hue}|${sat}|${lit}|${palette ? hslKey(palette.primary) + '/' + hslKey(palette.secondary) + '/' + hslKey(palette.tertiary) + '/' + hslKey(palette.surface) : ''}`
   if (tokensCacheKey === key && tokensCache) return tokensCache
   tokensCacheKey = key
-  tokensCache = buildTokens(hue, sat, lit)
+  tokensCache = buildTokens(hue, sat, lit, palette)
   return tokensCache
 }
 
-function buildTokens(hue: number, sat: number, lit: number): { colorScheme: 'light' | 'dark'; tokens: Record<string, string> } {
+function hslKey([h, s, l]: [number, number, number]): string {
+  return `${Math.round(h)}:${Math.round(s * 100)}:${Math.round(l * 100)}`
+}
+
+function buildTokens(hue: number, sat: number, lit: number, palette?: ColorPalette | null): { colorScheme: 'light' | 'dark'; tokens: Record<string, string> } {
   const dark = lit < 0.55
   const h = (d: number) => ((hue + d) % 360 + 360) % 360
   const s = (d: number) => Math.max(0, Math.min(1, sat + d))
@@ -46,17 +54,23 @@ function buildTokens(hue: number, sat: number, lit: number): { colorScheme: 'lig
   const rgba = (hh: number, ss: number, ll: number, a: number) =>
     `hsla(${Math.round(hh)},${Math.round(ss * 100)}%,${Math.round(ll * 100)}%,${a})`
 
+  // Material-You-style accent hues from the extracted/generated palette.
+  const accentHue = palette ? palette.tertiary[0] : h(180)
+  const secondaryHue = palette ? palette.secondary[0] : h(30)
+  const surfaceHue = palette ? palette.surface[0] : hue
+  const surfaceSat = palette ? Math.min(0.08, palette.surface[1]) : 0
+
   if (dark) {
     return {
       colorScheme: 'dark',
       tokens: {
-        '--dsw-alias-bg-base': hsl(h(0), s(0), l(-0.04)),
-        '--dsw-alias-bg-layer-1': hsl(h(0), s(0), l(0.02)),
-        '--dsw-alias-bg-layer-2': hsl(h(0), s(0), l(0.07)),
-        '--dsw-alias-bg-layer-3': hsl(h(0), s(-0.05), l(0.12)),
-        '--dsw-alias-bg-overlay': hsl(h(0), s(-0.05), l(0.12)),
-        '--dsw-alias-border-l1': rgba(h(0), s(-0.1), l(0.18), 0.12),
-        '--dsw-alias-border-l2': rgba(h(0), s(-0.1), l(0.22), 0.22),
+        '--dsw-alias-bg-base': hsl(surfaceHue, surfaceSat, l(-0.04)),
+        '--dsw-alias-bg-layer-1': hsl(surfaceHue, surfaceSat, l(0.02)),
+        '--dsw-alias-bg-layer-2': hsl(surfaceHue, Math.min(1, surfaceSat + 0.03), l(0.07)),
+        '--dsw-alias-bg-layer-3': hsl(surfaceHue, Math.min(1, surfaceSat + 0.05), l(0.12)),
+        '--dsw-alias-bg-overlay': hsl(surfaceHue, Math.min(1, surfaceSat + 0.05), l(0.12)),
+        '--dsw-alias-border-l1': rgba(surfaceHue, s(-0.1), l(0.18), 0.12),
+        '--dsw-alias-border-l2': rgba(surfaceHue, s(-0.1), l(0.22), 0.22),
         '--dsw-alias-label-primary': hsl(0, 0, 1),
         '--dsw-alias-label-secondary': hsl(0, 0, 1),
         '--dsw-alias-label-tertiary': hsl(0, 0, 1),
@@ -66,26 +80,26 @@ function buildTokens(hue: number, sat: number, lit: number): { colorScheme: 'lig
         '--dsw-alias-label-caption': hsl(0, 0, 1),
         '--dsw-alias-label-dimmed': hsl(0, 0, 1),
         '--dsw-alias-label-quaternary': hsl(0, 0, 1),
-        '--dsw-alias-brand-primary': hsl(h(0), s(0.1), Math.max(l(0.2), 0.5)),
-        '--dsw-alias-brand-text': l(0.2) > 0.6 ? '#000' : '#fff',
-        '--dsw-alias-button-primary-hover': hsl(h(0), s(0.1), Math.max(l(0.28), 0.58)),
-        '--dsw-alias-button-primary-dimmed': hsl(h(0), s(0), l(0.07)),
-        '--dsw-alias-button-elevated-fill': hsl(h(0), s(0), l(0.04)),
-        '--dsw-alias-interactive-bg-hover': rgba(h(0), s(0), Math.max(l(0.15), 0.4), 0.12),
-        '--dsw-alias-interactive-bg-active': rgba(h(0), s(0), Math.max(l(0.15), 0.4), 0.2),
+        '--dsw-alias-brand-primary': hsl(secondaryHue, Math.min(1, s(0.15) + 0.05), Math.max(l(0.15), 0.5)),
+        '--dsw-alias-brand-text': l(0.15) > 0.6 ? '#000' : '#fff',
+        '--dsw-alias-button-primary-hover': hsl(secondaryHue, Math.min(1, s(0.15) + 0.05), Math.max(l(0.25), 0.58)),
+        '--dsw-alias-button-primary-dimmed': hsl(secondaryHue, Math.min(1, s(0.05) + 0.02), l(0.07)),
+        '--dsw-alias-button-elevated-fill': hsl(surfaceHue, surfaceSat, l(0.04)),
+        '--dsw-alias-interactive-bg-hover': rgba(accentHue, Math.min(1, s(0.05) + 0.05), Math.max(l(0.15), 0.4), 0.12),
+        '--dsw-alias-interactive-bg-active': rgba(accentHue, Math.min(1, s(0.05) + 0.05), Math.max(l(0.15), 0.4), 0.2),
         '--dsw-alias-markdown-code-block': hsl(h(0), s(0), l(-0.06)),
         '--dsw-alias-markdown-inline-code': hsl(h(0), s(0), l(0.04)),
         '--dsw-alias-state-error-primary': '#ff5c72',
         '--dsw-alias-state-success-primary': '#3ddc84',
         '--dsw-alias-state-warn-primary': '#ffb347',
-        '--dsw-specific-sidebar-fill': hsl(h(0), s(0), l(-0.06)),
-        '--dsw-specific-sidebar-nav-item-active': hsl(h(0), s(0), l(0.04)),
-        '--dsw-specific-sidebar-nav-item-hover': hsl(h(0), s(0), l(0)),
-        '--dsw-specific-input-major': hsl(h(0), s(0), l(0.02)),
-        '--dsw-alias-scrollbar-bg-l1': hsl(h(0), s(-0.05), l(0.12)),
-        '--dsw-alias-scrollbar-bg-l2': hsl(h(0), s(-0.05), l(0.16)),
-        '--dsw-alias-scrollbar-hover-l1': hsl(h(0), s(-0.05), l(0.22)),
-        '--dsw-alias-scrollbar-hover-l2': hsl(h(0), s(-0.05), l(0.22)),
+        '--dsw-specific-sidebar-fill': hsl(surfaceHue, surfaceSat, l(-0.06)),
+        '--dsw-specific-sidebar-nav-item-active': hsl(surfaceHue, Math.min(1, surfaceSat + 0.02), l(0.04)),
+        '--dsw-specific-sidebar-nav-item-hover': hsl(surfaceHue, surfaceSat, l(0)),
+        '--dsw-specific-input-major': hsl(surfaceHue, surfaceSat, l(0.02)),
+        '--dsw-alias-scrollbar-bg-l1': hsl(surfaceHue, Math.min(1, surfaceSat + 0.02), l(0.12)),
+        '--dsw-alias-scrollbar-bg-l2': hsl(surfaceHue, Math.min(1, surfaceSat + 0.04), l(0.16)),
+        '--dsw-alias-scrollbar-hover-l1': hsl(surfaceHue, Math.min(1, surfaceSat + 0.04), l(0.22)),
+        '--dsw-alias-scrollbar-hover-l2': hsl(surfaceHue, Math.min(1, surfaceSat + 0.06), l(0.22)),
       },
     }
   }
@@ -94,13 +108,13 @@ function buildTokens(hue: number, sat: number, lit: number): { colorScheme: 'lig
     tokens: {
       // Backgrounds track the picked color at its lightness — theme-colored,
       // with only mild desaturation so the surfaces stay readable.
-      '--dsw-alias-bg-base': hsl(h(0), s(-0.08), l(0.03)),
-      '--dsw-alias-bg-layer-1': hsl(h(0), s(-0.12), l(0.07)),
-      '--dsw-alias-bg-layer-2': hsl(h(0), s(-0.1), l(-0.03)),
-      '--dsw-alias-bg-layer-3': hsl(h(0), s(-0.08), l(-0.09)),
-      '--dsw-alias-bg-overlay': hsl(h(0), s(-0.12), l(0.08)),
-      '--dsw-alias-border-l1': rgba(h(0), s(-0.15), l(-0.35), 0.18),
-      '--dsw-alias-border-l2': rgba(h(0), s(-0.15), l(-0.35), 0.3),
+      '--dsw-alias-bg-base': hsl(surfaceHue, surfaceSat, l(0.03)),
+      '--dsw-alias-bg-layer-1': hsl(surfaceHue, Math.min(1, surfaceSat + 0.03), l(0.07)),
+      '--dsw-alias-bg-layer-2': hsl(surfaceHue, Math.min(1, surfaceSat + 0.05), l(-0.03)),
+      '--dsw-alias-bg-layer-3': hsl(surfaceHue, Math.min(1, surfaceSat + 0.08), l(-0.09)),
+      '--dsw-alias-bg-overlay': hsl(surfaceHue, surfaceSat, l(0.08)),
+      '--dsw-alias-border-l1': rgba(surfaceHue, s(-0.15), l(-0.35), 0.18),
+      '--dsw-alias-border-l2': rgba(surfaceHue, s(-0.15), l(-0.35), 0.3),
       // Text is pure black on light surfaces, pure white on dark.
       '--dsw-alias-label-primary': hsl(0, 0, 0),
       '--dsw-alias-label-secondary': hsl(0, 0, 0),
@@ -111,23 +125,23 @@ function buildTokens(hue: number, sat: number, lit: number): { colorScheme: 'lig
       '--dsw-alias-label-caption': hsl(0, 0, 0),
       '--dsw-alias-label-dimmed': hsl(0, 0, 0),
       '--dsw-alias-label-quaternary': hsl(0, 0, 0),
-      '--dsw-alias-brand-primary': hsl(h(0), s(0.05), Math.min(l(-0.18), 0.45)),
+      '--dsw-alias-brand-primary': hsl(secondaryHue, Math.min(1, s(0.1) + 0.05), Math.min(l(-0.18), 0.45)),
       '--dsw-alias-brand-text': '#fff',
-      '--dsw-alias-button-primary-hover': hsl(h(0), s(0.05), Math.min(l(-0.12), 0.5)),
-      '--dsw-alias-button-primary-dimmed': hsl(h(0), s(-0.1), l(-0.03)),
-      '--dsw-alias-button-elevated-fill': hsl(h(0), s(-0.1), l(0.1)),
-      '--dsw-alias-interactive-bg-hover': rgba(h(0), s(0), l(-0.3), 0.08),
-      '--dsw-alias-interactive-bg-active': rgba(h(0), s(0), l(-0.3), 0.14),
+      '--dsw-alias-button-primary-hover': hsl(secondaryHue, Math.min(1, s(0.1) + 0.05), Math.min(l(-0.12), 0.5)),
+      '--dsw-alias-button-primary-dimmed': hsl(secondaryHue, Math.min(1, s(0.05) + 0.02), l(-0.03)),
+      '--dsw-alias-button-elevated-fill': hsl(surfaceHue, Math.min(1, surfaceSat + 0.02), l(0.1)),
+      '--dsw-alias-interactive-bg-hover': rgba(accentHue, Math.min(1, s(0.05) + 0.05), l(-0.3), 0.08),
+      '--dsw-alias-interactive-bg-active': rgba(accentHue, Math.min(1, s(0.05) + 0.05), l(-0.3), 0.14),
       '--dsw-alias-markdown-code-block': hsl(h(0), s(-0.1), l(-0.03)),
       '--dsw-alias-markdown-inline-code': hsl(h(0), s(-0.08), l(0.04)),
-      '--dsw-specific-sidebar-fill': hsl(h(0), s(-0.1), l(-0.03)),
-      '--dsw-specific-sidebar-nav-item-active': hsl(h(0), s(-0.08), l(0.05)),
-      '--dsw-specific-sidebar-nav-item-hover': hsl(h(0), s(-0.12), l(0)),
-      '--dsw-specific-input-major': hsl(h(0), s(-0.12), l(0.1)),
-      '--dsw-alias-scrollbar-bg-l1': hsl(h(0), s(-0.1), l(-0.08)),
-      '--dsw-alias-scrollbar-bg-l2': hsl(h(0), s(-0.08), l(-0.12)),
-      '--dsw-alias-scrollbar-hover-l1': hsl(h(0), s(-0.08), l(-0.16)),
-      '--dsw-alias-scrollbar-hover-l2': hsl(h(0), s(-0.08), l(-0.16)),
+      '--dsw-specific-sidebar-fill': hsl(surfaceHue, Math.min(1, surfaceSat + 0.02), l(-0.03)),
+      '--dsw-specific-sidebar-nav-item-active': hsl(surfaceHue, Math.min(1, surfaceSat + 0.05), l(0.05)),
+      '--dsw-specific-sidebar-nav-item-hover': hsl(surfaceHue, surfaceSat, l(0)),
+      '--dsw-specific-input-major': hsl(surfaceHue, Math.min(1, surfaceSat + 0.02), l(0.1)),
+      '--dsw-alias-scrollbar-bg-l1': hsl(surfaceHue, Math.min(1, surfaceSat + 0.02), l(-0.08)),
+      '--dsw-alias-scrollbar-bg-l2': hsl(surfaceHue, Math.min(1, surfaceSat + 0.04), l(-0.12)),
+      '--dsw-alias-scrollbar-hover-l1': hsl(surfaceHue, Math.min(1, surfaceSat + 0.04), l(-0.16)),
+      '--dsw-alias-scrollbar-hover-l2': hsl(surfaceHue, Math.min(1, surfaceSat + 0.06), l(-0.16)),
     },
   }
 }
@@ -166,10 +180,21 @@ export function rgbToHsl(r: number, g: number, b: number): [number, number, numb
 // clamp lightness into a band that keeps the light/dark scheme decision
 // unambiguous. Purely client-side: no RPC traffic, and memory is bounded by
 // one 64×64 canvas + one ImageData + two small typed arrays.
+//
+// The extraction now returns a Material-You-style palette: primary (dominant),
+// secondary (second-most vivid), tertiary (complementary accent), surface
+// (neutralized dominant), and the average luminance of the sampled image for
+// automatic light/dark decisions.
 
 const EXTRACT_SIDE = 64
 
-export function extractWallpaperColor(dataUrl: string, bgState: BgState): Promise<[number, number, number] | null> {
+interface Bucket { count: number; r: number; g: number; b: number; s: number }
+
+function bucketsToHsl(b: Bucket): [number, number, number] {
+  return rgbToHsl(b.r / b.count, b.g / b.count, b.b / b.count)
+}
+
+export function extractWallpaperPalette(dataUrl: string, bgState: BgState): Promise<ColorPalette | null> {
   return new Promise(resolve => {
     const img = new Image()
     img.onerror = () => resolve(null)
@@ -177,9 +202,6 @@ export function extractWallpaperColor(dataUrl: string, bgState: BgState): Promis
       try {
         const iw = img.naturalWidth || img.width
         const ih = img.naturalHeight || img.height
-        // Sample what the user framed: reuse the wallpaper placement model
-        // (contain-fit at zoom with the center pinned to the committed
-        // fractional point) to crop the visible region in image coordinates.
         const bg = bgState
         let sx = 0, sy = 0, sw = iw, sh = ih
         if (bg.iw === iw && bg.ih === ih && bg.iw > 0) {
@@ -197,49 +219,96 @@ export function extractWallpaperColor(dataUrl: string, bgState: BgState): Promis
         const g = c.getContext('2d', { willReadFrequently: true })!
         g.drawImage(img, sx, sy, sw, sh, 0, 0, EXTRACT_SIDE, EXTRACT_SIDE)
         const px = g.getImageData(0, 0, EXTRACT_SIDE, EXTRACT_SIDE).data
-        // 4-bit RGB quantization → 4096 buckets with pixel counts and sums.
         const counts = new Uint32Array(4096)
         const sums = new Float64Array(4096 * 3)
+        let totalLum = 0
+        let sampled = 0
         for (let i = 0; i < px.length; i += 4) {
           const r = px[i], gg = px[i + 1], b = px[i + 2]
           const max = Math.max(r, gg, b), min = Math.min(r, gg, b)
           const v = max / 255
           const s = max === 0 ? 0 : (max - min) / max
-          // Skip achromatic and nearly black/white pixels — they would yield
-          // dull gray themes.
+          // Include all non-extreme pixels in luminance; only vivid pixels in
+          // palette buckets so we don't theme around gray/black/white.
+          totalLum += v
+          sampled++
           if (s < 0.08 || v < 0.12 || v > 0.97) continue
           const key = ((r >> 4) << 8) | ((gg >> 4) << 4) | (b >> 4)
           counts[key]++
           sums[key * 3] += r; sums[key * 3 + 1] += gg; sums[key * 3 + 2] += b
         }
-        // Winner: the most populous vivid bucket (vividness breaks near ties).
-        let best = -1, bestW = 0
+        const buckets: Bucket[] = []
         for (let k = 0; k < 4096; k++) {
           if (counts[k] === 0) continue
-          const r = sums[k * 3] / counts[k]
-          const gg = sums[k * 3 + 1] / counts[k]
-          const b = sums[k * 3 + 2] / counts[k]
-          const max = Math.max(r, gg, b), min = Math.min(r, gg, b)
-          const s = max === 0 ? 0 : (max - min) / max
-          const w = counts[k] * (0.5 + s)
-          if (w > bestW) { bestW = w; best = k }
+          buckets.push({
+            count: counts[k],
+            r: sums[k * 3],
+            g: sums[k * 3 + 1],
+            b: sums[k * 3 + 2],
+            s: (Math.max(sums[k * 3], sums[k * 3 + 1], sums[k * 3 + 2]) - Math.min(sums[k * 3], sums[k * 3 + 1], sums[k * 3 + 2])) / Math.max(sums[k * 3], sums[k * 3 + 1], sums[k * 3 + 2]) || 0,
+          })
         }
-        if (best < 0) { resolve(null); return }
-        const r = sums[best * 3] / counts[best]
-        const gg = sums[best * 3 + 1] / counts[best]
-        const b = sums[best * 3 + 2] / counts[best]
-        const [h, s, l] = rgbToHsl(r, gg, b)
-        // Keep hue and saturation, snap lightness out of the ambiguous middle
-        // (genTokens decides the scheme at l < 0.55): dark picks land in
-        // [0.2, 0.44], light picks in [0.6, 0.82].
-        const lc = l < 0.5 ? Math.min(0.44, Math.max(0.2, l)) : Math.max(0.6, Math.min(0.82, l))
-        resolve([h, Math.min(0.9, Math.max(0.15, s)), lc])
+        if (buckets.length === 0) { resolve(null); return }
+        // Sort by vivid-weighted count.
+        buckets.sort((a, b) => b.count * (0.5 + b.s) - a.count * (0.5 + a.s))
+        const primary = bucketsToHsl(buckets[0]!)
+        const primaryHue = primary[0]
+        // Secondary: next bucket that is reasonably separated from primary.
+        let secondary = primary
+        for (const b of buckets.slice(1)) {
+          const [h] = bucketsToHsl(b)
+          const sep = Math.abs(((h - primaryHue + 540) % 360) - 180)
+          if (sep > 30) { secondary = bucketsToHsl(b); break }
+        }
+        // Tertiary: complementary-ish hue based on primary if no good secondary.
+        let tertiary: [number, number, number] = [((primaryHue + 180) % 360), Math.min(0.7, primary[1]), Math.min(0.7, primary[2])]
+        for (const b of buckets.slice(1)) {
+          const [h] = bucketsToHsl(b)
+          const sep = Math.abs(((h - primaryHue + 540) % 360) - 180)
+          if (sep > 90 && sep < 150) { tertiary = bucketsToHsl(b); break }
+        }
+        // Surface: neutralized primary (very low saturation).
+        const surface: [number, number, number] = [primaryHue, Math.min(0.06, primary[1] * 0.3), primary[2]]
+        // Auto light/dark: use the average luminance of the whole image so a
+        // bright wallpaper naturally drives a light scheme and vice-versa.
+        const luminance = sampled > 0 ? totalLum / sampled : primary[2]
+        // Snap primary lightness out of the ambiguous middle band.
+        const autoDark = luminance < 0.5
+        const lc = autoDark ? Math.min(0.44, Math.max(0.2, primary[2])) : Math.max(0.6, Math.min(0.82, primary[2]))
+        primary[2] = lc
+        resolve({
+          primary: [primary[0], Math.min(0.9, Math.max(0.15, primary[1])), primary[2]],
+          secondary: [secondary[0], Math.min(0.85, Math.max(0.2, secondary[1])), Math.min(0.75, Math.max(0.35, secondary[2]))],
+          tertiary: [tertiary[0], Math.min(0.8, Math.max(0.2, tertiary[1])), Math.min(0.7, Math.max(0.35, tertiary[2]))],
+          surface,
+          luminance,
+        })
       } catch {
         resolve(null)
       }
     }
     img.src = dataUrl
   })
+}
+
+/** Fallback palette when only a seed HSL color is known (no wallpaper). */
+export function paletteFromHsl([h, s, l]: [number, number, number]): ColorPalette {
+  const autoDark = l < 0.55
+  const lc = autoDark ? Math.min(0.44, Math.max(0.2, l)) : Math.max(0.6, Math.min(0.82, l))
+  const hue = ((h % 360) + 360) % 360
+  return {
+    primary: [hue, Math.min(0.9, Math.max(0.15, s)), lc],
+    secondary: [((hue + 30) % 360), Math.min(0.8, Math.max(0.2, s)), Math.min(0.75, Math.max(0.35, l))],
+    tertiary: [((hue + 180) % 360), Math.min(0.7, Math.max(0.2, s)), Math.min(0.7, Math.max(0.35, l))],
+    surface: [hue, Math.min(0.06, s * 0.3), l],
+    luminance: l,
+  }
+}
+
+/** Backward-compatible single-color extraction: returns the primary HSL. */
+export async function extractWallpaperColor(dataUrl: string, bgState: BgState): Promise<[number, number, number] | null> {
+  const palette = await extractWallpaperPalette(dataUrl, bgState)
+  return palette ? palette.primary : null
 }
 
 /** HSL (h 0-360, s/l 0-1) → RGB (0-255 integers). */

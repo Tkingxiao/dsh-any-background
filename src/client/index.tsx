@@ -26,7 +26,7 @@ import type { Ctx, RpcResultLike, BoundActions, ThemeSectionProps, PartOpacities
 import { NS, zh, en } from './i18n'
 import { cfg, rHasColor, rColor, rWp, rBgState, setWpUrl, setBgState, adoptConfig, DEFAULT_CONFIG } from './state'
 import { RPC_CHANNEL, initRpc, saveConfig, flushSave, loadPersisted, persistWallpaper, persistConfig } from './rpc'
-import { applyWp, teardownWp, applySettingsOverrides, SETTINGS_STYLE_RULE, watchParts } from './wallpaper'
+import { applyWp, teardownWp, applySettingsOverrides, SETTINGS_STYLE_RULE, watchParts, regenerateGeneratedBg, setBackgroundType, updateGeneratedBg, refreshPaletteAndApply } from './wallpaper'
 import { genTokens, hslToHsv, hsvToHsl, extractWallpaperColor } from './utils/color'
 import { ThemeSection } from './components/ThemeSection'
 import { SUN_PATHS } from './components/icons'
@@ -115,7 +115,16 @@ export function apply(ctx: Ctx): void {
       const [h, s, l] = rColor()
       registerCustom(h, s, l)
     }
-    applyWp(); syncBg()
+    // If the user last used a generated background, regenerate the data URL
+    // from the saved parameters (the image itself is not persisted).
+    if (cfg.backgroundType !== 'image') {
+      regenerateGeneratedBg()
+    } else {
+      // For an uploaded image, derive the palette from the wallpaper so the
+      // token colors match it even when no explicit theme color is saved.
+      refreshPaletteAndApply()
+    }
+    syncBg()
     if (rHasColor()) { colorRev++; bound?.syncColor(hslToHsv(...rColor()), colorRev) }
   })
   ctx.effect(() => () => { teardownWp() }, 'dsh-any-background: wp cleanup')
@@ -172,11 +181,13 @@ export function apply(ctx: Ctx): void {
     return {
       t: ctx.locale.bind(NS),
       hue: dh, sat: ds, lit: dv,
+      backgroundType: cfg.backgroundType,
+      generatedBg: cfg.generatedBg,
       setColor: (nh: number, ns: number, nl: number) => {
         const [sh, ss, sl] = hsvToHsl(nh, ns, nl)
         cfg.color = [sh, ss, sl]
         registerCustom(sh, ss, sl)
-        applyWp()
+        refreshPaletteAndApply()
         saveConfig()
         // Keep the wheel's canonical color in the store so programmatic
         // changes (wallpaper extraction) and remounts share one source.
@@ -184,10 +195,30 @@ export function apply(ctx: Ctx): void {
         bound?.syncColor([nh, ns, nl], colorRev)
       },
       setWp: (u: string | null) => {
+        cfg.backgroundType = 'image'
         setWpUrl(u)
         setBgState({ ...DEFAULT_CONFIG.bgState })
-        applyWp(); syncBg()
         persistWallpaper(u)
+        refreshPaletteAndApply()
+        syncBg()
+      },
+      setBgType: (type: ThemeSectionProps['backgroundType']) => {
+        setBackgroundType(type)
+        // Generated backgrounds are reconstructed from params; drop the old
+        // uploaded image from disk so the store does not keep stale wallpaper.jpg.
+        if (type !== 'image') persistWallpaper(null)
+        saveConfig()
+        syncBg()
+      },
+      setGeneratedBg: (params) => {
+        updateGeneratedBg(params)
+        saveConfig()
+        syncBg()
+      },
+      regenerateBg: () => {
+        regenerateGeneratedBg()
+        saveConfig()
+        syncBg()
       },
       setOps: (ops: PartOpacities) => { cfg.opacities = ops; applyWp(); syncBg(); saveConfig() },
       setBlurs: (blurs: PartBlurs) => { cfg.blurs = blurs; applyWp(); syncBg(); saveConfig() },
@@ -203,7 +234,7 @@ export function apply(ctx: Ctx): void {
         if (!hsl) return false
         cfg.color = hsl
         registerCustom(hsl[0], hsl[1], hsl[2])
-        applyWp()
+        refreshPaletteAndApply()
         saveConfig()
         const hsv = hslToHsv(hsl[0], hsl[1], hsl[2])
         colorRev++
@@ -211,13 +242,15 @@ export function apply(ctx: Ctx): void {
         return true
       },
       // Download the whole theme as dsh-any-theme.json: the config plus the
-      // wallpaper as its original data URL, so the file is self-contained.
+      // wallpaper data URL only when it is an uploaded image. Generated
+      // backgrounds are reconstructed from the saved params on import, so the
+      // export stays small.
       exportTheme: () => {
         const payload = {
-          version: 1,
+          version: 2,
           exportedAt: new Date().toISOString(),
           config: cfg,
-          wallpaper: rWp(),
+          wallpaper: cfg.backgroundType === 'image' ? rWp() : null,
         }
         const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
         const url = URL.createObjectURL(blob)
@@ -229,24 +262,30 @@ export function apply(ctx: Ctx): void {
       },
       // Import a theme JSON: apply the config to memory, then persist through
       // the same paths as manual edits — config → theme-config.json, wallpaper
-      // base64 → wallpaper.jpg (decoded on the node half). The client keeps the
-      // data URL from the file, so nothing is re-encoded on every load.
+      // base64 → wallpaper.jpg (decoded on the node half). For generated
+      // backgrounds the image is reconstructed from params instead of persisted.
       importTheme: async (file: File): Promise<boolean> => {
         try {
           const data: unknown = JSON.parse(await file.text())
           if (!data || typeof data !== 'object') return false
-          const d = data as { config?: unknown; wallpaper?: unknown }
+          const d = data as { version?: number; config?: unknown; wallpaper?: unknown }
           if (typeof d.config !== 'object' || d.config === null) return false
           adoptConfig(d.config)
-          const wallpaper = typeof d.wallpaper === 'string' && /^data:image\//.test(d.wallpaper) ? d.wallpaper : null
-          setWpUrl(wallpaper)
+          if (cfg.backgroundType === 'image') {
+            const wallpaper = typeof d.wallpaper === 'string' && /^data:image\//.test(d.wallpaper) ? d.wallpaper : null
+            setWpUrl(wallpaper)
+            persistWallpaper(wallpaper)
+            refreshPaletteAndApply()
+          } else {
+            setWpUrl(null)
+            persistWallpaper(null)
+            regenerateGeneratedBg()
+          }
           persistConfig()
-          persistWallpaper(wallpaper)
           if (rHasColor()) {
             const [h, s, l] = rColor()
             registerCustom(h, s, l)
           }
-          applyWp()
           syncBg()
           if (rHasColor()) {
             colorRev++

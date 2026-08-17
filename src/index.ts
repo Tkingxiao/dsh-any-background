@@ -35,6 +35,12 @@ interface PartOpacities {
 interface PartBlurs {
   bg: number; sidebar: number; card: number; settings: number
 }
+type BackgroundType = 'image' | 'mesh' | 'shader' | 'pattern'
+type GeneratedBgParams =
+  | { type: 'mesh'; seed: number; scale: number; intensity: number }
+  | { type: 'shader'; preset: 'aurora' | 'nebula' | 'noise'; speed: number; scale: number }
+  | { type: 'pattern'; preset: 'dots' | 'waves' | 'poly'; density: number; scale: number }
+
 interface ThemeConfig {
   /** Saved HSL theme color; null means "use the system theme". */
   color: [number, number, number] | null
@@ -50,6 +56,10 @@ interface ThemeConfig {
   blur: number
   /** Wallpaper placement state (zoom + fractional center + intrinsic size). */
   bgState: BgState
+  /** Current background source type. */
+  backgroundType: BackgroundType
+  /** Parameters for generated backgrounds (not used for images). */
+  generatedBg: GeneratedBgParams | null
 }
 
 const DEFAULT_CONFIG: ThemeConfig = {
@@ -60,6 +70,8 @@ const DEFAULT_CONFIG: ThemeConfig = {
   wallpaperOpacity: 1,
   blur: 0,
   bgState: { zoom: 1, x: 0, y: 0, iw: 0, ih: 0 },
+  backgroundType: 'image',
+  generatedBg: null,
 }
 
 const dataDir = (): string => dshHomePath(DATA_DIR)
@@ -81,6 +93,15 @@ function normalizeConfig(raw: unknown): ThemeConfig {
       ? [clamp(c[0] as number, 0, 360, 220), clamp(c[1] as number, 0, 1, 0.55), clamp(c[2] as number, 0, 1, 0.25)]
       : null
   const bg = (r.bgState ?? {}) as Partial<BgState>
+  const bgType: BackgroundType = ['image', 'mesh', 'shader', 'pattern'].includes(r.backgroundType as string)
+    ? (r.backgroundType as BackgroundType)
+    : DEFAULT_CONFIG.backgroundType
+  const gen = r.generatedBg && typeof r.generatedBg === 'object'
+    ? (r.generatedBg as { type?: string })
+    : null
+  const generatedBg: ThemeConfig['generatedBg'] = gen && gen.type === bgType
+    ? normalizeGeneratedBg(r.generatedBg as GeneratedBgParams)
+    : null
   // Migration: the old single main-interface opacity becomes per-part, keeping
   // the sidebar's former +0.08 offset and leaving cards opaque as before.
   const legacy = typeof r.opacity === 'number' ? r.opacity : null
@@ -109,7 +130,37 @@ function normalizeConfig(raw: unknown): ThemeConfig {
       iw: typeof bg.iw === 'number' && (bg.iw as number) > 0 ? bg.iw : 0,
       ih: typeof bg.ih === 'number' && (bg.ih as number) > 0 ? bg.ih : 0,
     },
+    backgroundType: bgType,
+    generatedBg,
   }
+}
+
+function normalizeGeneratedBg(p: GeneratedBgParams): GeneratedBgParams | null {
+  if (p.type === 'mesh') {
+    return {
+      type: 'mesh',
+      seed: typeof p.seed === 'number' ? p.seed : 0,
+      scale: clamp(p.scale, 0.3, 3, 1),
+      intensity: clamp(p.intensity, 0, 1, 0.6),
+    }
+  }
+  if (p.type === 'shader') {
+    return {
+      type: 'shader',
+      preset: ['aurora', 'nebula', 'noise'].includes(p.preset) ? p.preset : 'aurora',
+      speed: clamp(p.speed, 0, 2, 0.3),
+      scale: clamp(p.scale, 0.3, 3, 1),
+    }
+  }
+  if (p.type === 'pattern') {
+    return {
+      type: 'pattern',
+      preset: ['dots', 'waves', 'poly'].includes(p.preset) ? p.preset : 'dots',
+      density: clamp(p.density, 0, 1, 0.5),
+      scale: clamp(p.scale, 0.3, 3, 1),
+    }
+  }
+  return null
 }
 
 // ── File operations ───────────────────────────────────────────────────────────

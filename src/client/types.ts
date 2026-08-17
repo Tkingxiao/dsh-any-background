@@ -50,6 +50,45 @@ export interface PartBlurs {
   settings: number
 }
 
+export type BackgroundType = 'image' | 'mesh' | 'shader' | 'pattern'
+
+export interface MeshGradientParams {
+  type: 'mesh'
+  seed: number
+  scale: number
+  intensity: number
+}
+
+export interface ShaderParams {
+  type: 'shader'
+  preset: 'aurora' | 'nebula' | 'noise'
+  speed: number
+  scale: number
+}
+
+export interface PatternParams {
+  type: 'pattern'
+  preset: 'dots' | 'waves' | 'poly'
+  density: number
+  scale: number
+}
+
+export type GeneratedBgParams = MeshGradientParams | ShaderParams | PatternParams
+
+/** Material-You-style palette extracted from a wallpaper or generated background. */
+export interface ColorPalette {
+  /** Dominant / primary hue (HSL). */
+  primary: [number, number, number]
+  /** Secondary / analogous hue. */
+  secondary: [number, number, number]
+  /** Tertiary / complementary accent. */
+  tertiary: [number, number, number]
+  /** Neutral surface used for backgrounds. */
+  surface: [number, number, number]
+  /** Average lightness of the source image (0..1) for auto light/dark. */
+  luminance: number
+}
+
 export interface ThemeConfig {
   /** Saved HSL theme color; null means "use the system theme". */
   color: [number, number, number] | null
@@ -65,6 +104,10 @@ export interface ThemeConfig {
   blur: number
   /** Wallpaper placement state (zoom + fractional center + intrinsic size). */
   bgState: BgState
+  /** Current background source type. */
+  backgroundType: BackgroundType
+  /** Parameters for generated backgrounds (not used for images). */
+  generatedBg: GeneratedBgParams | null
 }
 
 /** State shape of the section's store (wallpaper URL + programmatic color). */
@@ -90,6 +133,11 @@ export interface ThemeSectionProps {
   setWop: (v: number) => void
   setBl: (v: number) => void
   setSop: (v: number) => void
+  backgroundType: BackgroundType
+  generatedBg: GeneratedBgParams | null
+  setBgType: (type: BackgroundType) => void
+  setGeneratedBg: (params: GeneratedBgParams) => void
+  regenerateBg: () => void
   extractColor: () => Promise<boolean>
   /** Download the current theme (config + wallpaper data URL) as JSON. */
   exportTheme: () => void
