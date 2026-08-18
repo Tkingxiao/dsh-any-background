@@ -113,22 +113,62 @@ export function applyCustomTokens(ops: PartOpacities): void {
 // while fading toward whatever sits behind the modal.
 
 const SETTINGS_PANEL_SEL = '[role="dialog"][aria-modal="true"][aria-labelledby]'
-export const SETTINGS_STYLE_RULE = `${SETTINGS_PANEL_SEL}{background:var(--dsh-any-bg-settings-surface,var(--dsw-alias-bg-layer-2));backdrop-filter:var(--dsh-any-blur-settings,none)}`
+export const SETTINGS_STYLE_RULE =
+  `${SETTINGS_PANEL_SEL}{` +
+  `background:var(--dsh-any-bg-settings-surface,var(--dsw-alias-bg-layer-2));` +
+  `backdrop-filter:var(--dsh-any-blur-settings,none);` +
+  // The dialog's own layer tokens are re-derived from settingsOpacity, so
+  // EVERY surface inside the dialog — the chrome (buttons, inputs, nav,
+  // header) AND the plugin's option panels/cards (.dab-card, which resolve
+  // --dsw-alias-bg-layer-1) — follows the "settings interface opacity" slider
+  // ONLY. Without this scope override those elements resolve the body-level
+  // layer tokens that applyCustomTokens rewrites with the homepage card alpha.
+  // The card slider reaches these panels through BLUR alone (below).
+  `--dsw-alias-bg-layer-1:var(--dsh-any-bg-settings-layer-1);` +
+  `--dsw-alias-bg-layer-2:var(--dsh-any-bg-settings-layer-2);` +
+  `--dsw-alias-bg-layer-3:var(--dsh-any-bg-settings-layer-3)}` +
+  // Blur of the option panels inside the dialog (.dab-card): owned by the
+  // "dialog option panel" (card) BLUR slider through a plugin-owned variable
+  // (applyCardPanelsBlur). It must never fall back to — or be shared with —
+  // the homepage center/details columns; those stay unblurred by this slider.
+  `${SETTINGS_PANEL_SEL} .dab-card{backdrop-filter:var(--dsh-any-blur-card-panels,none);-webkit-backdrop-filter:var(--dsh-any-blur-card-panels,none)}`
 
 export function applySettingsOverrides(op: number): void {
-  if (op >= 1) {
-    document.documentElement.style.removeProperty('--dsh-any-bg-settings-surface')
-    return
-  }
-  // No saved color → the panel keeps the host surface; nothing to tint.
-  if (!rHasColor()) return
-  // Derive the panel surface from the saved color's layer-2 token (not a
-  // computed-style read), so the settings panel matches the homepage tint
-  // without depending on the presenter or theme state.
+  // The settings-panel variables are ALWAYS written explicitly — at every
+  // opacity value, including 100% — and never removed. Removing them made
+  // SETTINGS_STYLE_RULE fall back to the body layer tokens, which
+  // applyCustomTokens rewrites with the homepage card alpha: at 100% the
+  // dialog surface silently switched to following the "dialog option panel"
+  // (card) opacity. Writing explicit values (opaque at 100%) keeps the dialog
+  // surface and every non-option surface inside it fully owned by the
+  // settings-opacity slider.
+  //
+  // rColor() falls back to the default pick when no color is saved, which
+  // matches the palette applyCustomTokens already writes in that case, so the
+  // surface keeps the same tint without depending on the presenter.
   const [h, s, l] = rColor()
-  const layer2 = genTokens(h, s, l).tokens['--dsw-alias-bg-layer-2']
+  const tokens = genTokens(h, s, l).tokens
+  const layer1 = tokens['--dsw-alias-bg-layer-1']
+  const layer2 = tokens['--dsw-alias-bg-layer-2']
+  const layer3 = tokens['--dsw-alias-bg-layer-3']
   if (layer2 !== undefined) {
     document.documentElement.style.setProperty('--dsh-any-bg-settings-surface', toRgba(layer2, op))
+  }
+  // Dialog-scoped layer overrides consumed by SETTINGS_STYLE_RULE: every
+  // surface inside the dialog (nav, header, buttons, inputs AND the option
+  // panels/cards, .dab-card) resolves these instead of the body layer tokens,
+  // so its OPACITY follows the settings slider ONLY. The card slider reaches
+  // the option panels solely through the blur variable
+  // --dsh-any-blur-card-panels (see applyCardPanelsBlur) — never through
+  // opacity.
+  if (layer1 !== undefined) {
+    document.documentElement.style.setProperty('--dsh-any-bg-settings-layer-1', toRgba(layer1, op))
+  }
+  if (layer2 !== undefined) {
+    document.documentElement.style.setProperty('--dsh-any-bg-settings-layer-2', toRgba(layer2, op))
+  }
+  if (layer3 !== undefined) {
+    document.documentElement.style.setProperty('--dsh-any-bg-settings-layer-3', toRgba(layer3, op))
   }
 }
 
@@ -328,23 +368,36 @@ function applySettingsBlur(px: number): void {
   else document.documentElement.style.removeProperty('--dsh-any-blur-settings')
 }
 
+/** Blur of the option panels inside the settings dialog (.dab-card), owned by
+ *  the "dialog option panel" (card) blur slider. Written as a plugin-owned
+ *  variable consumed by SETTINGS_STYLE_RULE — deliberately NOT applied to the
+ *  homepage center/details columns, which this slider must never touch. */
+function applyCardPanelsBlur(px: number): void {
+  if (px > 0) document.documentElement.style.setProperty('--dsh-any-blur-card-panels', `blur(${px}px)`)
+  else document.documentElement.style.removeProperty('--dsh-any-blur-card-panels')
+}
+
 /** Apply per-part interface blur to the AppFrame columns + settings panel. */
 export function applyPartBlurs(blurs: PartBlurs): void {
   discoverParts()
   setBlur(frameEl, blurs.bg)
   setBlur(sidebarEl, blurs.sidebar)
-  setBlur(centerEl, blurs.card)
-  setBlur(detailsEl, blurs.card)
+  // The card-part blur targets the dialog's option panels, not the homepage
+  // center/details columns; clear any legacy underlays left on those columns
+  // by older builds that blurred them.
+  setBlur(centerEl, 0)
+  setBlur(detailsEl, 0)
+  applyCardPanelsBlur(blurs.card)
   applySettingsBlur(blurs.settings)
 }
 
 /** Live per-part blur update during slider drag (no full re-apply). */
 export function setPartBlur(part: keyof PartBlurs, v: number): void {
   if (part === 'settings') { applySettingsBlur(v); return }
+  if (part === 'card') { applyCardPanelsBlur(v); return }
   discoverParts()
   if (part === 'bg') setBlur(frameEl, v)
-  else if (part === 'sidebar') setBlur(sidebarEl, v)
-  else { setBlur(centerEl, v); setBlur(detailsEl, v) }
+  else setBlur(sidebarEl, v)
 }
 
 let partsObserver: MutationObserver | null = null
@@ -453,7 +506,12 @@ export function teardownWp(): void {
   clearCustomTokens()
   tokenStyleEl?.remove(); tokenStyleEl = null
   document.documentElement.style.removeProperty('--dsh-any-bg-settings-surface')
+  document.documentElement.style.removeProperty('--dsh-any-bg-settings-layer-1')
+  document.documentElement.style.removeProperty('--dsh-any-bg-settings-layer-2')
+  document.documentElement.style.removeProperty('--dsh-any-bg-settings-layer-3')
+  document.documentElement.style.removeProperty('--dsh-any-bg-settings-card-surface')
   document.documentElement.style.removeProperty('--dsh-any-blur-settings')
+  document.documentElement.style.removeProperty('--dsh-any-blur-card-panels')
   setBlur(frameEl, 0); setBlur(sidebarEl, 0); setBlur(centerEl, 0); setBlur(detailsEl, 0)
   stopWatchingParts()
 }

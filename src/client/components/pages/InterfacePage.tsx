@@ -36,7 +36,13 @@ export function InterfacePage({ p }: { p: ThemeSectionProps }) {
         {PARTS.map((part, i) => {
           const { labelKey, Icon, isSettings } = part
           const opKey = part.opKey
-          const blurKey: keyof PartBlurs = opKey ?? 'settings'
+          // Homepage parts (bg/sidebar/card) bind to their own part only; the
+          // settings panel (isSettings) binds exclusively to the 'settings'
+          // part (--dsh-any-blur-settings / --dsh-any-bg-settings-surface) and
+          // must never fall back to a homepage part key — otherwise the dialog
+          // panel would track the homepage center/card blur and the
+          // bg/sidebar/card opacities.
+          const blurKey: keyof PartBlurs = isSettings ? 'settings' : opKey!
           const opacity = isSettings ? rSop() : rOps()[opKey!]
           return (
             <section key={blurKey} className="dab-card dab-card-hover dab-rise" style={{ '--d': i + 1 } as CSSProperties}>
