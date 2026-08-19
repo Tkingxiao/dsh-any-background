@@ -1,9 +1,10 @@
-import { rWp, rWpImage, rBgState, rBl, rWop, rOps, rSop, rColor, rHasColor, rBlurs, cfg, setWpUrl, rBgDark, setBgDark } from './state'
+import { rWp, rWpImage, rWpVideo, rBgState, rVideoBgState, rBl, rWop, rOps, rSop, rColor, rHasColor, rBlurs, rBgMode, rChatTextOpacity, rTrajectoryOpacity, cfg, setWpUrl, rBgDark, setBgDark } from './state'
 import type { BackgroundType, GeneratedBgParams, PartOpacities, PartBlurs } from './types'
 import { genTokens, toRgba, extractWallpaperColor, analyzeFrameDark } from './utils/color'
 import { createDynamicBackground, defaultParamsFor } from './utils/bg-generators'
 
 let wpEl: HTMLDivElement | null = null
+let videoEl: HTMLVideoElement | null = null
 let appliedTokenNames: string[] = []
 let wpController: { canvas: HTMLCanvasElement; stop: () => void; snapshot: () => string } | null = null
 let snapshotListener: (() => void) | null = null
@@ -35,15 +36,6 @@ function clearCustomTokens(): void {
   appliedTokenNames = []
 }
 
-/**
- * Write the saved color's full token set as inline variables on body — the
- * same write surface the theme presenter owns, but derived DIRECTLY from the
- * saved pick, so the theme color never depends on the theme service's active
- * state or the presenter's timing. The bg-base, sidebar and layer surfaces are
- * re-emitted at their per-part alpha; every other token (labels, borders,
- * brand) is written verbatim. No reads: nothing can observe a stale or reset
- * theme value and leave the homepage on the system color.
- */
 /** Label tokens flipped by the generated-background brightness verdict. */
 const LABEL_TOKENS = [
   '--dsw-alias-label-primary',
@@ -58,32 +50,21 @@ export function applyCustomTokens(ops: PartOpacities): void {
   const [h, s, l] = rColor()
   let { tokens } = genTokens(h, s, l)
   try {
-    // A generated background carries its own brightness verdict (analyzed once
-    // per switch from a captured frame — never per-frame). It overrides ONLY
-    // the font direction (dark frame → white labels, light frame → black) so
-    // text stays readable over the animated background; every other token
-    // keeps following the picked color. genTokens' result is cached and shared,
-    // so clone before overriding.
+    // The generated background's brightness verdict overrides only the font
+    // direction; genTokens' result is cached and shared, so clone before
+    // overriding.
     const dark = rBgDark()
     if (dark !== null) {
       tokens = { ...tokens }
       const font = dark ? '#fff' : '#000'
       for (const name of LABEL_TOKENS) tokens[name] = font
     }
-    // Drive the base-palette switch ourselves so tokens the plugin does not
-    // override (the input surface, masks, static tokens) follow the picked
-    // color's dark/light scheme even while the theme service preference is
-    // being adopted/reset.
-    // Use a plugin-specific value so the gradient rule does not accidentally
-    // match a dark-mode flag set by the host harness.
+    // Drive the base-palette switch ourselves with a plugin-specific value so
+    // the gradient rule never matches a host dark-mode flag.
     if (dark ?? l < 0.55) document.body.setAttribute('data-ds-dark-theme', 'dsh-any-background')
     else document.body.removeAttribute('data-ds-dark-theme')
-    // Write the tokens as a stylesheet rule with !important instead of inline
-    // on body. The host's theme presenter clears body inline styles when it
-    // adopts a built-in preference (observed on boot), which wipes inline
-    // tokens for ~150ms and flashes the interface back to the system palette.
-    // A stylesheet rule survives that clearing and, being !important, also
-    // outranks the host's own non-important inline token writes.
+    // A stylesheet rule with !important survives the host presenter clearing
+    // body inline styles on boot (which would flash the system palette).
     const decls: string[] = []
     for (const [name, value] of Object.entries(tokens)) {
       let v = value
@@ -93,59 +74,38 @@ export function applyCustomTokens(ops: PartOpacities): void {
       decls.push(`${name}:${v}!important`)
     }
     ensureTokenStyle().textContent = `body{${decls.join(';')}}`
-    // Drop any inline tokens left by earlier builds so the stylesheet is the
-    // single source of truth.
+    // Drop inline tokens left by earlier builds so the stylesheet is the single source of truth.
     for (const name of appliedTokenNames) document.body.style.removeProperty(name)
     appliedTokenNames = Object.keys(tokens)
-  } catch (e) {
+    applyPartOpacities(ops)
+  } catch {
     // ignore
   }
 }
 
 // ── Settings panel opacity ─────────────────────────────────────────────────────
-// The settings modal is the only aria-modal dialog that identifies itself with
-// aria-labelledby (ui-primitives' Modal and the image lightbox use aria-label),
-// so this selector scopes the translucency to the settings panel alone. The
-// panel surface is --dsw-alias-bg-layer-2, resolved here from body's computed
-// style (the theme presenter writes custom-theme tokens inline on body; the
-// base palettes declare the alias in the stylesheets) and re-emitted with an
-// alpha through a plugin-owned variable, so the panel keeps its current color
-// while fading toward whatever sits behind the modal.
+// The settings modal is the only aria-modal dialog identifying itself with
+// aria-labelledby, so this selector scopes translucency to the settings panel.
+// The surface (--dsw-alias-bg-layer-2) is re-emitted with an alpha through a
+// plugin-owned variable so the panel keeps its color while fading.
 
 const SETTINGS_PANEL_SEL = '[role="dialog"][aria-modal="true"][aria-labelledby]'
 export const SETTINGS_STYLE_RULE =
   `${SETTINGS_PANEL_SEL}{` +
   `background:var(--dsh-any-bg-settings-surface,var(--dsw-alias-bg-layer-2));` +
   `backdrop-filter:var(--dsh-any-blur-settings,none);` +
-  // The dialog's own layer tokens are re-derived from settingsOpacity, so
-  // EVERY surface inside the dialog — the chrome (buttons, inputs, nav,
-  // header) AND the plugin's option panels/cards (.dab-card, which resolve
-  // --dsw-alias-bg-layer-1) — follows the "settings interface opacity" slider
-  // ONLY. Without this scope override those elements resolve the body-level
-  // layer tokens that applyCustomTokens rewrites with the homepage card alpha.
-  // The card slider reaches these panels through BLUR alone (below).
+  // Re-scope the dialog's layer tokens to plugin-owned variables so every
+  // surface inside the dialog follows the settings opacity slider only.
   `--dsw-alias-bg-layer-1:var(--dsh-any-bg-settings-layer-1);` +
   `--dsw-alias-bg-layer-2:var(--dsh-any-bg-settings-layer-2);` +
   `--dsw-alias-bg-layer-3:var(--dsh-any-bg-settings-layer-3)}` +
-  // Blur of the option panels inside the dialog (.dab-card): owned by the
-  // "dialog option panel" (card) BLUR slider through a plugin-owned variable
-  // (applyCardPanelsBlur). It must never fall back to — or be shared with —
-  // the homepage center/details columns; those stay unblurred by this slider.
+  // Option-panel blur inside the dialog, owned by the card blur slider.
   `${SETTINGS_PANEL_SEL} .dab-card{backdrop-filter:var(--dsh-any-blur-card-panels,none);-webkit-backdrop-filter:var(--dsh-any-blur-card-panels,none)}`
 
 export function applySettingsOverrides(op: number): void {
-  // The settings-panel variables are ALWAYS written explicitly — at every
-  // opacity value, including 100% — and never removed. Removing them made
-  // SETTINGS_STYLE_RULE fall back to the body layer tokens, which
-  // applyCustomTokens rewrites with the homepage card alpha: at 100% the
-  // dialog surface silently switched to following the "dialog option panel"
-  // (card) opacity. Writing explicit values (opaque at 100%) keeps the dialog
-  // surface and every non-option surface inside it fully owned by the
-  // settings-opacity slider.
-  //
-  // rColor() falls back to the default pick when no color is saved, which
-  // matches the palette applyCustomTokens already writes in that case, so the
-  // surface keeps the same tint without depending on the presenter.
+  // Always written explicitly (including 100%) — removing them would make
+  // SETTINGS_STYLE_RULE fall back to the body layer tokens that
+  // applyCustomTokens rewrites with the homepage card alpha.
   const [h, s, l] = rColor()
   const tokens = genTokens(h, s, l).tokens
   const layer1 = tokens['--dsw-alias-bg-layer-1']
@@ -154,13 +114,8 @@ export function applySettingsOverrides(op: number): void {
   if (layer2 !== undefined) {
     document.documentElement.style.setProperty('--dsh-any-bg-settings-surface', toRgba(layer2, op))
   }
-  // Dialog-scoped layer overrides consumed by SETTINGS_STYLE_RULE: every
-  // surface inside the dialog (nav, header, buttons, inputs AND the option
-  // panels/cards, .dab-card) resolves these instead of the body layer tokens,
-  // so its OPACITY follows the settings slider ONLY. The card slider reaches
-  // the option panels solely through the blur variable
-  // --dsh-any-blur-card-panels (see applyCardPanelsBlur) — never through
-  // opacity.
+  // Dialog-scoped layer overrides consumed by SETTINGS_STYLE_RULE; opacity
+  // follows the settings slider only (the card slider reaches panels via blur).
   if (layer1 !== undefined) {
     document.documentElement.style.setProperty('--dsh-any-bg-settings-layer-1', toRgba(layer1, op))
   }
@@ -172,25 +127,37 @@ export function applySettingsOverrides(op: number): void {
   }
 }
 
-// ── Generated backgrounds & palette refresh ───────────────────────────────────
+// ── Trajectory view opacity ──────────────────────────────────────────────
+// The trajectory view's own panels fully cover the root, so retinting only the
+// root background is invisible. Re-scope the view root's layer tokens to
+// plugin-owned variables so every surface follows the trajectory slider.
+export const TRAJECTORY_STYLE_RULE =
+  '[data-conversation-composer-overlay]{' +
+  // No fallback inside var(): a self-referential fallback would be a cycle.
+  '--dsw-alias-bg-layer-1:var(--dsh-any-traj-layer-1);' +
+  '--dsw-alias-bg-layer-2:var(--dsh-any-traj-layer-2);' +
+  '--dsw-alias-bg-layer-3:var(--dsh-any-traj-layer-3)}'
 
-/** Apply only the wallpaper layer (position, scale, opacity, blur) without
- *  touching the theme color palette. Used when generated background parameters
- *  change so the visual keeps updating without shifting the picked theme color. */
-function applyWallpaper(): void {
-  applyWp()
+export function applyTrajectoryOverrides(op: number): void {
+  // Always written explicitly so the view stays owned by this slider at 100%.
+  const [h, s, l] = rColor()
+  const tokens = genTokens(h, s, l).tokens
+  const layer1 = tokens['--dsw-alias-bg-layer-1']
+  const layer2 = tokens['--dsw-alias-bg-layer-2']
+  const layer3 = tokens['--dsw-alias-bg-layer-3']
+  if (layer1 !== undefined) {
+    document.documentElement.style.setProperty('--dsh-any-traj-layer-1', toRgba(layer1, op))
+  }
+  if (layer2 !== undefined) {
+    document.documentElement.style.setProperty('--dsh-any-traj-layer-2', toRgba(layer2, op))
+  }
+  if (layer3 !== undefined) {
+    document.documentElement.style.setProperty('--dsh-any-traj-layer-3', toRgba(layer3, op))
+  }
 }
 
-/** Re-apply the current theme/wallpaper state. Since genTokens now derives
- *  everything directly from the saved HSL pick, no palette refresh is needed. */
-export function refreshPaletteAndApply(): void {
-  applyWp()
-}
-
-/** Apply the theme color. If the user has an explicit saved pick we use it
- *  directly; otherwise we fall back to extracting a dominant color from the
- *  current wallpaper (one HSL sample, no palette), so new uploads still get a
- *  matching theme automatically. */
+/** Apply the theme color: use the saved pick directly, or fall back to
+ *  extracting a dominant color from the current wallpaper. */
 export function applyThemeColor(): void {
   if (rHasColor()) {
     applyWp()
@@ -198,7 +165,10 @@ export function applyThemeColor(): void {
   }
   const url = rWp()
   if (url) {
-    void extractWallpaperColor(url, rBgState()).then(hsl => {
+    // Video mode samples the frame snapshot through the video's own placement
+    // state; the image slot's framing does not apply to the snapshot.
+    const st = cfg.backgroundType === 'video' ? rVideoBgState() : rBgState()
+    void extractWallpaperColor(url, st).then(hsl => {
       if (hsl) cfg.color = hsl
       applyWp()
     })
@@ -212,17 +182,22 @@ export function applyThemeColor(): void {
 export function setBackgroundType(type: BackgroundType): void {
   cfg.backgroundType = type
   if (type === 'image') {
-    // Restore the previously uploaded image (it is retained separately), remove
-    // the live canvas, and point the display URL back at the image. The
-    // generated-background brightness verdict no longer applies.
+    // Restore the retained image upload and drop the generated brightness verdict.
     clearDynamicBg()
     setBgDark(null)
     setWpUrl(rWpImage())
     applyThemeColor()
     return
   }
-  // If we already have params for this generated type, keep them so switching
-  // between generated sub-types does not wipe user adjustments.
+  if (type === 'video') {
+    // Restore the retained video upload; the frame snapshot stays the preview URL.
+    clearDynamicBg()
+    setBgDark(null)
+    setWpUrl(null)
+    applyThemeColor()
+    return
+  }
+  // Keep existing params for this generated type so sub-type switches preserve adjustments.
   if (!cfg.generatedBg || cfg.generatedBg.type !== type) {
     cfg.generatedBg = defaultParamsFor(type)
   }
@@ -238,12 +213,8 @@ function randomSeed(): number {
 export function regenerateGeneratedBg(): void {
   const params = cfg.generatedBg
   if (!params || cfg.backgroundType === 'image') return
-  const next: GeneratedBgParams =
-    params.type === 'mesh'
-      ? { ...params, seed: randomSeed() }
-      : { ...params, seed: randomSeed() }
-  cfg.generatedBg = next
-  applyGeneratedBg(next)
+  cfg.generatedBg = { ...params, seed: randomSeed() }
+  applyGeneratedBg(cfg.generatedBg)
 }
 
 /** Update a generated background's parameters and re-render. */
@@ -255,6 +226,7 @@ export function updateGeneratedBg(params: GeneratedBgParams): void {
 
 function applyGeneratedBg(params: GeneratedBgParams): void {
   clearDynamicBg()
+  clearVideoEl()
   ensureWpContainer()
   wpController = createDynamicBackground(params)
   if (wpEl) {
@@ -262,20 +234,17 @@ function applyGeneratedBg(params: GeneratedBgParams): void {
     wpEl.appendChild(wpController.canvas)
   }
   // The canvas paints its first frame on the next animation tick; only then is
-  // the snapshot meaningful for the settings preview and color picker. Capture
-  // it after that frame and re-sync dependents. Do NOT refresh the palette here:
-  // generated backgrounds should not overwrite the user's picked theme color.
+  // the snapshot meaningful. Do NOT refresh the palette here — generated
+  // backgrounds must not overwrite the user's picked theme color.
   requestAnimationFrame(() => {
     if (!wpController) return
     const controller = wpController
     const frame = controller.snapshot()
     setWpUrl(frame)
-    applyWallpaper()
+    applyWp()
     snapshotListener?.()
-    // One-shot brightness verdict from the just-captured frame: decode +
-    // average luma on a 32×32 canvas, then flip the font direction. Runs only
-    // on switches — never in the animation loop — so there is zero per-frame
-    // cost. While pending, the picked color's lightness keeps deciding fonts.
+    // One-shot brightness verdict from the captured frame to flip font
+    // direction; never runs in the animation loop.
     setBgDark(null)
     void analyzeFrameDark(frame).then(dark => {
       if (dark === null || wpController !== controller) return
@@ -286,19 +255,14 @@ function applyGeneratedBg(params: GeneratedBgParams): void {
 }
 
 // ── Per-part interface blur ───────────────────────────────────────────────────
-// The three-column AppFrame (ui-layout) styles its columns with hashed
-// CSS-module classes, so the parts are located structurally instead: the shell
-// overlay carries a stable data attribute, and the sidebar/center/details
-// columns are its three preceding siblings inside the frame.
+// The AppFrame columns use hashed CSS-module classes, so parts are located
+// structurally: the shell overlay carries a stable data attribute and the
+// sidebar/center/details columns are its three preceding siblings.
 //
-// backdrop-filter must NEVER be written directly onto a host part: any element
-// with a non-none backdrop-filter becomes the containing block for its
-// fixed-positioned descendants, and the host mounts the settings dialog inside
-// the AppFrame subtree (observed inside the sidebar column) — a direct blur
-// would lock that fixed dialog into the column box ("settings window stuck in
-// the sidebar"). Each blurred part instead carries an isolated ::before
-// underlay that holds the backdrop-filter, so the part itself never traps
-// fixed-positioned host UI.
+// backdrop-filter must NEVER go directly on a host part: it turns the element
+// into a containing block for fixed-positioned descendants, which would trap
+// the host's settings dialog inside the column. Each blurred part carries an
+// isolated ::before underlay holding the backdrop-filter instead.
 let frameEl: HTMLElement | null = null
 let sidebarEl: HTMLElement | null = null
 let centerEl: HTMLElement | null = null
@@ -368,6 +332,21 @@ function applySettingsBlur(px: number): void {
   else document.documentElement.style.removeProperty('--dsh-any-blur-settings')
 }
 
+/** Apply the main-background opacity to the center/details columns instead of
+ *  the frame. The frame's translucent bg-base sits UNDER the sidebar, so
+ *  reducing the main-bg opacity stacked a second alpha onto the sidebar; moving
+ *  the alpha onto the columns keeps the sidebar owned by its own slider. */
+function applyPartOpacities(ops: PartOpacities): void {
+  if (!(rHasColor() || rBgDark() !== null)) return
+  discoverParts()
+  if (frameEl === null) return
+  const [h, s, l] = rColor()
+  const base = genTokens(h, s, l).tokens['--dsw-alias-bg-base']
+  frameEl.style.background = 'transparent'
+  if (centerEl !== null) centerEl.style.background = base !== undefined ? toRgba(base, ops.bg) : 'transparent'
+  if (detailsEl !== null) detailsEl.style.background = base !== undefined ? toRgba(base, ops.bg) : 'transparent'
+}
+
 /** Blur of the option panels inside the settings dialog (.dab-card), owned by
  *  the "dialog option panel" (card) blur slider. Written as a plugin-owned
  *  variable consumed by SETTINGS_STYLE_RULE — deliberately NOT applied to the
@@ -380,24 +359,217 @@ function applyCardPanelsBlur(px: number): void {
 /** Apply per-part interface blur to the AppFrame columns + settings panel. */
 export function applyPartBlurs(blurs: PartBlurs): void {
   discoverParts()
-  setBlur(frameEl, blurs.bg)
+  // The bg blur frosts the wallpaper behind the main content columns (center +
+  // details); the frame itself stays unblurred so the sidebar is never
+  // double-frosted by both the bg and sidebar sliders.
+  setBlur(frameEl, 0)
   setBlur(sidebarEl, blurs.sidebar)
-  // The card-part blur targets the dialog's option panels, not the homepage
-  // center/details columns; clear any legacy underlays left on those columns
-  // by older builds that blurred them.
-  setBlur(centerEl, 0)
-  setBlur(detailsEl, 0)
+  setBlur(centerEl, blurs.bg)
+  setBlur(detailsEl, blurs.bg)
   applyCardPanelsBlur(blurs.card)
   applySettingsBlur(blurs.settings)
+  applyViewCards()
 }
 
 /** Live per-part blur update during slider drag (no full re-apply). */
 export function setPartBlur(part: keyof PartBlurs, v: number): void {
   if (part === 'settings') { applySettingsBlur(v); return }
   if (part === 'card') { applyCardPanelsBlur(v); return }
+  if (part === 'chat' || part === 'trajectory') { applyViewCards(); return }
   discoverParts()
-  if (part === 'bg') setBlur(frameEl, v)
+  if (part === 'bg') { setBlur(centerEl, v); setBlur(detailsEl, v) }
   else setBlur(sidebarEl, v)
+}
+
+// ── Conversation view treatments ────────────────────────────────────
+// The chat message column is styled as a real card (layer-1 surface + border +
+// 16px radius + 18px padding); the trajectory view gets NO card decoration —
+// its own panels fully cover the view root, so its opacity slider re-scopes the
+// layer tokens inside the view and its blur frosts the backdrop through the
+// standard root underlay.
+//
+// Host structure (deepseek-harness ui-conversation / ui-trajectory):
+//   ConversationRoot
+//     header                     — title + tabs, OUTSIDE the scrollport
+//     [data-conversation-scroll] — the single scrollport
+//       [data-chat-flow]         ← chat column (flow content, NOT scrollable)
+//       [data-conversation-composer-overlay] ← trajectory view root
+//       [data-composer-seat]     — sticky composer, a sibling
+// The input is sticky inside the same scrollport, so the stable host markers
+// are used; generic heuristics remain as a chat fallback for marker-less hosts.
+//
+// Cards are ALWAYS styled once their host exists — sliders at zero only turn
+// surface/border transparent, so the layout never reflows and the view cannot
+// jump when a slider leaves zero. Removal happens only at plugin teardown.
+interface ViewCardSpec {
+  sel: string
+  mark: string
+  /** Dataset key prefix holding the stashed pre-card inline values. */
+  prev: string
+  opacity: () => number
+  blur: () => number
+  /** Generic heuristic fallback (chat card only, hosts without the marker). */
+  fallback?: boolean
+  /** No card decoration — surfaces follow scoped layer tokens; only the blur
+   *  underlay is attached to the host element. */
+  plain?: boolean
+}
+
+const VIEW_CARDS: ViewCardSpec[] = [
+  { sel: '[data-chat-flow]', mark: 'data-dab-chat-card', prev: 'dabChatPrev', opacity: rChatTextOpacity, blur: () => rBlurs().chat, fallback: true },
+  { sel: '[data-conversation-composer-overlay]', mark: 'data-dab-traj-card', prev: 'dabTrajPrev', opacity: rTrajectoryOpacity, blur: () => rBlurs().trajectory, plain: true },
+]
+
+const viewTargets: Array<HTMLElement | null> = VIEW_CARDS.map(() => null)
+
+function isScrollableY(el: HTMLElement): boolean {
+  const oy = getComputedStyle(el).overflowY
+  // 'overlay' covers Chromium's non-standard overflow value.
+  return oy === 'auto' || oy === 'scroll' || oy === 'overlay'
+}
+
+/** Whether the subtree hosts the chat input (textarea / contenteditable /
+ *  textbox role) — used to keep the card off the input row. */
+function containsChatEditor(el: HTMLElement): boolean {
+  return el.querySelector('textarea,[contenteditable="true"],[contenteditable=""],[contenteditable="plaintext-only"],[role="textbox"]') !== null
+}
+
+/** Walk down from a coarse candidate toward the actual message column: stop
+ *  at a scroll container (the card surface must stay pinned to the scroll
+ *  port); while the chat input lives inside, descend into the tallest child that
+ *  does NOT contain it (the header row is short, the input row holds the
+ *  editor); otherwise peel wrappers dominated (>= 85%) by a single child so
+ *  tab bars / titles stay outside the card. */
+function refineMessageColumn(start: HTMLElement): HTMLElement {
+  let cur = start
+  for (let depth = 0; depth < 10; depth++) {
+    if (isScrollableY(cur)) break
+    const kids = Array.from(cur.children).filter((k): k is HTMLElement => k instanceof HTMLElement)
+    if (kids.length === 0) break
+    const tallest = kids.reduce((a, b) => (b.clientHeight > a.clientHeight ? b : a))
+    if (containsChatEditor(cur)) {
+      const candidates = kids.filter(k => !containsChatEditor(k) && k.clientHeight >= cur.clientHeight * 0.4)
+      if (candidates.length === 0) break
+      cur = candidates.reduce((a, b) => (b.clientHeight > a.clientHeight ? b : a))
+      continue
+    }
+    if (kids.length > 1 && tallest.clientHeight >= cur.clientHeight * 0.85) { cur = tallest; continue }
+    break
+  }
+  return cur
+}
+
+function discoverViewTarget(idx: number, spec: ViewCardSpec): HTMLElement | null {
+  if (centerEl === null || !document.body.contains(centerEl)) { viewTargets[idx] = null; return null }
+  // The host marker always wins over a cached fallback (the view may not be
+  // mounted yet when the plugin applies early).
+  const marked = centerEl.querySelector<HTMLElement>(spec.sel)
+  const cached = viewTargets[idx]
+  if (marked !== null) {
+    if (cached !== null && cached !== marked) { setBlur(cached, 0); restoreCardHost(cached, spec.mark, spec.prev, spec.plain === true) }
+    viewTargets[idx] = marked
+    return marked
+  }
+  if (cached !== null && centerEl.contains(cached)) return cached
+  viewTargets[idx] = null
+  if (spec.fallback !== true) return null
+  // On the harness, an absent [data-chat-flow] just means the chat view is not
+  // mounted (hero phase, trajectory tab) — settling on the whole scrollport
+  // there would wrap the entire page in the card.
+  if (centerEl.querySelector('[data-conversation-scroll]') !== null) return null
+  // Marker-less hosts keep their layout until a slider moves.
+  if (spec.opacity() <= 0 && spec.blur() <= 0) return null
+  // Generic fallbacks: the largest vertically scrollable element inside the
+  // column, or the tallest direct child when the host virtualises scrolling.
+  let best: HTMLElement | null = null
+  let bestArea = 0
+  for (const el of Array.from(centerEl.querySelectorAll<HTMLElement>('*'))) {
+    if (!isScrollableY(el)) continue
+    if (el.clientHeight < centerEl.clientHeight * 0.35) continue
+    const area = el.clientWidth * el.clientHeight
+    if (area > bestArea) { bestArea = area; best = el }
+  }
+  if (best === null) {
+    for (const el of Array.from(centerEl.children)) {
+      if (!(el instanceof HTMLElement)) continue
+      if (el.clientHeight < centerEl.clientHeight * 0.5) continue
+      if (el.clientHeight > (best?.clientHeight ?? 0)) best = el
+    }
+  }
+  // Coarse candidates are narrowed to the message column itself.
+  const refined = best !== null ? refineMessageColumn(best) : null
+  viewTargets[idx] = refined
+  return refined
+}
+
+/** Stash the host's own inline values so teardown restores them exactly.
+ *  Plain views only get a background override, so only that is stashed. */
+function stashCardPrev(el: HTMLElement, prev: string, plain: boolean): void {
+  const ds = el.dataset as Record<string, string | undefined>
+  ds[prev + 'Bg'] = el.style.getPropertyValue('background')
+  if (plain) return
+  ds[prev + 'Border'] = el.style.getPropertyValue('border')
+  ds[prev + 'Radius'] = el.style.getPropertyValue('border-radius')
+  ds[prev + 'Padding'] = el.style.getPropertyValue('padding')
+}
+
+/** Undo the inline styling, restoring the host's previous inline values. */
+function restoreCardHost(el: HTMLElement, mark: string, prev: string, plain: boolean): void {
+  if (!el.hasAttribute(mark)) return
+  const ds = el.dataset as Record<string, string | undefined>
+  const restore = (prop: string, v: string | undefined): void => {
+    if (v !== undefined && v !== '') el.style.setProperty(prop, v)
+    else el.style.removeProperty(prop)
+  }
+  restore('background', ds[prev + 'Bg'])
+  if (!plain) {
+    restore('border', ds[prev + 'Border'])
+    restore('border-radius', ds[prev + 'Radius'])
+    restore('padding', ds[prev + 'Padding'])
+    delete ds[prev + 'Border']; delete ds[prev + 'Radius']; delete ds[prev + 'Padding']
+  }
+  delete ds[prev + 'Bg']
+  el.removeAttribute(mark)
+}
+
+/** Teardown only: strip every view treatment and hand the hosts back untouched. */
+function removeViewCards(): void {
+  VIEW_CARDS.forEach((spec, i) => {
+    const el = viewTargets[i]
+    if (el !== null) { setBlur(el, 0); restoreCardHost(el, spec.mark, spec.prev, spec.plain === true) }
+    viewTargets[i] = null
+  })
+}
+
+/** Re-derive the conversation view cards from the current config. Cheap
+ *  enough for live slider drags; the card structure is applied unconditionally
+ *  once the host exists so the layout never reflows when a slider leaves zero. */
+export function applyViewCards(): void {
+  discoverParts()
+  if (centerEl === null) return
+  const [h, s, l] = rColor()
+  const surface = genTokens(h, s, l).tokens['--dsw-alias-bg-layer-1']
+  VIEW_CARDS.forEach((spec, i) => {
+    const target = discoverViewTarget(i, spec)
+    if (target === null) return
+    const plain = spec.plain === true
+    const opacity = spec.opacity()
+    const blurPx = spec.blur()
+    if (!plain) {
+      if (!target.hasAttribute(spec.mark)) stashCardPrev(target, spec.prev, false)
+      // Mirrors .dab-card (layer-1 background, border, 16px radius, 18px
+      // padding), written inline so it wins over host stylesheets; the opacity
+      // slider drives surface alpha and fades the border with it.
+      const borderAlpha = opacity > 0 ? Math.min(1, opacity * 1.5) : (blurPx > 0 ? 0.35 : 0)
+      target.style.background = surface !== undefined ? toRgba(surface, opacity) : 'transparent'
+      target.style.border = surface !== undefined ? `1px solid ${toRgba(surface, borderAlpha)}` : '1px solid transparent'
+      target.style.borderRadius = '16px'
+      target.style.padding = '18px'
+    }
+    // Plain views write no inline styles — only the blur underlay is hosted here.
+    target.setAttribute(spec.mark, '1')
+    setBlur(target, blurPx)
+  })
 }
 
 let partsObserver: MutationObserver | null = null
@@ -408,8 +580,11 @@ let partsObserver: MutationObserver | null = null
 export function watchParts(): void {
   if (partsObserver !== null || typeof MutationObserver === 'undefined') return
   partsObserver = new MutationObserver(() => {
-    if (frameEl !== null && sidebarEl !== null && centerEl !== null && detailsEl !== null && document.body.contains(frameEl)) return
+    if (frameEl !== null && sidebarEl !== null && centerEl !== null && detailsEl !== null && document.body.contains(frameEl)
+      // Keep re-applying while any card host is absent or was swapped by the host.
+      && viewTargets.every(el => el !== null && document.body.contains(el))) return
     applyPartBlurs(rBlurs())
+    applyPartOpacities(rOps())
   })
   partsObserver.observe(document.body, { childList: true, subtree: true })
 }
@@ -427,33 +602,123 @@ function ensureWpContainer(): void {
   }
 }
 
+function clearVideoEl(): void {
+  if (videoEl === null) return
+  videoEl.pause()
+  videoEl.removeAttribute('src')
+  videoEl.load()
+  videoEl.remove()
+  videoEl = null
+}
+
+/** Intrinsic-size cache for the center mode (native pixels of the current image). */
+let imgNat: { url: string; w: number; h: number } | null = null
+function imageNatSize(url: string, cb: (w: number, h: number) => void): void {
+  if (imgNat !== null && imgNat.url === url) { cb(imgNat.w, imgNat.h); return }
+  const img = new Image()
+  img.onload = () => {
+    imgNat = { url, w: img.naturalWidth, h: img.naturalHeight }
+    cb(img.naturalWidth, img.naturalHeight)
+  }
+  img.onerror = () => cb(0, 0)
+  img.src = url
+}
+
 function applyImageWp(url: string): void {
   clearDynamicBg()
+  clearVideoEl()
   ensureWpContainer()
   const bg = rBgState()
+  const mode = rBgMode()
   const next = `url("${url}")`
-  // Skip re-setting the background image when it is already in place. Re-setting
-  // the same data URL makes the browser re-decode the image, which flashes the
-  // wallpaper blank for a frame on boot re-applies.
+  // Skip re-setting the same data URL — re-decoding it flashes the wallpaper
+  // blank for a frame on boot re-applies.
   if (wpEl!.style.backgroundImage !== next) {
     wpEl!.style.backgroundImage = next
-    wpEl!.style.backgroundRepeat = 'no-repeat'
   }
-  if (bg.iw > 0) {
-    // Saved placement: contain-fit at zoom with the image CENTER pinned to
-    // the committed fractional viewport point (x, y are center fractions,
-    // 0.5 = viewport center — the editor commits the same anchor), so the
-    // framed region survives viewport changes: window moves between screens,
-    // aspect-ratio changes, and panel splitters re-derive a consistent view.
+  if (mode === 'fit') {
+    wpEl!.style.backgroundRepeat = 'no-repeat'
+    if (bg.iw > 0) {
+      // Contain-fit at zoom with the image center pinned to the committed
+      // fractional viewport point, so the framed region survives viewport changes.
+      const fit = Math.min(window.innerWidth / bg.iw, window.innerHeight / bg.ih)
+      const w = bg.iw * fit * bg.zoom
+      const h = bg.ih * fit * bg.zoom
+      wpEl!.style.backgroundSize = `${w}px ${h}px`
+      wpEl!.style.backgroundPosition = `${bg.x * window.innerWidth - w / 2}px ${bg.y * window.innerHeight - h / 2}px`
+    } else {
+      // Fresh image: match the editor's initial centered contain view.
+      wpEl!.style.backgroundSize = 'contain'
+      wpEl!.style.backgroundPosition = 'center'
+    }
+  } else if (mode === 'fill') {
+    wpEl!.style.backgroundRepeat = 'no-repeat'
+    wpEl!.style.backgroundSize = 'cover'
+    wpEl!.style.backgroundPosition = 'center'
+  } else if (mode === 'stretch') {
+    wpEl!.style.backgroundRepeat = 'no-repeat'
+    wpEl!.style.backgroundSize = '100% 100%'
+    wpEl!.style.backgroundPosition = 'center'
+  } else if (mode === 'tile') {
+    wpEl!.style.backgroundRepeat = 'repeat'
+    // background-size:auto resolves the intrinsic size per tile.
+    wpEl!.style.backgroundSize = 'auto'
+    wpEl!.style.backgroundPosition = '0px 0px'
+  } else {
+    // Center: native size, centered. The intrinsic size needs an async decode;
+    // 'contain' keeps a sensible frame until it lands.
+    wpEl!.style.backgroundRepeat = 'no-repeat'
+    wpEl!.style.backgroundSize = 'contain'
+    wpEl!.style.backgroundPosition = 'center'
+    imageNatSize(url, (w, h) => {
+      if (!wpEl || wpEl.style.backgroundImage !== next || rBgMode() !== 'center') return
+      if (w > 0 && h > 0) {
+        wpEl.style.backgroundSize = `${w}px ${h}px`
+        wpEl.style.backgroundPosition = 'center'
+      }
+    })
+  }
+  applyWpEffects()
+}
+
+/** Video wallpaper: a muted looping <video> inside the wallpaper layer.
+ *  Placement modes map onto object-fit (tile has no video equivalent and
+ *  falls back to cover). */
+function applyVideoWp(url: string): void {
+  clearDynamicBg()
+  ensureWpContainer()
+  if (wpEl!.style.backgroundImage !== 'none') wpEl!.style.backgroundImage = 'none'
+  if (videoEl === null || !videoEl.isConnected) {
+    videoEl = document.createElement('video')
+    videoEl.muted = true
+    videoEl.loop = true
+    videoEl.autoplay = true
+    videoEl.playsInline = true
+    videoEl.setAttribute('playsinline', '')
+    videoEl.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;object-position:center;'
+    videoEl.setAttribute('src', url)
+    void videoEl.play().catch(() => undefined)
+    wpEl!.appendChild(videoEl)
+  } else if (videoEl.getAttribute('src') !== url) {
+    // Compare the attribute, not videoEl.src: the property getter resolves to
+    // an absolute URL that would never match the relative serve URL and would
+    // restart playback on every re-apply.
+    videoEl.setAttribute('src', url)
+    void videoEl.play().catch(() => undefined)
+  }
+  const mode = rBgMode()
+  const bg = rVideoBgState()
+  if (mode === 'fit' && bg.iw > 0) {
+    // Editor-committed box at contain-fit scale × zoom, centered on the
+    // fractional point; object-fit:fill stretches the frame into the box
+    // (same aspect ratio, so nothing distorts).
     const fit = Math.min(window.innerWidth / bg.iw, window.innerHeight / bg.ih)
     const w = bg.iw * fit * bg.zoom
     const h = bg.ih * fit * bg.zoom
-    wpEl!.style.backgroundSize = `${w}px ${h}px`
-    wpEl!.style.backgroundPosition = `${bg.x * window.innerWidth - w / 2}px ${bg.y * window.innerHeight - h / 2}px`
+    videoEl.style.cssText = `position:absolute;left:${bg.x * window.innerWidth - w / 2}px;top:${bg.y * window.innerHeight - h / 2}px;width:${w}px;height:${h}px;object-fit:fill;`
   } else {
-    // Fresh image: match the editor's initial centered contain view.
-    wpEl!.style.backgroundSize = 'contain'
-    wpEl!.style.backgroundPosition = 'center'
+    videoEl.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;object-position:center;'
+    videoEl.style.objectFit = mode === 'stretch' ? 'fill' : (mode === 'fill' || mode === 'tile') ? 'cover' : 'contain'
   }
   applyWpEffects()
 }
@@ -467,9 +732,21 @@ function applyWpEffects(): void {
 
 export function applyWp(): void {
   const url = rWp()
-  if (cfg.backgroundType !== 'image' && cfg.generatedBg) {
-    // Generated backgrounds are live canvases. If one is not active yet,
-    // create it from the saved params (happens on boot or after import).
+  if (cfg.backgroundType === 'video') {
+    // The frame snapshot (rWp's video branch) is preview-only; the layer plays
+    // the video from its own slot.
+    const vurl = rWpVideo()
+    if (vurl) {
+      applyVideoWp(vurl)
+    } else {
+      clearDynamicBg()
+      clearVideoEl()
+      wpEl?.remove(); wpEl = null
+    }
+  } else if (cfg.backgroundType !== 'image' && cfg.generatedBg) {
+    // Recreate the live canvas from saved params if one is not active yet
+    // (boot or after import).
+    clearVideoEl()
     if (!wpController) {
       applyGeneratedBg(cfg.generatedBg)
       return
@@ -482,37 +759,44 @@ export function applyWp(): void {
   } else {
     // No background: tear down the layer but keep tokens/blur intact.
     clearDynamicBg()
+    clearVideoEl()
     wpEl?.remove(); wpEl = null
   }
-  // Theme color + per-part opacities: write the full token set inline
-  // (self-contained), then the settings panel surface + per-part blur.
-  // Only write tokens when there is a color to derive them from (a saved pick,
-  // or a generated background whose brightness verdict is known). On boot the
-  // persisted state has not loaded yet, so rColor() falls back to the default
-  // blue and would flash the whole interface before the saved color lands.
+  // Write tokens only when there is a color to derive them from (a saved pick,
+  // or a generated background whose brightness verdict is known) — on boot the
+  // persisted state has not loaded yet, and rColor() would flash the default.
   if (rHasColor() || rBgDark() !== null) {
     applyCustomTokens(rOps())
   }
   if (rHasColor()) {
     applySettingsOverrides(rSop())
+    applyTrajectoryOverrides(rTrajectoryOpacity())
   }
   applyPartBlurs(rBlurs())
 }
 
 export function teardownWp(): void {
   clearDynamicBg()
+  clearVideoEl()
   setBgDark(null)
   wpEl?.remove(); wpEl = null
   clearCustomTokens()
   tokenStyleEl?.remove(); tokenStyleEl = null
+  removeViewCards()
   document.documentElement.style.removeProperty('--dsh-any-bg-settings-surface')
   document.documentElement.style.removeProperty('--dsh-any-bg-settings-layer-1')
   document.documentElement.style.removeProperty('--dsh-any-bg-settings-layer-2')
   document.documentElement.style.removeProperty('--dsh-any-bg-settings-layer-3')
+  document.documentElement.style.removeProperty('--dsh-any-traj-layer-1')
+  document.documentElement.style.removeProperty('--dsh-any-traj-layer-2')
+  document.documentElement.style.removeProperty('--dsh-any-traj-layer-3')
   document.documentElement.style.removeProperty('--dsh-any-bg-settings-card-surface')
   document.documentElement.style.removeProperty('--dsh-any-blur-settings')
   document.documentElement.style.removeProperty('--dsh-any-blur-card-panels')
   setBlur(frameEl, 0); setBlur(sidebarEl, 0); setBlur(centerEl, 0); setBlur(detailsEl, 0)
+  if (frameEl !== null) frameEl.style.removeProperty('background')
+  if (centerEl !== null) centerEl.style.removeProperty('background')
+  if (detailsEl !== null) detailsEl.style.removeProperty('background')
   stopWatchingParts()
 }
 

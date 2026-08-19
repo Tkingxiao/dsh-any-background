@@ -1,33 +1,18 @@
 /**
  * dsh-any-background — browser half entry.
  *
- * Appearance plugin with:
- * 1. PS-style color wheel (hue ring + saturation/lightness square) for
- *    real-time theme color selection with dynamic token generation.
- * 2. Background image editor modal with drag-to-pan and scroll-to-zoom
- *    inside a viewport-proportional preview rectangle.
- * 3. Opacity / blur sliders with zero-lag direct DOM manipulation: the
- *    homepage background opacity (主界面) and the settings panel opacity
- *    (设置界面透明度) are separate sliders.
- *
- * This file wires the plugin lifecycle (theme registration, wallpaper layer,
- * viewport watch, i18n, settings-section injection, boot restore, watchdog).
- * The heavy lifting lives in the sibling modules:
- *   state.ts       in-memory config mirror + getters
- *   rpc.ts         file-backed persistence over the /dsh-any-background channel
- *   wallpaper.ts   wallpaper DOM layer + inline token writes
- *   utils/         color math, token generation, image compression
- *   components/    ThemeSection shell + pages/, ColorWheel, BgEditor, LiveSlider
- *   i18n.ts        zh/en dictionaries
- *   ui.css.ts      scoped design-system stylesheet (classes + keyframes)
+ * Wires the plugin lifecycle: theme registration, wallpaper layer, viewport
+ * watch, i18n, settings-section injection, boot restore, watchdog. The heavy
+ * lifting lives in the sibling modules (state/rpc/wallpaper/utils/components).
  */
 import { defineStore } from '@deepseek-ai/dsh-client-runtime/client'
 import type { Ctx, RpcResultLike, BoundActions, ThemeSectionProps, PartOpacities, PartBlurs, BackgroundType, GeneratedBgParams } from './types'
 import { NS, zh, en } from './i18n'
-import { cfg, rHasColor, rColor, rWp, rBgState, setWpUrl, setWpImageUrl, setBgState, adoptConfig, DEFAULT_CONFIG, setBgDark } from './state'
-import { RPC_CHANNEL, initRpc, saveConfig, flushSave, loadPersisted, persistWallpaper, persistConfig } from './rpc'
-import { applyWp, teardownWp, applySettingsOverrides, SETTINGS_STYLE_RULE, watchParts, regenerateGeneratedBg, setBackgroundType, updateGeneratedBg, applyThemeColor, onGeneratedSnapshot } from './wallpaper'
+import { cfg, rHasColor, rColor, rWp, rWpImage, rWpVideo, rBgState, rVideoBgState, setWpUrl, setWpImageUrl, setWpVideoUrl, setWpVideoSnapshot, setBgState, adoptConfig, DEFAULT_CONFIG, setBgDark } from './state'
+import { RPC_CHANNEL, VIDEO_SERVE_URL, initRpc, saveConfig, flushSave, loadPersisted, persistWallpaper, persistVideo, persistConfig, uploadVideo } from './rpc'
+import { applyWp, teardownWp, applySettingsOverrides, SETTINGS_STYLE_RULE, TRAJECTORY_STYLE_RULE, watchParts, regenerateGeneratedBg, setBackgroundType, updateGeneratedBg, applyThemeColor, onGeneratedSnapshot } from './wallpaper'
 import { genTokens, hslToHsv, hsvToHsl, extractWallpaperColor } from './utils/color'
+import { captureVideoSnapshot } from './utils/video'
 import { ThemeSection } from './components/ThemeSection'
 import { SUN_PATHS } from './components/icons'
 
@@ -44,9 +29,7 @@ export function apply(ctx: Ctx): void {
   )
 
   // 1. Restore custom color and register as a skin. The saved color's
-  // lightness decides the scheme — a dark pick gets white text, a light pick
-  // black text — so both the theme color and the dark/light text follow the
-  // picked color.
+  // lightness decides the scheme (dark pick → white text, light → black).
   const [initH, initS, initL] = rColor()
   let customDispose: (() => void) | null = null
   // registerCustom takes HSL (the storage/wheel space and genTokens space).
@@ -56,15 +39,12 @@ export function apply(ctx: Ctx): void {
       const { colorScheme, tokens } = genTokens(h, s, l)
       customDispose = ctx.theme.register({ id: CUSTOM_ID, colorScheme, tokens })
     } catch {
-      // A live registration from an earlier apply pass (HMR swap that could
-      // not run this fiber's disposer) cannot be torn down here; keep it and
-      // activate it below. Without this the duplicate-id throw would abort
-      // apply and skip the wallpaper/opacity restore.
+      // A live registration from an earlier HMR apply pass cannot be torn down
+      // here; keep it and activate it below. Without this the duplicate-id
+      // throw would abort apply and skip the wallpaper/opacity restore.
       customDispose = null
     }
-    // Only activate the custom theme if it is actually registered. This keeps
-    // the HMR fallback above safe and avoids a crash when registration fails
-    // for any other reason.
+    // Only activate the custom theme if it is actually registered.
     if (ctx.theme.getTheme().themes.some(t => t.id === CUSTOM_ID)) {
       ctx.theme.setTheme(CUSTOM_ID)
     }
@@ -77,16 +57,12 @@ export function apply(ctx: Ctx): void {
   }, 'dsh-any-background: skin dispose')
 
   // 2. Gradient CSS (for custom dark themes).
-  let styleEl: HTMLStyleElement | undefined
-  if (typeof document !== 'undefined') {
-    styleEl = document.createElement('style')
-    styleEl.dataset.plugin = 'dsh-any-background'
-    // This gradient only applies while applyCustomTokens has marked the body
-    // with the plugin's own dark-mode value, avoiding accidental matches against
-    // the host harness's theme attribute.
-    styleEl.textContent = `body[data-ds-dark-theme="dsh-any-background"]::before{content:'';position:fixed;inset:0;z-index:-1;pointer-events:none;background:radial-gradient(ellipse 80% 60% at 50% 0%,rgba(255,255,255,0.03) 0%,transparent 60%)}${SETTINGS_STYLE_RULE}`
-    document.head.appendChild(styleEl)
-  }
+  const styleEl = document.createElement('style')
+  styleEl.dataset.plugin = 'dsh-any-background'
+  // Only applies while applyCustomTokens marks the body with the plugin's
+  // own dark-mode value, avoiding matches against the host's theme attribute.
+  styleEl.textContent = `body[data-ds-dark-theme="dsh-any-background"]::before{content:'';position:fixed;inset:0;z-index:-1;pointer-events:none;background:radial-gradient(ellipse 80% 60% at 50% 0%,rgba(255,255,255,0.03) 0%,transparent 60%)}${SETTINGS_STYLE_RULE}${TRAJECTORY_STYLE_RULE}`
+  document.head.appendChild(styleEl)
   ctx.effect(() => () => { styleEl?.parentNode?.removeChild(styleEl) }, 'dsh-any-background: gradient')
 
   // 3. State store.
@@ -128,35 +104,42 @@ export function apply(ctx: Ctx): void {
   // The AppFrame mounts after this apply; watch for it so persisted per-part
   // blurs land as soon as the shell renders.
   watchParts()
-  // Load the file-backed theme from the node half and re-apply once it lands
-  // (the node store may be absent or unreachable at this instant; defaults are
-  // already applied above, and the deferred restore below re-asserts too).
+  // Load the file-backed theme and re-apply once it lands (defaults are already
+  // applied above; the deferred restore below re-asserts too).
   void loadPersisted().then(() => {
-    // The file-backed store may land after the section mounted with defaults:
-    // re-register the skin with the restored color and push it to the wheel
-    // through the store so UI and theme never diverge.
+    // Re-register the skin with the restored color so UI and theme never diverge.
     if (rHasColor()) {
       const [h, s, l] = rColor()
       registerCustom(h, s, l)
     }
-    // If the user last used a generated background, either regenerate it on
-    // reload (when regenerateOnReload is enabled) or reconstruct the same
-    // snapshot from the saved parameters so the wallpaper stays stable.
-    if (cfg.backgroundType !== 'image') {
+    // Regenerate on reload if enabled, else reconstruct from saved params.
+    if (cfg.backgroundType === 'video') {
+      const v = rWpVideo()
+      if (v) {
+        // The frame snapshot is not persisted: re-capture it for previews.
+        void captureVideoSnapshot(v).then(snap => {
+          if (rWpVideo() !== v) return
+          setWpVideoSnapshot(snap)
+          applyThemeColor()
+          syncBg()
+        })
+        applyWp()
+      } else {
+        // Stored video missing: fall back to the retained image slot.
+        cfg.backgroundType = 'image'
+        setWpUrl(rWpImage())
+        applyThemeColor()
+      }
+    } else if (cfg.backgroundType !== 'image') {
       if (cfg.regenerateOnReload) {
         regenerateGeneratedBg()
       } else if (cfg.generatedBg) {
         updateGeneratedBg(cfg.generatedBg)
       }
-      // Persist the normalized config so the seed (and regenerateOnReload flag)
-      // are written back to disk. Old configs created before the seed field
-      // existed will get a deterministic seed=0 saved, so subsequent reloads
-      // are stable without requiring user interaction.
+      // Persist the normalized config so the seed and flag land on disk.
       persistConfig()
     } else {
-      // Apply the theme color: when a color is saved this synchronously derives
-      // the palette from it (so the saved pick wins); otherwise it falls back
-      // to extracting a palette from the uploaded wallpaper.
+      // Saved pick wins; otherwise extract from the uploaded wallpaper.
       applyThemeColor()
     }
     syncBg()
@@ -164,12 +147,10 @@ export function apply(ctx: Ctx): void {
   })
   ctx.effect(() => () => { teardownWp() }, 'dsh-any-background: wp cleanup')
   ctx.effect(() => ctx.on('theme/change', () => {
-    // The theme service persists only built-in preferences; the custom theme's
-    // preference lives in memory, so a host-scope adoption can silently reset
-    // it. While a color is saved, re-assert the custom theme so it stays
-    // active. Guard on registry presence — registerCustom disposes the old
-    // skin before re-registering, and during that transient the registry lacks
-    // CUSTOM_ID, so asserting there would throw.
+    // The custom theme's preference lives in memory, so a host adoption can
+    // silently reset it; re-assert it while a color is saved. Guard on registry
+    // presence — registerCustom disposes the old skin first, so during that
+    // transient the registry lacks CUSTOM_ID.
     if (rHasColor()) {
       const snapshot = ctx.theme.getTheme()
       if (snapshot.preference !== CUSTOM_ID && snapshot.themes.some(t => t.id === CUSTOM_ID)) {
@@ -178,15 +159,11 @@ export function apply(ctx: Ctx): void {
     }
     applyWp()
   }), 'dsh-any-background: theme change')
-  // The wallpaper's inline size/position are absolute pixels computed for the
-  // viewport at apply time, so a stale viewport leaves them misplaced.
-  // Watch the viewport itself: a fixed inset:0 sentinel's box always equals
-  // the viewport, so a ResizeObserver on it fires for ANY viewport change
-  // (window resize, moving between monitors, panel splitters, zoom) where
-  // window.resize can be missed; a resolution media query catches DPI-only
-  // moves between differently scaled screens. All re-applies are coalesced to
-  // one per animation frame. Re-running applyWp recomputes the contain-fit
-  // scale and the fractional offsets for the new viewport (the editor's model).
+  // Wallpaper placement is computed in absolute viewport pixels, so watch the
+  // viewport itself: a fixed inset:0 sentinel's box always equals the viewport,
+  // so a ResizeObserver on it catches any viewport change (window resize,
+  // monitor moves, panel splitters, zoom); a resolution media query catches
+  // DPI-only moves. Re-applies are coalesced to one per animation frame.
   let frame = 0
   const applySoon = (): void => {
     if (frame !== 0) return
@@ -219,12 +196,8 @@ export function apply(ctx: Ctx): void {
       setColor: (nh: number, ns: number, nl: number) => {
         const [sh, ss, sl] = hsvToHsl(nh, ns, nl)
         cfg.color = [sh, ss, sl]
-        // Wheel dragging produces a flood of events. Updating the preview UI
-        // (orb/hex/wheel marker) must stay synchronous so it feels instant, but
-        // registering a new theme + writing 40+ CSS variables + persisting the
-        // config is expensive. Debounce that work by 80ms: while the user drags
-        // rapidly we only update in-memory state/UI; once they pause or release
-        // the mouse the theme is applied once.
+        // Preview UI stays synchronous for instant feedback; the expensive work
+        // (theme registration + token writes + persist) is debounced by 80ms.
         if (colorTimerRef.current !== null) window.clearTimeout(colorTimerRef.current)
         colorTimerRef.current = window.setTimeout(() => {
           colorTimerRef.current = null
@@ -232,23 +205,70 @@ export function apply(ctx: Ctx): void {
           applyWp()
           saveConfig()
         }, 80)
-        // Keep the wheel's canonical color in the store so programmatic
-        // changes (wallpaper extraction) and remounts share one source.
+        // Keep the canonical color in the store so programmatic changes and
+        // remounts share one source.
         colorRev++
         bound?.syncColor([nh, ns, nl], colorRev)
       },
       setWp: (u: string | null) => {
         cfg.backgroundType = 'image'
-        // Retain the uploaded image in its own slot so switching to a generated
-        // background and back never loses it. persisted to wallpaper.jpg too.
+        // Retain the upload in its own slot so type switches never lose it.
         // The generated-background brightness verdict stops applying here.
         setBgDark(null)
         setWpImageUrl(u)
         setWpUrl(u)
         setBgState({ ...DEFAULT_CONFIG.bgState })
         persistWallpaper(u)
+        if (u === null) {
+          // Removing the background clears the stored video as well.
+          setWpVideoUrl(null, null)
+          void persistVideo(null)
+        }
         applyThemeColor()
         syncBg()
+      },
+      setVideo: async (u: Blob | string | null, mime: string | null) => {
+        setBgDark(null)
+        if (u === null) {
+          // Removing: clear the stored video and return to the image slot.
+          setWpVideoUrl(null, null)
+          cfg.backgroundType = 'image'
+          setWpUrl(rWpImage())
+          void persistVideo(null)
+          applyThemeColor()
+          syncBg()
+          saveConfig()
+          return
+        }
+        // Persist first, play second. Blobs stream their raw bytes to disk
+        // over the binary upload route — never base64 through the JSON RPC
+        // channel, whose body limit rejects large clips before they land.
+        // A data URL string (legacy/small) still rides the RPC path.
+        let ok: boolean
+        if (typeof u === 'string') ok = await persistVideo(u)
+        else ok = await uploadVideo(u, mime ?? u.type ?? 'video/mp4')
+        const live = ok ? VIDEO_SERVE_URL : (typeof u === 'string' ? u : null)
+        if (live === null) {
+          // Upload failed and there is no data-URL fallback: keep whatever
+          // background was active instead of switching to a dead video.
+          return
+        }
+        cfg.backgroundType = 'video'
+        setWpUrl(null)
+        cfg.videoBgState = { ...DEFAULT_CONFIG.bgState }
+        setWpVideoUrl(live, mime ?? (typeof u === 'string' ? null : u.type) ?? null)
+        applyWp()
+        saveConfig()
+        syncBg()
+        // The frame snapshot is preview-only (settings thumbnail, color
+        // extraction, eyedropper, position editor reference).
+        const applied = rWpVideo()
+        void captureVideoSnapshot(live).then(snap => {
+          if (rWpVideo() !== applied) return
+          setWpVideoSnapshot(snap)
+          applyThemeColor()
+          syncBg()
+        })
       },
       setBgType: (type: BackgroundType) => {
         setBackgroundType(type)
@@ -286,7 +306,10 @@ export function apply(ctx: Ctx): void {
       extractColor: async (): Promise<boolean> => {
         const url = rWp()
         if (!url) return false
-        const hsl = await extractWallpaperColor(url, rBgState())
+        // Video mode extracts from the frame snapshot through the video's
+        // placement state (rWp already returns the snapshot there).
+        const st = cfg.backgroundType === 'video' ? rVideoBgState() : rBgState()
+        const hsl = await extractWallpaperColor(url, st)
         if (!hsl) return false
         cfg.color = hsl
         registerCustom(hsl[0], hsl[1], hsl[2])
@@ -298,15 +321,39 @@ export function apply(ctx: Ctx): void {
         return true
       },
       // Download the whole theme as dsh-any-theme.json: the config plus the
-      // wallpaper data URL only when it is an uploaded image. Generated
-      // backgrounds are reconstructed from the saved params on import, so the
-      // export stays small.
-      exportTheme: () => {
+      // wallpaper data URL only when it is an uploaded image, and the video
+      // bytes copied in as a data URL when a video background is active.
+      // Generated backgrounds are reconstructed from the saved params on
+      // import, so their exports stay small.
+      exportTheme: async () => {
+        let videoPayload: string | null = null
+        if (cfg.backgroundType === 'video') {
+          const vurl = rWpVideo()
+          if (vurl) {
+            try {
+              const blob = await fetch(vurl).then(r => r.blob())
+              videoPayload = await new Promise<string>((resolve, reject) => {
+                const fr = new FileReader()
+                fr.onload = () => resolve(fr.result as string)
+                fr.onerror = () => reject(fr.error)
+                fr.readAsDataURL(blob)
+              })
+              // The serve route may report a generic Content-Type; pin the
+              // recorded MIME so the import detector sees data:video/….
+              if (videoPayload && !/^data:video\//.test(videoPayload)) {
+                videoPayload = videoPayload.replace(/^data:[^;,]*/, `data:${cfg.videoMime ?? 'video/mp4'}`)
+              }
+            } catch {
+              videoPayload = null
+            }
+          }
+        }
         const payload = {
           version: 2,
           exportedAt: new Date().toISOString(),
           config: cfg,
           wallpaper: cfg.backgroundType === 'image' ? rWp() : null,
+          video: videoPayload,
         }
         const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
         const url = URL.createObjectURL(blob)
@@ -324,10 +371,46 @@ export function apply(ctx: Ctx): void {
         try {
           const data: unknown = JSON.parse(await file.text())
           if (!data || typeof data !== 'object') return false
-          const d = data as { version?: number; config?: unknown; wallpaper?: unknown }
+          const d = data as { version?: number; config?: unknown; wallpaper?: unknown; video?: unknown }
           if (typeof d.config !== 'object' || d.config === null) return false
           adoptConfig(d.config)
-          if (cfg.backgroundType === 'image') {
+          if (cfg.backgroundType === 'video') {
+            const video = typeof d.video === 'string' && /^data:video\//.test(d.video) ? d.video : null
+            if (video !== null) {
+              // Embedded video: decode the data URL back to raw bytes and
+              // stream it to disk over the binary upload route (sending the
+              // base64 through RPC would hit the same body limit as upload).
+              // The data-URL RPC path stays as the small-file fallback.
+              let ok = false
+              try {
+                const blob = await fetch(video).then(r => r.blob())
+                ok = await uploadVideo(blob, cfg.videoMime ?? blob.type ?? 'video/mp4')
+              } catch {
+                ok = false
+              }
+              if (!ok) ok = await persistVideo(video)
+              const live = ok ? VIDEO_SERVE_URL : video
+              setWpVideoUrl(live, cfg.videoMime)
+              applyWp()
+              // Re-capture the preview snapshot, then derive colors from it.
+              const applied = rWpVideo()
+              void captureVideoSnapshot(live).then(snap => {
+                if (rWpVideo() !== applied) return
+                setWpVideoSnapshot(snap)
+                applyThemeColor()
+                syncBg()
+              })
+            } else {
+              // Export lacked the video payload: fall back to no background.
+              setWpVideoUrl(null, null)
+              void persistVideo(null)
+              cfg.backgroundType = 'image'
+              setWpImageUrl(null)
+              setWpUrl(null)
+              persistWallpaper(null)
+              applyThemeColor()
+            }
+          } else if (cfg.backgroundType === 'image') {
             const wallpaper = typeof d.wallpaper === 'string' && /^data:image\//.test(d.wallpaper) ? d.wallpaper : null
             setWpImageUrl(wallpaper)
             setWpUrl(wallpaper)

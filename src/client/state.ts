@@ -1,43 +1,58 @@
-import type { BgState, ThemeConfig, PartOpacities, PartBlurs, ColorPalette } from './types'
+import type { BgState, ThemeConfig, PartOpacities, PartBlurs, BgMode } from './types'
 
 export const DEFAULT_CONFIG: ThemeConfig = {
   color: null,
   opacities: { bg: 0.85, sidebar: 0.93, card: 1 },
-  blurs: { bg: 0, sidebar: 0, card: 0, settings: 0 },
+  blurs: { bg: 0, sidebar: 0, card: 0, settings: 0, chat: 0, trajectory: 0 },
   settingsOpacity: 1,
   wallpaperOpacity: 1,
   blur: 0,
   bgState: { zoom: 1, x: 0, y: 0, iw: 0, ih: 0 },
+  videoBgState: { zoom: 1, x: 0, y: 0, iw: 0, ih: 0 },
   backgroundType: 'image',
+  bgMode: 'fit',
+  videoMime: null,
   generatedBg: null,
   regenerateOnReload: false,
+  chatTextOpacity: 0,
+  // 100% = untouched host surface; zero would blank the page by default.
+  trajectoryOpacity: 1,
 }
 
-// Derived Material-You-style palette. It is recomputed from the active
-// wallpaper/generated background whenever the background changes, and used by
-// genTokens to map brand/accent/surface colors more harmoniously.
-export let palette: ColorPalette | null = null
-export function setPalette(p: ColorPalette | null): void { palette = p }
-export function rPalette(): ColorPalette | null { return palette }
+const clamp01 = (n: unknown, def: number): number =>
+  typeof n === 'number' ? Math.min(1, Math.max(0, n)) : def
 
-// In-memory mirror of the file-backed store. The node half owns the disk; this
-// module is the single source of truth the UI reads from and mutates, synced
-// to disk via the RPC layer.
-export let cfg: ThemeConfig = { ...DEFAULT_CONFIG, opacities: { ...DEFAULT_CONFIG.opacities }, blurs: { ...DEFAULT_CONFIG.blurs }, bgState: { ...DEFAULT_CONFIG.bgState } }
+// In-memory mirror of the file-backed store; the UI reads and mutates this,
+// and it is synced to disk via the RPC layer.
+export let cfg: ThemeConfig = { ...DEFAULT_CONFIG, opacities: { ...DEFAULT_CONFIG.opacities }, blurs: { ...DEFAULT_CONFIG.blurs }, bgState: { ...DEFAULT_CONFIG.bgState }, videoBgState: { ...DEFAULT_CONFIG.videoBgState } }
 export let wpImageUrl: string | null = null
-// The uploaded image is retained across background-type switches so coming back
-// to the "image" type restores the original picture (see issue: switching to a
-// generated bg overwrote the image URL and lost it).
+// Retained across background-type switches so coming back to image/video
+// restores the original upload.
 export let wpUrl: string | null = null
+export let wpVideoUrl: string | null = null
+/** Captured video frame standing in for previews/color extraction (still-image APIs). */
+export let wpVideoSnapshot: string | null = null
 
 export function setWpImageUrl(url: string | null): void { wpImageUrl = url }
 export function setWpUrl(url: string | null): void { wpUrl = url }
+// The serve URL is stable, so replacing the stored video needs a query-string
+// cache-buster or the player keeps the cached copy.
+let videoRev = 0
+export function setWpVideoUrl(url: string | null, mime: string | null): void {
+  if (url === null) {
+    wpVideoUrl = null
+    wpVideoSnapshot = null
+  } else {
+    videoRev++
+    wpVideoUrl = `${url}${url.includes('?') ? '&' : '?'}r=${videoRev}`
+  }
+  cfg.videoMime = url ? mime : null
+}
+export function setWpVideoSnapshot(url: string | null): void { wpVideoSnapshot = url }
 export function setBgState(s: BgState): void { cfg.bgState = s }
 
-// Brightness verdict of the active generated background, analyzed ONCE per
-// switch from a captured frame (never per-frame). null = no generated
-// background active or analysis pending, so the picked color's lightness
-// keeps deciding the font direction as before.
+// Brightness verdict of the active generated background, analyzed once per
+// switch from a captured frame. null = fall back to the picked color's lightness.
 export let bgDark: boolean | null = null
 export function setBgDark(v: boolean | null): void { bgDark = v }
 export function rBgDark(): boolean | null { return bgDark }
@@ -45,29 +60,54 @@ export function rBgDark(): boolean | null { return bgDark }
 export function rHasColor(): boolean { return cfg.color !== null }
 export function rColor(): [number, number, number] { return cfg.color ?? [220, 0.55, 0.25] }
 export function rWpImage(): string | null { return wpImageUrl }
-/** Display URL: the uploaded image when in image mode, else the generated snapshot. */
-export function rWp(): string | null { return cfg.backgroundType === 'image' ? wpImageUrl : wpUrl }
+export function rWpVideo(): string | null { return wpVideoUrl }
+export function rBgMode(): BgMode { return cfg.bgMode ?? DEFAULT_CONFIG.bgMode }
+export function rChatTextOpacity(): number { return clamp01(cfg.chatTextOpacity, DEFAULT_CONFIG.chatTextOpacity) }
+export function rTrajectoryOpacity(): number { return clamp01(cfg.trajectoryOpacity, DEFAULT_CONFIG.trajectoryOpacity) }
+/** Display URL: the uploaded image/video snapshot per active type, else the generated snapshot. */
+export function rWp(): string | null {
+  if (cfg.backgroundType === 'image') return wpImageUrl
+  if (cfg.backgroundType === 'video') return wpVideoSnapshot
+  return wpUrl
+}
 export function rOps(): PartOpacities {
   const o = cfg.opacities ?? {}
-  return {
-    bg: typeof o.bg === 'number' ? Math.min(1, Math.max(0, o.bg)) : DEFAULT_CONFIG.opacities.bg,
-    sidebar: typeof o.sidebar === 'number' ? Math.min(1, Math.max(0, o.sidebar)) : DEFAULT_CONFIG.opacities.sidebar,
-    card: typeof o.card === 'number' ? Math.min(1, Math.max(0, o.card)) : DEFAULT_CONFIG.opacities.card,
+  const out = {} as PartOpacities
+  for (const k of ['bg', 'sidebar', 'card'] as const) {
+    out[k] = clamp01(o[k], DEFAULT_CONFIG.opacities[k])
   }
+  return out
 }
 export function rBlurs(): PartBlurs {
   const b = cfg.blurs ?? {}
+  const out = {} as PartBlurs
+  for (const k of ['bg', 'sidebar', 'card', 'settings', 'chat', 'trajectory'] as const) {
+    const v = b[k]
+    out[k] = typeof v === 'number' ? Math.min(60, Math.max(0, v)) : DEFAULT_CONFIG.blurs[k]
+  }
+  return out
+}
+export function rWop(): number { return clamp01(cfg.wallpaperOpacity, DEFAULT_CONFIG.wallpaperOpacity) }
+export function rBl(): number {
+  return typeof cfg.blur === 'number' ? Math.min(60, Math.max(0, cfg.blur)) : DEFAULT_CONFIG.blur
+}
+export function rSop(): number { return clamp01(cfg.settingsOpacity, DEFAULT_CONFIG.settingsOpacity) }
+export function rBgState(): BgState { return cfg.bgState }
+export function rVideoBgState(): BgState { return cfg.videoBgState }
+
+const num = (n: unknown, def: number): number => typeof n === 'number' ? n : def
+const cl = (n: unknown, lo: number, hi: number, def: number): number =>
+  typeof n === 'number' ? Math.min(hi, Math.max(lo, n)) : def
+
+function adoptBgState(s: Partial<BgState>): BgState {
   return {
-    bg: typeof b.bg === 'number' ? Math.min(60, Math.max(0, b.bg)) : DEFAULT_CONFIG.blurs.bg,
-    sidebar: typeof b.sidebar === 'number' ? Math.min(60, Math.max(0, b.sidebar)) : DEFAULT_CONFIG.blurs.sidebar,
-    card: typeof b.card === 'number' ? Math.min(60, Math.max(0, b.card)) : DEFAULT_CONFIG.blurs.card,
-    settings: typeof b.settings === 'number' ? Math.min(60, Math.max(0, b.settings)) : DEFAULT_CONFIG.blurs.settings,
+    zoom: num(s.zoom, 1),
+    x: num(s.x, 0),
+    y: num(s.y, 0),
+    iw: typeof s.iw === 'number' && s.iw > 0 ? s.iw : 0,
+    ih: typeof s.ih === 'number' && s.ih > 0 ? s.ih : 0,
   }
 }
-export function rWop(): number { return typeof cfg.wallpaperOpacity === 'number' ? Math.min(1, Math.max(0, cfg.wallpaperOpacity)) : DEFAULT_CONFIG.wallpaperOpacity }
-export function rBl(): number { return typeof cfg.blur === 'number' ? Math.min(60, Math.max(0, cfg.blur)) : DEFAULT_CONFIG.blur }
-export function rSop(): number { return typeof cfg.settingsOpacity === 'number' ? Math.min(1, Math.max(0, cfg.settingsOpacity)) : DEFAULT_CONFIG.settingsOpacity }
-export function rBgState(): BgState { return cfg.bgState }
 
 /** Move a possibly-absent partial config into the shape the UI reads. */
 export function adoptConfig(raw: unknown): void {
@@ -75,13 +115,19 @@ export function adoptConfig(raw: unknown): void {
   const color = Array.isArray(c.color) && c.color.length === 3
     ? [c.color[0], c.color[1], c.color[2]] as [number, number, number]
     : null
-  const bg = (c.bgState ?? {}) as Partial<BgState>
   // Migration: the old single main-interface opacity becomes per-part, keeping
-  // the sidebar's former +0.08 offset and leaving cards opaque as before.
+  // the sidebar's former +0.08 offset.
   const legacy = typeof c.opacity === 'number' ? c.opacity : null
   const ops = (c.opacities ?? {}) as Partial<PartOpacities>
   const bl = (c.blurs ?? {}) as Partial<PartBlurs>
-  const bgType = (c.backgroundType === 'mesh' || c.backgroundType === 'shader' || c.backgroundType === 'pattern') ? c.backgroundType : DEFAULT_CONFIG.backgroundType
+  const blurs = {} as PartBlurs
+  for (const k of ['bg', 'sidebar', 'card', 'settings', 'chat', 'trajectory'] as const) {
+    blurs[k] = num(bl[k], DEFAULT_CONFIG.blurs[k])
+  }
+  const bgType = ['video', 'mesh', 'shader', 'pattern'].includes(c.backgroundType as string)
+    ? (c.backgroundType as ThemeConfig['backgroundType'])
+    : DEFAULT_CONFIG.backgroundType
+  const bgMode = (['fit', 'fill', 'stretch', 'tile', 'center'] as BgMode[]).includes(c.bgMode as BgMode) ? (c.bgMode as BgMode) : DEFAULT_CONFIG.bgMode
   const gen = c.generatedBg && typeof c.generatedBg === 'object'
     ? (c.generatedBg as { type?: string })
     : null
@@ -90,29 +136,23 @@ export function adoptConfig(raw: unknown): void {
   cfg = {
     color,
     opacities: {
-      bg: typeof ops.bg === 'number' ? ops.bg : (legacy ?? DEFAULT_CONFIG.opacities.bg),
-      sidebar: typeof ops.sidebar === 'number' ? ops.sidebar : (legacy !== null ? Math.min(1, legacy + 0.08) : DEFAULT_CONFIG.opacities.sidebar),
-      card: typeof ops.card === 'number' ? ops.card : DEFAULT_CONFIG.opacities.card,
+      bg: num(ops.bg, legacy ?? DEFAULT_CONFIG.opacities.bg),
+      sidebar: num(ops.sidebar, legacy !== null ? Math.min(1, legacy + 0.08) : DEFAULT_CONFIG.opacities.sidebar),
+      card: num(ops.card, DEFAULT_CONFIG.opacities.card),
     },
-    blurs: {
-      bg: typeof bl.bg === 'number' ? bl.bg : DEFAULT_CONFIG.blurs.bg,
-      sidebar: typeof bl.sidebar === 'number' ? bl.sidebar : DEFAULT_CONFIG.blurs.sidebar,
-      card: typeof bl.card === 'number' ? bl.card : DEFAULT_CONFIG.blurs.card,
-      settings: typeof bl.settings === 'number' ? bl.settings : DEFAULT_CONFIG.blurs.settings,
-    },
-    settingsOpacity: typeof c.settingsOpacity === 'number' ? c.settingsOpacity : DEFAULT_CONFIG.settingsOpacity,
-    wallpaperOpacity: typeof c.wallpaperOpacity === 'number' ? c.wallpaperOpacity : DEFAULT_CONFIG.wallpaperOpacity,
-    blur: typeof c.blur === 'number' ? c.blur : DEFAULT_CONFIG.blur,
-    bgState: {
-      zoom: typeof bg.zoom === 'number' ? bg.zoom : 1,
-      x: typeof bg.x === 'number' ? bg.x : 0,
-      y: typeof bg.y === 'number' ? bg.y : 0,
-      iw: typeof bg.iw === 'number' && bg.iw > 0 ? bg.iw : 0,
-      ih: typeof bg.ih === 'number' && bg.ih > 0 ? bg.ih : 0,
-    },
+    blurs,
+    settingsOpacity: num(c.settingsOpacity, DEFAULT_CONFIG.settingsOpacity),
+    wallpaperOpacity: num(c.wallpaperOpacity, DEFAULT_CONFIG.wallpaperOpacity),
+    blur: num(c.blur, DEFAULT_CONFIG.blur),
+    bgState: adoptBgState((c.bgState ?? {}) as Partial<BgState>),
+    videoBgState: adoptBgState((c.videoBgState ?? {}) as Partial<BgState>),
     backgroundType: bgType,
+    bgMode,
+    videoMime: typeof c.videoMime === 'string' ? c.videoMime : null,
     generatedBg: generatedBg ? normalizeGeneratedBg(generatedBg) : null,
     regenerateOnReload: typeof c.regenerateOnReload === 'boolean' ? c.regenerateOnReload : DEFAULT_CONFIG.regenerateOnReload,
+    chatTextOpacity: clamp01(c.chatTextOpacity, DEFAULT_CONFIG.chatTextOpacity),
+    trajectoryOpacity: clamp01(c.trajectoryOpacity, DEFAULT_CONFIG.trajectoryOpacity),
   }
 }
 
@@ -121,25 +161,25 @@ function normalizeGeneratedBg(p: ThemeConfig['generatedBg']): ThemeConfig['gener
   if (p.type === 'mesh') {
     return {
       type: 'mesh',
-      seed: typeof p.seed === 'number' ? p.seed : 0,
-      scale: typeof p.scale === 'number' ? Math.min(3, Math.max(0.3, p.scale)) : 1,
-      intensity: typeof p.intensity === 'number' ? Math.min(1, Math.max(0, p.intensity)) : 0.6,
+      seed: num(p.seed, 0),
+      scale: cl(p.scale, 0.3, 3, 1),
+      intensity: cl(p.intensity, 0, 1, 0.6),
     }
   }
   if (p.type === 'shader') {
     return {
       type: 'shader',
       preset: ['aurora', 'nebula', 'noise'].includes(p.preset) ? p.preset : 'aurora',
-      speed: typeof p.speed === 'number' ? Math.min(2, Math.max(0, p.speed)) : 0.3,
-      scale: typeof p.scale === 'number' ? Math.min(3, Math.max(0.3, p.scale)) : 1,
+      speed: cl(p.speed, 0, 2, 0.3),
+      scale: cl(p.scale, 0.3, 3, 1),
       seed: typeof p.seed === 'number' ? Math.floor(p.seed) : 0,
     }
   }
   return {
     type: 'pattern',
     preset: ['dots', 'waves', 'poly'].includes(p.preset) ? p.preset : 'dots',
-    density: typeof p.density === 'number' ? Math.min(1, Math.max(0, p.density)) : 0.5,
-    scale: typeof p.scale === 'number' ? Math.min(3, Math.max(0.3, p.scale)) : 1,
+    density: cl(p.density, 0, 1, 0.5),
+    scale: cl(p.scale, 0.3, 3, 1),
     seed: typeof p.seed === 'number' ? Math.floor(p.seed) : 0,
   }
 }

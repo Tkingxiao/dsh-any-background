@@ -10,7 +10,7 @@ import type { CSSProperties } from 'react'
  */
 export function LiveSlider({ min, max, step, def, fmt, label, onInput, onChange }: {
   min: number; max: number; step: number; def: number
-  fmt: (v: number) => string; label?: string; onInput: (v: number) => void; onChange: (v: number) => void
+  fmt: (v: number) => string; label?: string; onInput?: (v: number) => void; onChange: (v: number) => void
 }) {
   const inputRef = useRef<HTMLInputElement>(null)
   const valRef = useRef<HTMLSpanElement>(null)
@@ -35,7 +35,7 @@ export function LiveSlider({ min, max, step, def, fmt, label, onInput, onChange 
       paint(inputRef.current, v)
     }
     if (valRef.current) valRef.current.textContent = fmt(v)
-    onInput(v)
+    onInput?.(v)
     onChange(v)
   }
 
@@ -53,7 +53,7 @@ export function LiveSlider({ min, max, step, def, fmt, label, onInput, onChange 
             const el = e.target as HTMLInputElement
             const v = Number(el.value)
             paint(el, v)
-            onInput(v)
+            onInput?.(v)
             if (valRef.current) valRef.current.textContent = fmt(v)
           }}
           onChange={e => onChange(Number((e.target as HTMLInputElement).value))} />

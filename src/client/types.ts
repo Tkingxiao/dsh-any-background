@@ -48,9 +48,16 @@ export interface PartBlurs {
   card: number
   /** Settings panel. */
   settings: number
+  /** Conversation text region (message column of the chat view). */
+  chat: number
+  /** Trajectory view surface. */
+  trajectory: number
 }
 
-export type BackgroundType = 'image' | 'mesh' | 'shader' | 'pattern'
+export type BackgroundType = 'image' | 'video' | 'mesh' | 'shader' | 'pattern'
+
+/** Adaptive placement of a static (image/video) background. */
+export type BgMode = 'fit' | 'fill' | 'stretch' | 'tile' | 'center'
 
 export interface MeshGradientParams {
   type: 'mesh'
@@ -108,12 +115,23 @@ export interface ThemeConfig {
   blur: number
   /** Wallpaper placement state (zoom + fractional center + intrinsic size). */
   bgState: BgState
+  /** Video placement state — a separate slot so editing the video framing
+   *  never clobbers the image framing and vice versa. */
+  videoBgState: BgState
   /** Current background source type. */
   backgroundType: BackgroundType
+  /** Placement mode for image/video backgrounds (default: editor-driven fit). */
+  bgMode: BgMode
+  /** MIME type of the persisted video background (null when none stored). */
+  videoMime: string | null
   /** Parameters for generated backgrounds (not used for images). */
   generatedBg: GeneratedBgParams | null
   /** Whether to regenerate generated backgrounds on page reload. */
   regenerateOnReload: boolean
+  /** Translucent tint over the conversation text region (0 = none, 1 = solid). */
+  chatTextOpacity: number
+  /** Translucent tint over the trajectory view surface (0 = none, 1 = solid). */
+  trajectoryOpacity: number
 }
 
 /** State shape of the section's reactive store (URL, color, background type). */
@@ -138,6 +156,10 @@ export interface ThemeSectionProps {
   /** Commit a new color (HSV); the section converts to HSL for storage. */
   setColor: (h: number, s: number, l: number) => void
   setWp: (url: string | null) => void
+  /** Set/remove the background video. Prefers the raw Blob (streamed to
+   *  disk over the binary upload route); a data URL string is the small-file
+   *  legacy path through RPC. */
+  setVideo: (source: Blob | string | null, mime: string | null) => void
   setOps: (ops: PartOpacities) => void
   setBlurs: (blurs: PartBlurs) => void
   setWop: (v: number) => void

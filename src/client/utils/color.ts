@@ -1,10 +1,8 @@
 import type { BgState, ColorPalette } from '../types'
 
-// ── HSV ↔ HSL ────────────────────────────────────────────────────────────────
-// The wheel works in HSV end to end: props and pickSL are HSV, the canvas
-// renders the HSV S-V plane directly. Storage and genTokens expect HSL, so
-// setColor converts HSV → HSL at the boundary; sectionInject converts stored
-// HSL → HSV for the initial wheel props. Conversions never stack.
+// The wheel works in HSV end to end; storage and genTokens expect HSL, so
+// setColor converts HSV → HSL at the boundary and sectionInject converts the
+// stored HSL → HSV for the initial wheel props. Conversions never stack.
 
 export function hsvToHsl(h: number, s: number, v: number): [number, number, number] {
   const l = v * (1 - s / 2)
@@ -18,8 +16,6 @@ export function hslToHsv(h: number, s: number, l: number): [number, number, numb
   return [h, sv, v]
 }
 
-// ── Token generation from HSL ──────────────────────────────────────────────────
-
 let tokensCacheKey = ''
 let tokensCache: { colorScheme: 'light' | 'dark'; tokens: Record<string, string> } | null = null
 
@@ -28,13 +24,8 @@ let tokensCache: { colorScheme: 'light' | 'dark'; tokens: Record<string, string>
  * same token set, and applyWp / applyCustomTokens / applySettingsOverrides call
  * this repeatedly (slider drags, viewport re-applies), so cache the last result
  * and skip the 30+ hsl() string builds when nothing changed.
- *
- * This is the simple, pre-Material-You version: dark/light is decided only by
- * lit < 0.55, and all tokens are derived directly from the picked hue/sat/lit.
- * The optional palette argument is kept for API compatibility but ignored here,
- * so saved picks never get rewritten by a wallpaper-derived palette.
  */
-export function genTokens(hue: number, sat: number, lit: number, _palette?: ColorPalette | null): { colorScheme: 'light' | 'dark'; tokens: Record<string, string> } {
+export function genTokens(hue: number, sat: number, lit: number): { colorScheme: 'light' | 'dark'; tokens: Record<string, string> } {
   const key = `${hue}|${sat}|${lit}`
   if (tokensCacheKey === key && tokensCache) return tokensCache
   tokensCacheKey = key
@@ -154,19 +145,12 @@ export function rgbToHsl(r: number, g: number, b: number): [number, number, numb
   return [h, s, l]
 }
 
-// ── Wallpaper color extraction ─────────────────────────────────────────────────
-// Full chain: decode the cached data URL → crop the visible (framed) region →
-// downsample to a 64×64 canvas → quantize pixels into 4-bit RGB buckets →
-// discard near-gray / near-black / near-white pixels → pick the most populous
-// vivid bucket (count × saturation bias) → average its members → RGB→HSL →
-// clamp lightness into a band that keeps the light/dark scheme decision
-// unambiguous. Purely client-side: no RPC traffic, and memory is bounded by
-// one 64×64 canvas + one ImageData + two small typed arrays.
-//
-// The extraction now returns a Material-You-style palette: primary (dominant),
-// secondary (second-most vivid), tertiary (complementary accent), surface
-// (neutralized dominant), and the average luminance of the sampled image for
-// automatic light/dark decisions.
+// Wallpaper color extraction: decode the cached data URL → crop the visible
+// (framed) region → downsample to a 64×64 canvas → quantize pixels into 4-bit
+// RGB buckets → discard near-gray / near-black / near-white pixels → pick the
+// most populous vivid bucket (count × saturation bias) → average its members →
+// RGB→HSL → clamp lightness into a band that keeps the light/dark scheme
+// decision unambiguous. Purely client-side and memory-bounded.
 
 const EXTRACT_SIDE = 64
 
@@ -176,7 +160,7 @@ function bucketsToHsl(b: Bucket): [number, number, number] {
   return rgbToHsl(b.r / b.count, b.g / b.count, b.b / b.count)
 }
 
-export function extractWallpaperPalette(dataUrl: string, bgState: BgState): Promise<ColorPalette | null> {
+function extractWallpaperPalette(dataUrl: string, bgState: BgState): Promise<ColorPalette | null> {
   return new Promise(resolve => {
     const img = new Image()
     img.onerror = () => resolve(null)
@@ -273,37 +257,16 @@ export function extractWallpaperPalette(dataUrl: string, bgState: BgState): Prom
   })
 }
 
-/** Fallback palette when only a seed HSL color is known (no wallpaper).
- *
- * CRITICAL: the primary color MUST equal the user's pick. Previously the
- * lightness was clamped into a 0.2–0.44 / 0.6–0.82 band, which turned a pure
- * red (#FA000F, L≈0.49) into a washed-out #746768-like color. We now keep the
- * user's HSL exactly and only sanitize saturation into a readable range. The
- * secondary/tertiary hues are derived for accents, while surface stays neutral.
- */
-export function paletteFromHsl([h, s, l]: [number, number, number]): ColorPalette {
-  const hue = ((h % 360) + 360) % 360
-  const sat = Math.min(1, Math.max(0, s))
-  return {
-    primary: [hue, sat, l],
-    secondary: [((hue + 30) % 360), Math.min(0.85, Math.max(0.2, sat)), Math.min(0.75, Math.max(0.35, l))],
-    tertiary: [((hue + 180) % 360), Math.min(0.7, Math.max(0.2, sat)), Math.min(0.7, Math.max(0.35, l))],
-    surface: [hue, Math.min(0.05, sat * 0.3), l],
-    luminance: l,
-  }
-}
-
 /** Backward-compatible single-color extraction: returns the primary HSL. */
 export async function extractWallpaperColor(dataUrl: string, bgState: BgState): Promise<[number, number, number] | null> {
   const palette = await extractWallpaperPalette(dataUrl, bgState)
   return palette ? palette.primary : null
 }
 
-// ── One-shot frame brightness analysis ────────────────────────────────────────
-// Called only when a generated background is switched (from its captured
-// snapshot), never from the animation loop: decode the frame, downsample to a
-// 32×32 canvas, average Rec.709 luma. Dark frame → light fonts, light frame →
-// dark fonts. The whole pass costs one small ImageData read per switch.
+// One-shot frame brightness analysis: called only when a generated background
+// is switched (from its captured snapshot), never from the animation loop.
+// Decode the frame, downsample to a 32×32 canvas, average Rec.709 luma.
+// Dark frame → light fonts, light frame → dark fonts.
 
 const ANALYZE_SIDE = 32
 

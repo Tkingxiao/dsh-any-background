@@ -33,7 +33,7 @@ A **DeepSeek Harness** appearance plugin that lets you fully customize the Web U
 <p align="center">
   <img src="example_img/image-4.png" alt="Background editor" width="720">
   <br/>
-  <em>Background editor · image wallpapers support drag-to-pan and scroll-to-zoom</em>
+  <em>Background editor · image/video wallpapers support drag-to-pan and scroll-to-zoom</em>
 </p>
 
 <p align="center">
@@ -58,19 +58,27 @@ A **DeepSeek Harness** appearance plugin that lets you fully customize the Web U
 
 - **PS-style Color Wheel** — Pick hue on the ring, adjust saturation & lightness in the inscribed square. Generates 30+ CSS design tokens in real time.
 - **Precise HSL / RGB Input** — Enter exact color values numerically with instant bidirectional sync to the wheel.
-- **Smart Color Extraction** — One click derives a theme color from your wallpaper by sampling the visible region, quantizing, and filtering out gray / near-black / near-white pixels. Fully client-side.
+- **Smart Color Extraction** — One click derives a theme color from your wallpaper by sampling the visible region, quantizing, and filtering out gray / near-black / near-white pixels. Video wallpapers contribute via an auto-captured frame. Fully client-side.
 - **Eyedropper** — Hover the wallpaper to preview a color and click to pick it as the theme color.
 - **Background Wallpaper** — Upload any image as your wallpaper. Drag to pan and scroll to zoom inside a viewport-proportional editor.
+- **Video Wallpaper** — Use a video as a live wallpaper: muted looping playback that survives refreshes (file persistence + HTTP streaming with Range seek), with an auto-captured frame powering the preview, theme-color extraction, and the position editor.
+- **Position Editor** — One shared editor for images and videos: drag to pan, scroll to zoom, one-click reset. Image and video placements are stored separately and never overwrite each other.
+- **Layout Modes** — Fit / Fill / Stretch / Tile / Center for both images and videos; in Fit mode the editor-committed framing stays consistent across window resizes and cross-monitor moves.
 - **Generated Dynamic Backgrounds** — Choose mesh gradient, Shader, or geometric patterns with adjustable spread, intensity, and seed locking.
 - **Per-part Interface Opacity** — Independent sliders for main background, sidebar, cards & panels, plus the settings panel and wallpaper.
 - **Per-part Interface Blur** — Frosted-glass `backdrop-filter` blur (0–60 px) for each interface part.
-- **Theme Export / Import** — One-click export to a self-contained `dsh-any-theme.json` (config + wallpaper) and import to restore it anywhere.
+- **Conversation View Cards** — The message list is wrapped in a translucent card automatically, and the trajectory page gets whole-page opacity & blur controls, letting the wallpaper shine through the content.
+- **Theme Export / Import** — One-click export to a self-contained `dsh-any-theme.json` (config + wallpaper, video embedded as a data URL) and import to restore it anywhere.
 - **File-based Persistence** — All settings are stored on the filesystem under `~/.dsh/.dsh-any-background-data/`, not `localStorage`.
 - **Bilingual** — Full Chinese / English UI with automatic locale detection.
 - **Theme Watchdog** — Re-asserts the custom theme if the host resets it.
 
 ## Recent Optimizations
 
+- **Video wallpaper end-to-end** — Videos are stored under MIME-derived names (`wallpaper.mp4/webm/...`) and streamed over the plugin's own HTTP route; they restore automatically after refresh or restart and travel inside exported configs.
+- **Binary upload for large videos** — Uploads stream raw bytes over an HTTP POST straight to disk instead of a base64 detour through RPC (no channel body limit, any size works); aborted transfers clean up after themselves.
+- **Video position editing** — The placement editor works on a captured frame reference with zoom/pan, adapted to all five layout modes; image and video framings persist independently.
+- **Conversation view cards** — The message column gains an automatic card (border/radius/padding) and the trajectory page gets whole-page opacity & blur; switching views restores the previous host.
 - **Boot flicker eliminated** — Theme tokens are injected through a dedicated `!important` stylesheet instead of inline `body` styles, surviving host theme service resets.
 - **Color wheel overlap fixed** — The hue ring is drawn on top of the saturation/lightness square so the square corners no longer cover the ring.
 - **Inspiration palette selection cleared** — Picking a theme color from the wheel deselects any previously selected inspiration swatch.

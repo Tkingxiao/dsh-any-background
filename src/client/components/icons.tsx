@@ -29,6 +29,18 @@ export const PhotoIcon = ({ size, className }: { size?: number; className?: stri
   <Glyph size={size} className={className}><rect x="2" y="3.2" width="12" height="9.6" rx="2" /><circle cx="5.7" cy="6.3" r="0.9" /><path d="M14 10.4l-2.8-2.8-4.8 4.8" /></Glyph>
 )
 
+export const VideoIcon = ({ size, className }: { size?: number; className?: string }) => (
+  <Glyph size={size} className={className}><rect x="1.5" y="4.2" width="8.8" height="7.6" rx="2" /><path d="M10.3 6.9l4.2-2.4v7l-4.2-2.4" /></Glyph>
+)
+
+export const TextIcon = ({ size, className }: { size?: number; className?: string }) => (
+  <Glyph size={size} className={className}><path d="M3 4.2h10M3 8h10M3 11.8h6.5" /></Glyph>
+)
+
+export const TrajectoryIcon = ({ size, className }: { size?: number; className?: string }) => (
+  <Glyph size={size} className={className}><path d="M2.5 3.2h11M2.5 6.6h11M2.5 10h11" /><circle cx="4.4" cy="3.2" r="1.1" /><circle cx="8" cy="6.6" r="1.1" /><circle cx="11.4" cy="10" r="1.1" /></Glyph>
+)
+
 export const SlidersIcon = ({ size, className }: { size?: number; className?: string }) => (
   <Glyph size={size} className={className}><path d="M2.5 4.5h4.9M11.6 4.5h1.9M2.5 11.5h1.9M8.6 11.5h4.9" /><circle cx="9.5" cy="4.5" r="1.7" /><circle cx="5.5" cy="11.5" r="1.7" /></Glyph>
 )

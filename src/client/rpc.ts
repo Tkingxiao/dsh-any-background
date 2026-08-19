@@ -1,7 +1,11 @@
 import type { RpcResultLike } from './types'
-import { cfg, adoptConfig, setWpUrl, setWpImageUrl } from './state'
+import { cfg, adoptConfig, setWpUrl, setWpImageUrl, setWpVideoUrl } from './state'
 
 export const RPC_CHANNEL = '/dsh-any-background'
+/** Same-origin serve URL of the persisted video (enough for <video src>/fetch). */
+export const VIDEO_SERVE_URL = '/dsh-any-background/video'
+/** HTTP route new videos are POSTed to as raw bytes (see uploadVideo). */
+export const VIDEO_UPLOAD_URL = '/dsh-any-background/video/upload'
 const RPC_NS = 'dshAnyBackground'
 const rpcEndpoint = (method: string): string => `${RPC_NS}/${method}`
 
@@ -24,12 +28,9 @@ async function rpcCall(method: string, payload: unknown): Promise<unknown> {
   }
 }
 
-// ── Debounced persistence ─────────────────────────────────────────────────────
-// Slider drags fire onInput (and React's onChange) dozens of times per second;
-// each saveConfig() would trigger an RPC write. Coalesce writes to a trailing
-// debounce so the disk is only touched after the user pauses or releases, and
-// flush the last pending write on pagehide so a quick close never loses it.
-
+// Slider drags fire dozens of events per second; coalesce writes to a trailing
+// debounce and flush the last pending write on pagehide so a quick close never
+// loses it.
 const SAVE_DEBOUNCE_MS = 250
 let saveTimer: number | undefined
 
@@ -53,22 +54,48 @@ export function persistConfig(): void {
   void rpcCall('writeConfig', { config: cfg })
 }
 
-/** Load the persisted theme (config + wallpaper) from the node half. */
+/** Load the persisted theme (config + wallpaper + video URL) from the node half. */
 export async function loadPersisted(): Promise<void> {
   const data = await rpcCall('read', {})
   if (data && typeof data === 'object') {
-    const d = data as { config?: unknown; wallpaper?: unknown }
+    const d = data as { config?: unknown; wallpaper?: unknown; videoUrl?: unknown }
     if (d.config) adoptConfig(d.config)
-    // The uploaded image is always its own slot so switching background types
-    // never discards it. When in image mode the caller points wpUrl at it.
+    // Uploaded image and video keep their own slots so type switches never
+    // discard them; in image mode the caller points wpUrl at it.
     if (typeof d.wallpaper === 'string') setWpImageUrl(d.wallpaper)
     else if (d.wallpaper === null) setWpImageUrl(null)
-    // The display URL is determined by the active type; if image mode, restore it.
+    // The video travels as a serve URL; the frame snapshot is re-captured by
+    // the boot restore in index.tsx when needed.
+    if (typeof d.videoUrl === 'string') setWpVideoUrl(d.videoUrl, cfg.videoMime)
+    else if (d.videoUrl === null) setWpVideoUrl(null, null)
     if (cfg.backgroundType === 'image') setWpUrl(d.wallpaper === null ? null : d.wallpaper as string | null)
   }
 }
 
-/** Persist a wallpaper (null removes it). One-shot large payload, no debounce. */
+/** Persist a wallpaper (null removes it); one-shot, no debounce. */
 export function persistWallpaper(dataUrl: string | null): void {
   void rpcCall('setWallpaper', { dataUrl })
+}
+
+/** Persist a background video (null removes it); resolves true once on disk,
+ *  so callers only switch playback to the serve URL after acceptance. */
+export async function persistVideo(dataUrl: string | null): Promise<boolean> {
+  const res = await rpcCall('setVideo', { dataUrl })
+  return res === true
+}
+
+/** Upload a video's raw bytes over HTTP (MIME in Content-Type, body untouched
+ *  — no base64 inflation that would blow the RPC body limit on large clips). */
+export async function uploadVideo(blob: Blob, mime: string): Promise<boolean> {
+  try {
+    const res = await fetch(VIDEO_UPLOAD_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': mime || 'application/octet-stream' },
+      body: blob,
+    })
+    return res.ok
+  } catch (e) {
+    console.warn('dsh-any-background: video upload failed', e)
+    return false
+  }
 }
