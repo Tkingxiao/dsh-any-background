@@ -34,9 +34,9 @@ export interface PartOpacities {
   bg: number
   /** Sidebar (--dsw-specific-sidebar-fill). */
   sidebar: number
-  /** Cards/panels (--dsw-alias-bg-layer-1/2/3). */
+  /** Cards/panels (--dsw-alias-bg-layer-1/2/3, --dsw-specific-menu). */
   card: number
-  /** Input/control surfaces (--dsw-specific-input-major, --dsw-specific-menu). */
+  /** Input/control surfaces (--dsw-specific-input-major). */
   input: number
 }
 

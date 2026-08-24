@@ -192,6 +192,28 @@ export function apply(ctx: Ctx): void {
   // 6. Section injection.
   const sectionInject = (actions: BoundActions): Omit<ThemeSectionProps, 'useStore'> => {
     bound = actions; syncBg()
+    // Play a picked/imported video instantly from a local object URL while its
+    // raw bytes stream to disk in the background — no upload + first-buffer
+    // wait after import. The serve URL takes over on the next reload.
+    const playVideoFromBlob = (blob: Blob, mime: string | null): void => {
+      const localUrl = URL.createObjectURL(blob)
+      cfg.backgroundType = 'video'
+      setWpUrl(null)
+      cfg.videoBgState = { ...DEFAULT_CONFIG.bgState }
+      setWpVideoUrl(localUrl, mime ?? blob.type ?? 'video/mp4')
+      applyWp()
+      syncBg()
+      const applied = rWpVideo()
+      void captureVideoSnapshot(localUrl).then(snap => {
+        if (rWpVideo() !== applied) return
+        setWpVideoSnapshot(snap)
+        applyThemeColor()
+        syncBg()
+      })
+      void uploadVideo(blob, mime ?? blob.type ?? 'video/mp4').then(ok => {
+        if (ok) persistConfig()
+      })
+    }
     const [wh, ws, wl] = rColor()
     const [dh, ds, dv] = hslToHsv(wh, ws, wl)
     return {
@@ -244,28 +266,22 @@ export function apply(ctx: Ctx): void {
           saveConfig()
           return
         }
-        // Persist first, play second. Blobs stream their raw bytes to disk
-        // over the binary upload route — never base64 through the JSON RPC
-        // channel, whose body limit rejects large clips before they land.
-        // A data URL string (legacy/small) still rides the RPC path.
-        let ok: boolean
-        if (typeof u === 'string') ok = await persistVideo(u)
-        else ok = await uploadVideo(u, mime ?? u.type ?? 'video/mp4')
-        const live = ok ? VIDEO_SERVE_URL : (typeof u === 'string' ? u : null)
-        if (live === null) {
-          // Upload failed and there is no data-URL fallback: keep whatever
-          // background was active instead of switching to a dead video.
+        if (typeof u !== 'string') {
+          // A picked file plays instantly from a local object URL while its raw
+          // bytes stream to disk in the background — no upload + buffer wait.
+          playVideoFromBlob(u, mime)
           return
         }
+        // Legacy data-URL string path: persist, then play from the serve URL.
+        const ok = await persistVideo(u)
+        const live = ok ? VIDEO_SERVE_URL : u
         cfg.backgroundType = 'video'
         setWpUrl(null)
         cfg.videoBgState = { ...DEFAULT_CONFIG.bgState }
-        setWpVideoUrl(live, mime ?? (typeof u === 'string' ? null : u.type) ?? null)
+        setWpVideoUrl(live, mime ?? null)
         applyWp()
         saveConfig()
         syncBg()
-        // The frame snapshot is preview-only (settings thumbnail, color
-        // extraction, eyedropper, position editor reference).
         const applied = rWpVideo()
         void captureVideoSnapshot(live).then(snap => {
           if (rWpVideo() !== applied) return
@@ -381,29 +397,26 @@ export function apply(ctx: Ctx): void {
           if (cfg.backgroundType === 'video') {
             const video = typeof d.video === 'string' && /^data:video\//.test(d.video) ? d.video : null
             if (video !== null) {
-              // Embedded video: decode the data URL back to raw bytes and
-              // stream it to disk over the binary upload route (sending the
-              // base64 through RPC would hit the same body limit as upload).
-              // The data-URL RPC path stays as the small-file fallback.
-              let ok = false
-              try {
-                const blob = await fetch(video).then(r => r.blob())
-                ok = await uploadVideo(blob, cfg.videoMime ?? blob.type ?? 'video/mp4')
-              } catch {
-                ok = false
+              // Decode the embedded data URL to a blob and play it instantly
+              // from a local object URL while the bytes stream to disk in the
+              // background (the data-URL RPC path stays as the small fallback).
+              let blob: Blob | null = null
+              try { blob = await fetch(video).then(r => r.blob()) } catch { blob = null }
+              if (blob !== null) {
+                playVideoFromBlob(blob, cfg.videoMime)
+              } else {
+                const ok = await persistVideo(video)
+                const live = ok ? VIDEO_SERVE_URL : video
+                setWpVideoUrl(live, cfg.videoMime)
+                applyWp()
+                const applied = rWpVideo()
+                void captureVideoSnapshot(live).then(snap => {
+                  if (rWpVideo() !== applied) return
+                  setWpVideoSnapshot(snap)
+                  applyThemeColor()
+                  syncBg()
+                })
               }
-              if (!ok) ok = await persistVideo(video)
-              const live = ok ? VIDEO_SERVE_URL : video
-              setWpVideoUrl(live, cfg.videoMime)
-              applyWp()
-              // Re-capture the preview snapshot, then derive colors from it.
-              const applied = rWpVideo()
-              void captureVideoSnapshot(live).then(snap => {
-                if (rWpVideo() !== applied) return
-                setWpVideoSnapshot(snap)
-                applyThemeColor()
-                syncBg()
-              })
             } else {
               // Export lacked the video payload: fall back to no background.
               setWpVideoUrl(null, null)

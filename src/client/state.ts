@@ -32,6 +32,8 @@ export let wpUrl: string | null = null
 export let wpVideoUrl: string | null = null
 /** Captured video frame standing in for previews/color extraction (still-image APIs). */
 export let wpVideoSnapshot: string | null = null
+/** Local blob URL backing an in-session video; revoked when replaced or cleared. */
+let wpVideoObjectUrl: string | null = null
 
 export function setWpImageUrl(url: string | null): void { wpImageUrl = url }
 export function setWpUrl(url: string | null): void { wpUrl = url }
@@ -44,11 +46,27 @@ export function setWpVideoUrl(url: string | null, mime: string | null): void {
     wpVideoSnapshot = null
   } else {
     videoRev++
-    wpVideoUrl = `${url}${url.includes('?') ? '&' : '?'}r=${videoRev}`
+    // Blob URLs are unique per object; a query string can break their
+    // resolution in some engines, so they skip the cache-buster.
+    wpVideoUrl = url.startsWith('blob:') ? url : `${url}${url.includes('?') ? '&' : '?'}r=${videoRev}`
   }
+  // Release the previous in-session object URL when replaced or cleared.
+  if (wpVideoObjectUrl !== null && wpVideoObjectUrl !== url) {
+    URL.revokeObjectURL(wpVideoObjectUrl)
+    wpVideoObjectUrl = null
+  }
+  if (url !== null && url.startsWith('blob:')) wpVideoObjectUrl = url
   cfg.videoMime = url ? mime : null
 }
 export function setWpVideoSnapshot(url: string | null): void { wpVideoSnapshot = url }
+
+/** Release the in-session video object URL (plugin teardown). */
+export function disposeVideoObjectUrl(): void {
+  if (wpVideoObjectUrl !== null) {
+    URL.revokeObjectURL(wpVideoObjectUrl)
+    wpVideoObjectUrl = null
+  }
+}
 export function setBgState(s: BgState): void { cfg.bgState = s }
 
 // Brightness verdict of the active generated background, analyzed once per

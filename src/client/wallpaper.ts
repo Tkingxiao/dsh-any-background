@@ -1,4 +1,4 @@
-import { rWp, rWpImage, rWpVideo, rBgState, rVideoBgState, rBl, rWop, rOps, rSop, rColor, rHasColor, rBlurs, rBgMode, rChatTextOpacity, rTrajectoryOpacity, cfg, setWpUrl, rBgDark, setBgDark } from './state'
+import { rWp, rWpImage, rWpVideo, rBgState, rVideoBgState, rBl, rWop, rOps, rSop, rColor, rHasColor, rBlurs, rBgMode, rChatTextOpacity, rTrajectoryOpacity, cfg, setWpUrl, rBgDark, setBgDark, disposeVideoObjectUrl } from './state'
 import type { BackgroundType, GeneratedBgParams, PartOpacities, PartBlurs } from './types'
 import { genTokens, toRgba, extractWallpaperColor, analyzeFrameDark } from './utils/color'
 import { createDynamicBackground, defaultParamsFor } from './utils/bg-generators'
@@ -49,12 +49,15 @@ const LABEL_TOKENS = [
 // Solid surface tokens grouped by which interface-opacity slider owns them.
 // Every member is re-emitted with per-part alpha so surfaces over the wallpaper
 // (composer input, elevated buttons, menu panels) can go translucent — not just
-// the layered bg/sidebar tokens.
+// the layered bg/sidebar tokens. --dsw-specific-menu (dropdowns, slash-trigger
+// menu, model selector, popovers around the dialog) is owned by the card
+// slider; the Cordis panel shares that token but is re-scoped to the input
+// slider via INPUT_BLUR_RULE.
 const OPACITY_TOKEN_GROUPS: Array<{ part: keyof PartOpacities; names: string[] }> = [
   { part: 'bg', names: ['--dsw-alias-bg-base'] },
   { part: 'sidebar', names: ['--dsw-specific-sidebar-fill'] },
-  { part: 'card', names: ['--dsw-alias-bg-layer-1', '--dsw-alias-bg-layer-2', '--dsw-alias-bg-layer-3'] },
-  { part: 'input', names: ['--dsw-specific-input-major', '--dsw-specific-menu'] },
+  { part: 'card', names: ['--dsw-alias-bg-layer-1', '--dsw-alias-bg-layer-2', '--dsw-alias-bg-layer-3', '--dsw-specific-menu'] },
+  { part: 'input', names: ['--dsw-specific-input-major'] },
 ]
 
 // Plugin-owned variables the opacity-bearing tokens read from. They live as
@@ -140,6 +143,8 @@ function applyCustomTokensNow(ops: PartOpacities): void {
         root.style.setProperty(OPACITY_VARS[name], toRgba(tokens[name] ?? '#000', ops[g.part]))
       }
     }
+    // The Cordis panel keeps its own input-slider alpha (see INPUT_BLUR_RULE).
+    root.style.setProperty('--dsh-any-op-menu-cordis', toRgba(tokens['--dsw-specific-menu'] ?? '#000', ops.input))
     const bgKey = `${baseTokenKey}|${ops.bg}`
     if (bgKey !== lastBgKey) { lastBgKey = bgKey; applyPartOpacities(ops) }
   } catch {
@@ -169,16 +174,18 @@ export const SETTINGS_STYLE_RULE =
 // Input/control surface blur. The composer card and the Cordis panel expose
 // stable host data attributes ([data-composer-card], [data-cordis-panel]), so
 // the backdrop is attached via a stylesheet rule rather than element discovery.
-// The --dsw-specific-menu input token also covers the slash-trigger menu, but
-// it renders without a stable selector, so the composer/cordis hooks are the
-// reliable surface set. Note the input slider must NOT drive the
-// button-elevated-fill / button-floating-hover tokens: the settings panel's own
-// controls (slider thumbs, .dab-btn, segmented thumb) are painted from those
-// same tokens, so tinting them would bleach the panel's own UI.
+// The Cordis panel shares the --dsw-specific-menu token with the dialog's
+// option boxes, but it stays owned by the input slider — the re-scope below
+// keeps it there now that the menu token itself follows the card slider. Note
+// the input slider must NOT drive the button-elevated-fill /
+// button-floating-hover tokens: the settings panel's own controls (slider
+// thumbs, .dab-btn, segmented thumb) are painted from those same tokens, so
+// tinting them would bleach the panel's own UI.
 export const INPUT_BLUR_RULE =
   '[data-composer-card],[data-cordis-panel]{' +
   '-webkit-backdrop-filter:var(--dsh-any-input-blur,none);' +
-  'backdrop-filter:var(--dsh-any-input-blur,none)}'
+  'backdrop-filter:var(--dsh-any-input-blur,none)}' +
+  '[data-cordis-panel]{--dsw-specific-menu:var(--dsh-any-op-menu-cordis)!important}'
 
 function applyInputBlur(px: number): void {
   if (px > 0) document.documentElement.style.setProperty('--dsh-any-input-blur', `blur(${px}px)`)
@@ -849,11 +856,14 @@ function applyVideoWp(url: string): void {
     videoEl.loop = true
     videoEl.autoplay = true
     videoEl.playsInline = true
+    videoEl.preload = 'auto'
     videoEl.setAttribute('playsinline', '')
     videoEl.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;object-position:center;'
+    // Attach before loading so the element is in the document when play()
+    // resolves; a detached video can defer its first rendered frame.
+    wpEl!.appendChild(videoEl)
     videoEl.setAttribute('src', url)
     void videoEl.play().catch(() => undefined)
-    wpEl!.appendChild(videoEl)
   } else if (videoEl.getAttribute('src') !== url) {
     // Compare the attribute, not videoEl.src: the property getter resolves to
     // an absolute URL that would never match the relative serve URL and would
@@ -933,6 +943,7 @@ export function applyWp(): void {
 export function teardownWp(): void {
   clearDynamicBg()
   clearVideoEl()
+  disposeVideoObjectUrl()
   setBgDark(null)
   wpEl?.remove(); wpEl = null
   clearCustomTokens()
