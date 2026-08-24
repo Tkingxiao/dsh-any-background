@@ -101,3 +101,7 @@ export const GearIcon = ({ size, className }: { size?: number; className?: strin
   <Glyph size={size} className={className}><circle cx="8" cy="8" r="2.1" /><path d="M8 1.7v1.8M8 12.5v1.8M1.7 8h1.8M12.5 8h1.8M3.6 3.6l1.3 1.3M11.1 11.1l1.3 1.3M12.4 3.6l-1.3 1.3M4.9 11.1l-1.3 1.3" /></Glyph>
 )
 
+export const InputIcon = ({ size, className }: { size?: number; className?: string }) => (
+  <Glyph size={size} className={className}><rect x="2.2" y="4" width="11.6" height="8" rx="2" /><path d="M8 6.6v2M7 8h2" /></Glyph>
+)
+

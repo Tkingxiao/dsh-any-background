@@ -46,7 +46,60 @@ const LABEL_TOKENS = [
   '--dsw-alias-label-quaternary',
 ]
 
+// Solid surface tokens grouped by which interface-opacity slider owns them.
+// Every member is re-emitted with per-part alpha so surfaces over the wallpaper
+// (composer input, elevated buttons, menu panels) can go translucent — not just
+// the layered bg/sidebar tokens.
+const OPACITY_TOKEN_GROUPS: Array<{ part: keyof PartOpacities; names: string[] }> = [
+  { part: 'bg', names: ['--dsw-alias-bg-base'] },
+  { part: 'sidebar', names: ['--dsw-specific-sidebar-fill'] },
+  { part: 'card', names: ['--dsw-alias-bg-layer-1', '--dsw-alias-bg-layer-2', '--dsw-alias-bg-layer-3'] },
+  { part: 'input', names: ['--dsw-specific-input-major', '--dsw-specific-menu'] },
+]
+
+// Plugin-owned variables the opacity-bearing tokens read from. They live as
+// inline custom props on <html>, so a slider drag rewrites only those few values
+// instead of re-parsing/re-matching the whole body token rule on every tick —
+// the difference is critical when a large wallpaper sits under the interface.
+const OPACITY_VARS: Record<string, string> = {
+  '--dsw-alias-bg-base': '--dsh-any-op-bg',
+  '--dsw-specific-sidebar-fill': '--dsh-any-op-sidebar',
+  '--dsw-alias-bg-layer-1': '--dsh-any-op-card-1',
+  '--dsw-alias-bg-layer-2': '--dsh-any-op-card-2',
+  '--dsw-alias-bg-layer-3': '--dsh-any-op-card-3',
+  '--dsw-specific-input-major': '--dsh-any-op-input',
+  '--dsw-specific-menu': '--dsh-any-op-menu',
+}
+
+// Fingerprint of the non-alpha token base (color pick + brightness verdict).
+// The static body rule is only rebuilt when it changes; a drag never touches it.
+let baseTokenKey = ''
+
+// Coalesce slider-driven token updates to one rAF: a single drag fires several
+// input events per frame, and every full re-apply repaints expensive regions
+// over a large wallpaper. Batching keeps at most one update per frame. The
+// base-fingerprint gate above already makes a muted drag cheap; this prevents
+// repeated identical reapplies from stacking within the same frame.
+let pendingOps: PartOpacities | null = null
+let tokensRaf: number | null = null
+
 export function applyCustomTokens(ops: PartOpacities): void {
+  pendingOps = ops
+  if (tokensRaf !== null) return
+  tokensRaf = requestAnimationFrame(() => {
+    tokensRaf = null
+    if (pendingOps === null) return
+    const o = pendingOps
+    pendingOps = null
+    applyCustomTokensNow(o)
+  })
+}
+
+// Only the main-bg slider retints the center/details columns; keys on
+// baseTokenKey + ops.bg so a sidebar/card/input drag never rewrites them.
+let lastBgKey = ''
+
+function applyCustomTokensNow(ops: PartOpacities): void {
   const [h, s, l] = rColor()
   let { tokens } = genTokens(h, s, l)
   try {
@@ -59,25 +112,36 @@ export function applyCustomTokens(ops: PartOpacities): void {
       const font = dark ? '#fff' : '#000'
       for (const name of LABEL_TOKENS) tokens[name] = font
     }
-    // Drive the base-palette switch ourselves with a plugin-specific value so
-    // the gradient rule never matches a host dark-mode flag.
-    if (dark ?? l < 0.55) document.body.setAttribute('data-ds-dark-theme', 'dsh-any-background')
-    else document.body.removeAttribute('data-ds-dark-theme')
-    // A stylesheet rule with !important survives the host presenter clearing
-    // body inline styles on boot (which would flash the system palette).
-    const decls: string[] = []
-    for (const [name, value] of Object.entries(tokens)) {
-      let v = value
-      if (name === '--dsw-alias-bg-base') v = toRgba(value, ops.bg)
-      else if (name === '--dsw-specific-sidebar-fill') v = toRgba(value, ops.sidebar)
-      else if (name === '--dsw-alias-bg-layer-1' || name === '--dsw-alias-bg-layer-2' || name === '--dsw-alias-bg-layer-3') v = toRgba(value, ops.card)
-      decls.push(`${name}:${v}!important`)
+    const forceDark = dark ?? l < 0.55
+    if (`${h}|${s}|${l}|${dark}` !== baseTokenKey) {
+      baseTokenKey = `${h}|${s}|${l}|${dark}`
+      // Drive the base-palette switch with a plugin-specific value so the
+      // gradient rule never matches a host dark-mode flag; color-scheme makes
+      // native controls (select popups) follow the forced palette. Both ride the
+      // stylesheet (not inline styles) so the host presenter clearing body
+      // inline styles on boot can't drop them, and the !important rule survives
+      // that clearing too.
+      if (forceDark) document.body.setAttribute('data-ds-dark-theme', 'dsh-any-background')
+      else document.body.removeAttribute('data-ds-dark-theme')
+      const decls: string[] = [`color-scheme:${forceDark ? 'dark' : 'light'}`]
+      for (const [name, value] of Object.entries(tokens)) {
+        const opVar = OPACITY_VARS[name]
+        decls.push(`${name}:${opVar !== undefined ? `var(${opVar})` : value}!important`)
+      }
+      ensureTokenStyle().textContent = `body{${decls.join(';')}}`
+      // Drop inline tokens left by earlier builds so the stylesheet is the single source of truth.
+      for (const name of appliedTokenNames) document.body.style.removeProperty(name)
+      appliedTokenNames = Object.keys(tokens)
     }
-    ensureTokenStyle().textContent = `body{${decls.join(';')}}`
-    // Drop inline tokens left by earlier builds so the stylesheet is the single source of truth.
-    for (const name of appliedTokenNames) document.body.style.removeProperty(name)
-    appliedTokenNames = Object.keys(tokens)
-    applyPartOpacities(ops)
+    // Cheap per-drag update: only the surface alpha vars move on <html>.
+    const root = document.documentElement
+    for (const g of OPACITY_TOKEN_GROUPS) {
+      for (const name of g.names) {
+        root.style.setProperty(OPACITY_VARS[name], toRgba(tokens[name] ?? '#000', ops[g.part]))
+      }
+    }
+    const bgKey = `${baseTokenKey}|${ops.bg}`
+    if (bgKey !== lastBgKey) { lastBgKey = bgKey; applyPartOpacities(ops) }
   } catch {
     // ignore
   }
@@ -101,6 +165,25 @@ export const SETTINGS_STYLE_RULE =
   `--dsw-alias-bg-layer-3:var(--dsh-any-bg-settings-layer-3)}` +
   // Option-panel blur inside the dialog, owned by the card blur slider.
   `${SETTINGS_PANEL_SEL} .dab-card{backdrop-filter:var(--dsh-any-blur-card-panels,none);-webkit-backdrop-filter:var(--dsh-any-blur-card-panels,none)}`
+
+// Input/control surface blur. The composer card and the Cordis panel expose
+// stable host data attributes ([data-composer-card], [data-cordis-panel]), so
+// the backdrop is attached via a stylesheet rule rather than element discovery.
+// The --dsw-specific-menu input token also covers the slash-trigger menu, but
+// it renders without a stable selector, so the composer/cordis hooks are the
+// reliable surface set. Note the input slider must NOT drive the
+// button-elevated-fill / button-floating-hover tokens: the settings panel's own
+// controls (slider thumbs, .dab-btn, segmented thumb) are painted from those
+// same tokens, so tinting them would bleach the panel's own UI.
+export const INPUT_BLUR_RULE =
+  '[data-composer-card],[data-cordis-panel]{' +
+  '-webkit-backdrop-filter:var(--dsh-any-input-blur,none);' +
+  'backdrop-filter:var(--dsh-any-input-blur,none)}'
+
+function applyInputBlur(px: number): void {
+  if (px > 0) document.documentElement.style.setProperty('--dsh-any-input-blur', `blur(${px}px)`)
+  else document.documentElement.style.removeProperty('--dsh-any-input-blur')
+}
 
 export function applySettingsOverrides(op: number): void {
   // Always written explicitly (including 100%) — removing them would make
@@ -368,6 +451,7 @@ export function applyPartBlurs(blurs: PartBlurs): void {
   setBlur(detailsEl, blurs.bg)
   applyCardPanelsBlur(blurs.card)
   applySettingsBlur(blurs.settings)
+  applyInputBlur(blurs.input)
   applyViewCards()
 }
 
@@ -375,6 +459,7 @@ export function applyPartBlurs(blurs: PartBlurs): void {
 export function setPartBlur(part: keyof PartBlurs, v: number): void {
   if (part === 'settings') { applySettingsBlur(v); return }
   if (part === 'card') { applyCardPanelsBlur(v); return }
+  if (part === 'input') { applyInputBlur(v); return }
   if (part === 'chat' || part === 'trajectory') { applyViewCards(); return }
   discoverParts()
   if (part === 'bg') { setBlur(centerEl, v); setBlur(detailsEl, v) }
@@ -624,6 +709,73 @@ function imageNatSize(url: string, cb: (w: number, h: number) => void): void {
   img.src = url
 }
 
+// ── Drag-time wallpaper downscaling ──────────────────────────────────────────
+// Repainting translucent surfaces over a full-resolution wallpaper is expensive
+// (proportional to the image's pixel area, worse under backdrop blur). During a
+// slider drag we swap the layer's background-image to a bounded-size JPEG copy,
+// slashing that per-frame raster cost; the full-res image is restored on release
+// and stays browser-cached, so the swap is cheap. Precomputed after each image
+// apply so the first drag needs no decode hitch.
+const DRAG_MAX_SIDE = 720
+
+let lowResUrl: string | null = null
+let lowResFor = ''
+let dragLow = false
+
+function captureLowRes(url: string, cb: (low: string | null) => void): void {
+  if (lowResFor === url) { cb(lowResUrl); return }
+  const img = new Image()
+  img.onload = () => {
+    const k = Math.min(1, DRAG_MAX_SIDE / Math.max(img.naturalWidth, img.naturalHeight))
+    if (k >= 1) { lowResFor = url; lowResUrl = null; cb(null); return }
+    const c = document.createElement('canvas')
+    c.width = Math.max(1, Math.round(img.naturalWidth * k))
+    c.height = Math.max(1, Math.round(img.naturalHeight * k))
+    const g = c.getContext('2d')
+    if (!g) { lowResFor = url; lowResUrl = null; cb(null); return }
+    g.drawImage(img, 0, 0, c.width, c.height)
+    const low = c.toDataURL('image/jpeg', 0.85)
+    lowResFor = url; lowResUrl = low
+    cb(low)
+  }
+  img.onerror = () => cb(null)
+  img.src = url
+}
+
+function setDragLow(on: boolean): void {
+  if (cfg.backgroundType !== 'image' || on === dragLow || !wpEl) return
+  const full = rWpImage()
+  if (!full) return
+  if (on) {
+    dragLow = true
+    captureLowRes(full, low => {
+      if (!dragLow || !wpEl || low === null) return
+      if (wpEl.style.backgroundImage !== `url("${low}")`) wpEl.style.backgroundImage = `url("${low}")`
+    })
+  } else {
+    dragLow = false
+    if (wpEl.style.backgroundImage !== `url("${full}")`) wpEl.style.backgroundImage = `url("${full}")`
+  }
+}
+
+/** While any range slider in the app is being dragged, run the wallpaper at
+ *  reduced resolution; restore on release. Returns a disposer for teardown. */
+export function watchWallpaperDragQuality(): () => void {
+  const isRange = (t: EventTarget | null): boolean =>
+    t instanceof HTMLInputElement && t.type === 'range'
+  const down = (e: PointerEvent): void => { if (isRange(e.target)) setDragLow(true) }
+  const up = (): void => { if (dragLow) setDragLow(false) }
+  window.addEventListener('pointerdown', down, true)
+  window.addEventListener('pointerup', up, true)
+  window.addEventListener('pointercancel', up, true)
+  return () => {
+    window.removeEventListener('pointerdown', down, true)
+    window.removeEventListener('pointerup', up, true)
+    window.removeEventListener('pointercancel', up, true)
+    if (dragLow) setDragLow(false)
+  }
+}
+
 function applyImageWp(url: string): void {
   clearDynamicBg()
   clearVideoEl()
@@ -678,6 +830,9 @@ function applyImageWp(url: string): void {
       }
     })
   }
+  // Precompute the drag-time downscaled copy now so the first drag swaps without
+  // a decode hitch (the original is already loaded, so this hits the cache).
+  captureLowRes(url, () => undefined)
   applyWpEffects()
 }
 
@@ -783,6 +938,8 @@ export function teardownWp(): void {
   clearCustomTokens()
   tokenStyleEl?.remove(); tokenStyleEl = null
   removeViewCards()
+  document.body.removeAttribute('data-ds-dark-theme')
+  document.body.style.removeProperty('color-scheme')
   document.documentElement.style.removeProperty('--dsh-any-bg-settings-surface')
   document.documentElement.style.removeProperty('--dsh-any-bg-settings-layer-1')
   document.documentElement.style.removeProperty('--dsh-any-bg-settings-layer-2')
@@ -793,6 +950,12 @@ export function teardownWp(): void {
   document.documentElement.style.removeProperty('--dsh-any-bg-settings-card-surface')
   document.documentElement.style.removeProperty('--dsh-any-blur-settings')
   document.documentElement.style.removeProperty('--dsh-any-blur-card-panels')
+  document.documentElement.style.removeProperty('--dsh-any-input-blur')
+  for (const v of Object.values(OPACITY_VARS)) document.documentElement.style.removeProperty(v)
+  baseTokenKey = ''
+  lastBgKey = ''
+  if (tokensRaf !== null) { cancelAnimationFrame(tokensRaf); tokensRaf = null }
+  pendingOps = null
   setBlur(frameEl, 0); setBlur(sidebarEl, 0); setBlur(centerEl, 0); setBlur(detailsEl, 0)
   if (frameEl !== null) frameEl.style.removeProperty('background')
   if (centerEl !== null) centerEl.style.removeProperty('background')

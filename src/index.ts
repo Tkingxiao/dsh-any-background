@@ -42,10 +42,10 @@ interface BgState {
   zoom: number; x: number; y: number; iw: number; ih: number
 }
 interface PartOpacities {
-  bg: number; sidebar: number; card: number
+  bg: number; sidebar: number; card: number; input: number
 }
 interface PartBlurs {
-  bg: number; sidebar: number; card: number; settings: number; chat: number; trajectory: number
+  bg: number; sidebar: number; card: number; settings: number; chat: number; trajectory: number; input: number
 }
 type BackgroundType = 'image' | 'video' | 'mesh' | 'shader' | 'pattern'
 type BgMode = 'fit' | 'fill' | 'stretch' | 'tile' | 'center'
@@ -75,8 +75,8 @@ interface ThemeConfig {
 
 const DEFAULT_CONFIG: ThemeConfig = {
   color: null,
-  opacities: { bg: 0.85, sidebar: 0.93, card: 1 },
-  blurs: { bg: 0, sidebar: 0, card: 0, settings: 0, chat: 0, trajectory: 0 },
+  opacities: { bg: 0.85, sidebar: 0.93, card: 1, input: 1 },
+  blurs: { bg: 0, sidebar: 0, card: 0, settings: 0, chat: 0, trajectory: 0, input: 0 },
   settingsOpacity: 1,
   wallpaperOpacity: 1,
   blur: 0,
@@ -156,7 +156,7 @@ function normalizeConfig(raw: unknown): ThemeConfig {
   const ops = (r.opacities ?? {}) as Partial<PartOpacities>
   const bl = (r.blurs ?? {}) as Partial<PartBlurs>
   const blurs = {} as PartBlurs
-  for (const k of ['bg', 'sidebar', 'card', 'settings', 'chat', 'trajectory'] as const) {
+  for (const k of ['bg', 'sidebar', 'card', 'settings', 'chat', 'trajectory', 'input'] as const) {
     blurs[k] = clamp(bl[k], 0, 60, DEFAULT_CONFIG.blurs[k])
   }
   return {
@@ -165,6 +165,7 @@ function normalizeConfig(raw: unknown): ThemeConfig {
       bg: clamp(ops.bg, 0, 1, legacy ?? DEFAULT_CONFIG.opacities.bg),
       sidebar: clamp(ops.sidebar, 0, 1, legacy !== null ? Math.min(1, legacy + 0.08) : DEFAULT_CONFIG.opacities.sidebar),
       card: clamp(ops.card, 0, 1, DEFAULT_CONFIG.opacities.card),
+      input: clamp(ops.input, 0, 1, DEFAULT_CONFIG.opacities.input),
     },
     blurs,
     settingsOpacity: clamp(r.settingsOpacity, 0, 1, DEFAULT_CONFIG.settingsOpacity),

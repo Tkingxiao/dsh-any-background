@@ -36,6 +36,8 @@ export interface PartOpacities {
   sidebar: number
   /** Cards/panels (--dsw-alias-bg-layer-1/2/3). */
   card: number
+  /** Input/control surfaces (--dsw-specific-input-major, --dsw-specific-menu). */
+  input: number
 }
 
 /** Per-part interface blur (px, 0..60), applied via backdrop-filter. */
@@ -52,6 +54,8 @@ export interface PartBlurs {
   chat: number
   /** Trajectory view surface. */
   trajectory: number
+  /** Input/control surfaces ([data-composer-card], [data-cordis-panel]). */
+  input: number
 }
 
 export type BackgroundType = 'image' | 'video' | 'mesh' | 'shader' | 'pattern'

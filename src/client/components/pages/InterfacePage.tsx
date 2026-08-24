@@ -4,7 +4,7 @@ import { cfg, rOps, rSop, rBlurs, rChatTextOpacity, rTrajectoryOpacity } from '.
 import { saveConfig } from '../../rpc'
 import { applyCustomTokens, applySettingsOverrides, setPartBlur, applyViewCards, applyTrajectoryOverrides } from '../../wallpaper'
 import { LiveSlider } from '../LiveSlider'
-import { CanvasIcon, SidebarIcon, ChatIcon, GearIcon, TextIcon, TrajectoryIcon } from '../icons'
+import { CanvasIcon, SidebarIcon, ChatIcon, GearIcon, TextIcon, TrajectoryIcon, InputIcon } from '../icons'
 
 interface PartDef {
   labelKey: string
@@ -22,6 +22,7 @@ const PARTS: PartDef[] = [
   { opKey: 'bg', labelKey: 'uiOpacityBg', Icon: CanvasIcon },
   { opKey: 'sidebar', labelKey: 'uiOpacitySide', Icon: SidebarIcon },
   { opKey: 'card', labelKey: 'uiOpacityCard', Icon: ChatIcon },
+  { opKey: 'input', labelKey: 'uiOpacityInput', Icon: InputIcon },
   { isSettings: true, labelKey: 'uiSop', Icon: GearIcon },
   { isChat: true, labelKey: 'uiChatRegion', Icon: TextIcon },
   { isTrajectory: true, labelKey: 'uiTrajectory', Icon: TrajectoryIcon },
@@ -42,14 +43,15 @@ export function InterfacePage({ p }: { p: ThemeSectionProps }) {
         {PARTS.map((part, i) => {
           const { labelKey, Icon, isSettings, isChat, isTrajectory } = part
           const opKey = part.opKey
-          // Homepage parts (bg/sidebar/card) bind to their own part only; the
-          // settings panel (isSettings) binds exclusively to the 'settings'
+          // Homepage parts (bg/sidebar/card/input) bind to their own part only;
+          // the settings panel (isSettings) binds exclusively to the 'settings'
           // part (--dsh-any-blur-settings / --dsh-any-bg-settings-surface) and
           // must never fall back to a homepage part key — otherwise the dialog
-          // panel would track the homepage center/card blur and the
-          // bg/sidebar/card opacities. The chat region (isChat) and the
-          // trajectory view (isTrajectory) own their own blur keys plus their
-          // own tint opacities.
+          // panel would track the homepage center/card blur and the home-page
+          // opacities. The chat region (isChat) and the trajectory view
+          // (isTrajectory) own their own blur keys plus their own tint
+          // opacities. Every homepage opKey is also a PartBlurs key (input
+          // included), so the shared blur slider dereferences it directly.
           const blurKey: keyof PartBlurs = isChat ? 'chat' : isTrajectory ? 'trajectory' : isSettings ? 'settings' : opKey!
           const opacity = isChat ? rChatTextOpacity() : isTrajectory ? rTrajectoryOpacity() : isSettings ? rSop() : rOps()[opKey!]
           return (

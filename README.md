@@ -65,8 +65,8 @@ A **DeepSeek Harness** appearance plugin that lets you fully customize the Web U
 - **Position Editor** — One shared editor for images and videos: drag to pan, scroll to zoom, one-click reset. Image and video placements are stored separately and never overwrite each other.
 - **Layout Modes** — Fit / Fill / Stretch / Tile / Center for both images and videos; in Fit mode the editor-committed framing stays consistent across window resizes and cross-monitor moves.
 - **Generated Dynamic Backgrounds** — Choose mesh gradient, Shader, or geometric patterns with adjustable spread, intensity, and seed locking.
-- **Per-part Interface Opacity** — Independent sliders for main background, sidebar, cards & panels, plus the settings panel and wallpaper.
-- **Per-part Interface Blur** — Frosted-glass `backdrop-filter` blur (0–60 px) for each interface part.
+- **Per-part Interface Opacity** — Independent sliders for the main background, sidebar, cards & panels, the input & controls (composer box, menus, Cordis panel), plus the settings panel and wallpaper.
+- **Per-part Interface Blur** — Frosted-glass `backdrop-filter` blur (0–60 px) for each interface part, including a real backdrop on the composer and Cordis panel via stable host selectors.
 - **Conversation View Cards** — The message list is wrapped in a translucent card automatically, and the trajectory page gets whole-page opacity & blur controls, letting the wallpaper shine through the content.
 - **Theme Export / Import** — One-click export to a self-contained `dsh-any-theme.json` (config + wallpaper, video embedded as a data URL) and import to restore it anywhere.
 - **File-based Persistence** — All settings are stored on the filesystem under `~/.dsh/.dsh-any-background-data/`, not `localStorage`.
@@ -84,6 +84,11 @@ A **DeepSeek Harness** appearance plugin that lets you fully customize the Web U
 - **Inspiration palette selection cleared** — Picking a theme color from the wheel deselects any previously selected inspiration swatch.
 - **Debug telemetry removed** — Temporary boot-time logging and `MutationObserver` instrumentation have been cleaned out.
 - **Per-part blur isolated** — Blur is applied on `::before` underlays so it never traps the host's fixed-position settings dialog.
+- **New "Input & controls" part** — The composer box, slash menu, and Cordis plugin panel own a dedicated opacity slider; their translucent surfaces get real frosted-glass backdrop blur attached through stable host data attributes (`[data-composer-card]`, `[data-cordis-panel]`).
+- **Native control contrast fixed** — Solid surface tokens (composer, menus, Cordis panel) now carry per-part alpha, and a forced `color-scheme` keeps native `<select>` popups legible — no more white-on-white when the wallpaper brightness verdict flips labels to white.
+- **Translucency without self-damage** — The "Input & controls" opacity slider is deliberately decoupled from the settings panel's own controls (which share the same button tokens), so adjusting it can never bleach the plugin's own sliders and buttons.
+- **Drag-time performance** — Opacity tokens are written as CSS variables on `<html>` instead of rebuilding the whole token stylesheet per tick; slider updates are coalesced to one rAF per frame; the main-background columns are only retinted when their own slider changes.
+- **Drag-time wallpaper downscaling** — While any slider is being dragged the wallpaper swaps to a (~720px) low-res copy for cheap rasterization over large images, then restores full resolution on release.
 
 ## Installation
 

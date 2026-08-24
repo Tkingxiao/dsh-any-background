@@ -2,8 +2,8 @@ import type { BgState, ThemeConfig, PartOpacities, PartBlurs, BgMode } from './t
 
 export const DEFAULT_CONFIG: ThemeConfig = {
   color: null,
-  opacities: { bg: 0.85, sidebar: 0.93, card: 1 },
-  blurs: { bg: 0, sidebar: 0, card: 0, settings: 0, chat: 0, trajectory: 0 },
+  opacities: { bg: 0.85, sidebar: 0.93, card: 1, input: 1 },
+  blurs: { bg: 0, sidebar: 0, card: 0, settings: 0, chat: 0, trajectory: 0, input: 0 },
   settingsOpacity: 1,
   wallpaperOpacity: 1,
   blur: 0,
@@ -73,7 +73,7 @@ export function rWp(): string | null {
 export function rOps(): PartOpacities {
   const o = cfg.opacities ?? {}
   const out = {} as PartOpacities
-  for (const k of ['bg', 'sidebar', 'card'] as const) {
+  for (const k of ['bg', 'sidebar', 'card', 'input'] as const) {
     out[k] = clamp01(o[k], DEFAULT_CONFIG.opacities[k])
   }
   return out
@@ -81,7 +81,7 @@ export function rOps(): PartOpacities {
 export function rBlurs(): PartBlurs {
   const b = cfg.blurs ?? {}
   const out = {} as PartBlurs
-  for (const k of ['bg', 'sidebar', 'card', 'settings', 'chat', 'trajectory'] as const) {
+  for (const k of ['bg', 'sidebar', 'card', 'settings', 'chat', 'trajectory', 'input'] as const) {
     const v = b[k]
     out[k] = typeof v === 'number' ? Math.min(60, Math.max(0, v)) : DEFAULT_CONFIG.blurs[k]
   }
@@ -121,7 +121,7 @@ export function adoptConfig(raw: unknown): void {
   const ops = (c.opacities ?? {}) as Partial<PartOpacities>
   const bl = (c.blurs ?? {}) as Partial<PartBlurs>
   const blurs = {} as PartBlurs
-  for (const k of ['bg', 'sidebar', 'card', 'settings', 'chat', 'trajectory'] as const) {
+  for (const k of ['bg', 'sidebar', 'card', 'settings', 'chat', 'trajectory', 'input'] as const) {
     blurs[k] = num(bl[k], DEFAULT_CONFIG.blurs[k])
   }
   const bgType = ['video', 'mesh', 'shader', 'pattern'].includes(c.backgroundType as string)
@@ -139,6 +139,7 @@ export function adoptConfig(raw: unknown): void {
       bg: num(ops.bg, legacy ?? DEFAULT_CONFIG.opacities.bg),
       sidebar: num(ops.sidebar, legacy !== null ? Math.min(1, legacy + 0.08) : DEFAULT_CONFIG.opacities.sidebar),
       card: num(ops.card, DEFAULT_CONFIG.opacities.card),
+      input: num(ops.input, DEFAULT_CONFIG.opacities.input),
     },
     blurs,
     settingsOpacity: num(c.settingsOpacity, DEFAULT_CONFIG.settingsOpacity),
