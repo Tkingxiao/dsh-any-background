@@ -91,6 +91,7 @@ A **DeepSeek Harness** appearance plugin that lets you fully customize the Web U
 - **Drag-time wallpaper downscaling** — While any slider is being dragged the wallpaper swaps to a (~720px) low-res copy for cheap rasterization over large images, then restores full resolution on release.
 - **Instant video playback on import** — A picked video starts playing immediately from a local object URL while its raw bytes stream to disk in the background; the persisted serve URL takes over on the next reload — no more upload + first-buffer wait after import.
 - **Option boxes follow the card slider** — The dropdowns, slash-trigger menu, model selector, and popovers around the dialog now follow the "Cards & panels" opacity slider instead of "Input & controls"; the Cordis panel keeps its own input-slider binding.
+- **Dual harness compatibility** — `defineStore` is resolved through a runtime adapter that prefers the new `@deepseek-ai/dsh-client-store` and falls back to the legacy `@deepseek-ai/dsh-client-runtime/client`. A single bundle therefore loads on both the npm release and the new deepseek-harness source, with no "missed the module table" boot failure.
 
 ## Installation
 
@@ -132,7 +133,7 @@ pnpm dsh web
 
 ## Compatibility
 
-- **[`dsh web`](https://github.com/deepseek-ai/deepseek-harness)** — Full support.
+- **[`dsh web`](https://github.com/deepseek-ai/deepseek-harness)** — Full support on both the npm release and the new source build. The plugin auto-detects which client-module table the host ships (the new `@deepseek-ai/dsh-client-store` or the legacy `@deepseek-ai/dsh-client-runtime`) and resolves `defineStore` accordingly at runtime.
 - **[deepseek-harness-desktop](https://github.com/anywhere-labs/deepseek-harness-desktop)** — Supported; a known Electron packaging issue makes the left sidebar and center area opacity appear inverted — awaiting a desktop-client update to fix it.
 
 ## Star History

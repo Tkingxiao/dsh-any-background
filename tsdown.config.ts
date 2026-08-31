@@ -17,6 +17,7 @@ const EXTERNALS = [
   '@deepseek-ai/dsh-client-connection',
   '@deepseek-ai/dsh-client-runtime',
   '@deepseek-ai/dsh-client-runtime/client',
+  '@deepseek-ai/dsh-client-store',
   '@deepseek-ai/dsh-client-locale',
   '@deepseek-ai/dsh-client-ui-settings',
   '@deepseek-ai/dsh-api-remotes',

@@ -91,6 +91,7 @@
 - **拖动时壁纸降采样** — 拖动任意滑块期间，壁纸临时切换到（~720px）低清副本以降低大图上的合成成本，松手后恢复全分辨率。
 - **导入即播视频壁纸** — 选中的视频立即通过本地对象 URL 开始播放，原始字节在后台流式落盘，下次刷新自动切回持久化服务地址——不再有「上传 + 首帧缓冲」的等待。
 - **选项框跟随卡片滑块** — 对话框周围的下拉菜单、斜杠命令菜单、模型选择器与弹层现在跟随「对话框中选项面板」透明度滑块，而非「输入框与控件」；Cordis 插件面板保持自己的输入滑块绑定。
+- **双版本兼容** — `defineStore` 通过运行时适配器解析：优先使用新版 `@deepseek-ai/dsh-client-store`，缺失时回退到旧版 `@deepseek-ai/dsh-client-runtime/client`。同一份 bundle 因此同时兼容 npm 老版本与新版 deepseek-harness 源码，不再出现 ‎"missed the module table"‎ 启动失败。
 
 ## 安装
 
@@ -132,7 +133,7 @@ pnpm dsh web
 
 ## 兼容性
 
-- **[`dsh web`](https://github.com/deepseek-ai/deepseek-harness)** — 完全支持。
+- **[`dsh web`](https://github.com/deepseek-ai/deepseek-harness)** — 同时兼容 npm 发布版与新版源码构建。插件会自动检测宿主携带的客户端模块表（新版 `@deepseek-ai/dsh-client-store` 或旧版 `@deepseek-ai/dsh-client-runtime`），并在运行时据此解析 `defineStore`。
 - **[deepseek-harness-desktop](https://github.com/anywhere-labs/deepseek-harness-desktop)** — 支持；已知 Electron 打包问题导致左侧边栏与中心区域透明度显示相反，需等待桌面端更新修复。
 
 ## Star History

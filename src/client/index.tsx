@@ -5,7 +5,7 @@
  * watch, i18n, settings-section injection, boot restore, watchdog. The heavy
  * lifting lives in the sibling modules (state/rpc/wallpaper/utils/components).
  */
-import { defineStore } from '@deepseek-ai/dsh-client-runtime/client'
+import { defineStore } from './runtime'
 import type { Ctx, RpcResultLike, BoundActions, ThemeSectionProps, PartOpacities, PartBlurs, BackgroundType, GeneratedBgParams } from './types'
 import { NS, zh, en } from './i18n'
 import { cfg, rHasColor, rColor, rWp, rWpImage, rWpVideo, rBgState, rVideoBgState, setWpUrl, setWpImageUrl, setWpVideoUrl, setWpVideoSnapshot, setBgState, adoptConfig, DEFAULT_CONFIG, setBgDark } from './state'
