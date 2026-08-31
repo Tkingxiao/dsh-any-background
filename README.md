@@ -75,23 +75,18 @@ A **DeepSeek Harness** appearance plugin that lets you fully customize the Web U
 
 ## Recent Optimizations
 
-- **Video wallpaper end-to-end** — Videos are stored under MIME-derived names (`wallpaper.mp4/webm/...`) and streamed over the plugin's own HTTP route; they restore automatically after refresh or restart and travel inside exported configs.
-- **Binary upload for large videos** — Uploads stream raw bytes over an HTTP POST straight to disk instead of a base64 detour through RPC (no channel body limit, any size works); aborted transfers clean up after themselves.
-- **Video position editing** — The placement editor works on a captured frame reference with zoom/pan, adapted to all five layout modes; image and video framings persist independently.
-- **Conversation view cards** — The message column gains an automatic card (border/radius/padding) and the trajectory page gets whole-page opacity & blur; switching views restores the previous host.
-- **Boot flicker eliminated** — Theme tokens are injected through a dedicated `!important` stylesheet instead of inline `body` styles, surviving host theme service resets.
-- **Color wheel overlap fixed** — The hue ring is drawn on top of the saturation/lightness square so the square corners no longer cover the ring.
-- **Inspiration palette selection cleared** — Picking a theme color from the wheel deselects any previously selected inspiration swatch.
-- **Debug telemetry removed** — Temporary boot-time logging and `MutationObserver` instrumentation have been cleaned out.
-- **Per-part blur isolated** — Blur is applied on `::before` underlays so it never traps the host's fixed-position settings dialog.
-- **New "Input & controls" part** — The composer box, slash menu, and Cordis plugin panel own a dedicated opacity slider; their translucent surfaces get real frosted-glass backdrop blur attached through stable host data attributes (`[data-composer-card]`, `[data-cordis-panel]`).
-- **Native control contrast fixed** — Solid surface tokens (composer, menus, Cordis panel) now carry per-part alpha, and a forced `color-scheme` keeps native `<select>` popups legible — no more white-on-white when the wallpaper brightness verdict flips labels to white.
-- **Translucency without self-damage** — The "Input & controls" opacity slider is deliberately decoupled from the settings panel's own controls (which share the same button tokens), so adjusting it can never bleach the plugin's own sliders and buttons.
-- **Drag-time performance** — Opacity tokens are written as CSS variables on `<html>` instead of rebuilding the whole token stylesheet per tick; slider updates are coalesced to one rAF per frame; the main-background columns are only retinted when their own slider changes.
-- **Drag-time wallpaper downscaling** — While any slider is being dragged the wallpaper swaps to a (~720px) low-res copy for cheap rasterization over large images, then restores full resolution on release.
-- **Instant video playback on import** — A picked video starts playing immediately from a local object URL while its raw bytes stream to disk in the background; the persisted serve URL takes over on the next reload — no more upload + first-buffer wait after import.
+### v0.2.2
+
+- **Dark host surfaces fully themed** — Message bubbles, setting-box inputs/cards, selectors, ghost/toolbar buttons, and module-platform surfaces now carry explicit dark tokens, eliminating white-on-white and white-icon-on-bright bugs across the conversation view, settings page, and interactive controls.
+- **Refresh white-flash eliminated** — A theme-reset watcher re-asserts the plugin's forced scheme within the same frame the host re-applies its light `:root/body` rules; the `!important` token stylesheet survives host theme resets, so entering, refreshing, and set-changes no longer paint a white frame.
+- **Brand badge & code banner contrast** — The sidebar brand badge and the code-block info banner now use dark surfaces with legible labels and icons.
+- **Placeholder reads as a hint** — The composer placeholder is rendered with the weak caption token and italic styling, clearly distinct from real input text.
+- **Dual harness compatibility** — `defineStore` is resolved through a runtime adapter that prefers the new `@deepseek-ai/dsh-client-store` and falls back to the legacy `@deepseek-ai/dsh-client-runtime/client`. A single bundle loads on both the npm release and the new deepseek-harness source, with no "missed the module table" boot failure.
+
+### v0.2.1
+
+- **Instant video playback on import** — A picked video starts playing immediately from a local object URL while its raw bytes stream to disk in the background; the persisted serve URL takes over on the next reload — no upload + first-buffer wait after import.
 - **Option boxes follow the card slider** — The dropdowns, slash-trigger menu, model selector, and popovers around the dialog now follow the "Cards & panels" opacity slider instead of "Input & controls"; the Cordis panel keeps its own input-slider binding.
-- **Dual harness compatibility** — `defineStore` is resolved through a runtime adapter that prefers the new `@deepseek-ai/dsh-client-store` and falls back to the legacy `@deepseek-ai/dsh-client-runtime/client`. A single bundle therefore loads on both the npm release and the new deepseek-harness source, with no "missed the module table" boot failure.
 
 ## Installation
 

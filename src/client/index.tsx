@@ -10,7 +10,7 @@ import type { Ctx, RpcResultLike, BoundActions, ThemeSectionProps, PartOpacities
 import { NS, zh, en } from './i18n'
 import { cfg, rHasColor, rColor, rWp, rWpImage, rWpVideo, rBgState, rVideoBgState, setWpUrl, setWpImageUrl, setWpVideoUrl, setWpVideoSnapshot, setBgState, adoptConfig, DEFAULT_CONFIG, setBgDark } from './state'
 import { RPC_CHANNEL, VIDEO_SERVE_URL, initRpc, saveConfig, flushSave, loadPersisted, persistWallpaper, persistVideo, persistConfig, uploadVideo } from './rpc'
-import { applyWp, teardownWp, applySettingsOverrides, SETTINGS_STYLE_RULE, TRAJECTORY_STYLE_RULE, INPUT_BLUR_RULE, watchParts, regenerateGeneratedBg, setBackgroundType, updateGeneratedBg, applyThemeColor, onGeneratedSnapshot, watchWallpaperDragQuality } from './wallpaper'
+import { applyWp, teardownWp, applySettingsOverrides, SETTINGS_STYLE_RULE, TRAJECTORY_STYLE_RULE, INPUT_BLUR_RULE, PLACEHOLDER_RULE, watchParts, watchThemeResets, regenerateGeneratedBg, setBackgroundType, updateGeneratedBg, applyThemeColor, onGeneratedSnapshot, watchWallpaperDragQuality } from './wallpaper'
 import { genTokens, hslToHsv, hsvToHsl, extractWallpaperColor } from './utils/color'
 import { captureVideoSnapshot } from './utils/video'
 import { ThemeSection } from './components/ThemeSection'
@@ -61,7 +61,7 @@ export function apply(ctx: Ctx): void {
   styleEl.dataset.plugin = 'dsh-any-background'
   // Only applies while applyCustomTokens marks the body with the plugin's
   // own dark-mode value, avoiding matches against the host's theme attribute.
-  styleEl.textContent = `body[data-ds-dark-theme="dsh-any-background"]::before{content:'';position:fixed;inset:0;z-index:-1;pointer-events:none;background:radial-gradient(ellipse 80% 60% at 50% 0%,rgba(255,255,255,0.03) 0%,transparent 60%)}${SETTINGS_STYLE_RULE}${TRAJECTORY_STYLE_RULE}${INPUT_BLUR_RULE}`
+  styleEl.textContent = `body[data-ds-dark-theme="dsh-any-background"]::before{content:'';position:fixed;inset:0;z-index:-1;pointer-events:none;background:radial-gradient(ellipse 80% 60% at 50% 0%,rgba(255,255,255,0.03) 0%,transparent 60%)}${SETTINGS_STYLE_RULE}${TRAJECTORY_STYLE_RULE}${INPUT_BLUR_RULE}` + PLACEHOLDER_RULE
   document.head.appendChild(styleEl)
   ctx.effect(() => () => { styleEl?.parentNode?.removeChild(styleEl) }, 'dsh-any-background: gradient')
 
@@ -563,6 +563,12 @@ export function apply(ctx: Ctx): void {
     if (changed) applyWp()
   }, 1000)
   ctx.effect(() => () => { window.clearInterval(watchdogId) }, 'dsh-any-background: theme watchdog')
+
+  // 8.5. Theme-reset watchdog: counter the host re-asserting its own light
+  // :root/body scheme after startup (refresh, cold load, settings adoption),
+  // which would paint a frame of white surfaces.
+  const disposeThemeResets = watchThemeResets()
+  ctx.effect(() => () => { disposeThemeResets() }, 'dsh-any-background: theme resets watch')
 
   // 9. Flush any pending debounced config write when the page is hidden or
   // closed, so the last slider position is never lost to the debounce window.

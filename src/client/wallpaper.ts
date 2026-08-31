@@ -36,14 +36,14 @@ function clearCustomTokens(): void {
   appliedTokenNames = []
 }
 
-/** Label tokens flipped by the generated-background brightness verdict. */
+/** Label tokens flipped by the generated-background brightness verdict. The
+ *  faint tiers (caption/dimmed) are deliberately NOT flipped: they back
+ *  placeholder/hint text, which must stay visibly weaker than real input even
+ *  when the wallpaper brightness flips the main label direction. */
 const LABEL_TOKENS = [
   '--dsw-alias-label-primary',
   '--dsw-alias-label-secondary',
   '--dsw-alias-label-tertiary',
-  '--dsw-alias-label-caption',
-  '--dsw-alias-label-dimmed',
-  '--dsw-alias-label-quaternary',
 ]
 
 // Solid surface tokens grouped by which interface-opacity slider owns them.
@@ -191,6 +191,21 @@ function applyInputBlur(px: number): void {
   if (px > 0) document.documentElement.style.setProperty('--dsh-any-input-blur', `blur(${px}px)`)
   else document.documentElement.style.removeProperty('--dsh-any-input-blur')
 }
+
+// Placeholder/hint text inside the composer and the plugin's own input
+// surfaces: rendered with the weak caption token (distinct from real input)
+// plus italic, so an empty box is never mistaken for typed content. Written
+// as a rule so it also covers placeholder text colored by the host's text tier.
+export const PLACEHOLDER_RULE =
+  '[data-composer-card] textarea::placeholder,' +
+  '[data-composer-card] input::placeholder,' +
+  '[data-composer-card] [contenteditable]::placeholder,' +
+  '[data-cordis-panel] input::placeholder,' +
+  '[data-cordis-panel] textarea::placeholder,' +
+  '.dab-input::placeholder,' +
+  '.dab-input textarea::placeholder,' +
+  '.dab-input input::placeholder' +
+  '{color:var(--dsh-any-placeholder,var(--dsw-alias-label-caption,#8a8f98))!important;font-style:italic;opacity:.85}'
 
 export function applySettingsOverrides(op: number): void {
   // Always written explicitly (including 100%) — removing them would make
@@ -684,6 +699,48 @@ export function watchParts(): void {
 export function stopWatchingParts(): void {
   partsObserver?.disconnect()
   partsObserver = null
+}
+
+// ── Theme-reset watchdog ──────────────────────────────────────────────────
+// The host re-asserts its own :root/body scheme rules on mount, on settings
+// adoption and after the plugin's startup assertion, toggling the
+// `data-ds-dark-theme` attribute off / to a host value — which would paint a
+// frame of light surfaces. Watch that flag and, whenever the plugin's own
+// value disappears, re-set it and re-emit the token stylesheet within the same
+// frame. The guard stops feedback: once our mark is present the handler
+// returns, so our own re-assertion cannot re-trigger.
+let themeObserver: MutationObserver | null = null
+let themeRaf = 0
+
+function reassertScheme(): void {
+  const [, , l] = rColor()
+  const dark = rBgDark() ?? l < 0.55
+  if (dark) document.body.setAttribute('data-ds-dark-theme', 'dsh-any-background')
+  else document.body.removeAttribute('data-ds-dark-theme')
+  applyCustomTokens(rOps())
+}
+
+/** Re-assert the plugin's forced scheme whenever the host strips it, so a
+ *  refresh / cold-load / set-change never flashes a light frame. Returns a
+ *  disposer for teardown. */
+export function watchThemeResets(): () => void {
+  if (themeObserver !== null || typeof MutationObserver === 'undefined') return () => undefined
+  themeObserver = new MutationObserver(() => {
+    if (document.body.getAttribute('data-ds-dark-theme') === 'dsh-any-background') return
+    if (!(rHasColor() || rBgDark() !== null)) return
+    if (themeRaf !== 0) return
+    themeRaf = requestAnimationFrame(() => {
+      themeRaf = 0
+      if (document.body.getAttribute('data-ds-dark-theme') === 'dsh-any-background') return
+      reassertScheme()
+    })
+  })
+  themeObserver.observe(document.body, { attributes: true, attributeFilter: ['data-ds-dark-theme'] })
+  themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-ds-dark-theme'] })
+  return () => {
+    themeObserver?.disconnect()
+    themeObserver = null
+  }
 }
 
 function ensureWpContainer(): void {
