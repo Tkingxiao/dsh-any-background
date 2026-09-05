@@ -98,7 +98,7 @@ export function BgEditor({ url, t, onClose, onCommit }: {
         <div style={{ display: 'flex', gap: 10 }}>
           <button type="button" className="dab-btn" onClick={resetView}>{t('editorReset')}</button>
           <button type="button" className="dab-btn" onClick={onClose}>{t('editorCancel')}</button>
-          <button type="button" className="dab-btn dab-btn-primary" onClick={() => onCommit(zoom, (pos.x + imgSize.w * zoom / 2) / pw, (pos.y + imgSize.h * zoom / 2) / ph, imgRef.current?.naturalWidth ?? 0, imgRef.current?.naturalHeight ?? 0)}>{t('editorCommit')}</button>
+          <button type="button" className="dab-btn" onClick={() => onCommit(zoom, (pos.x + imgSize.w * zoom / 2) / pw, (pos.y + imgSize.h * zoom / 2) / ph, imgRef.current?.naturalWidth ?? 0, imgRef.current?.naturalHeight ?? 0)}>{t('editorCommit')}</button>
         </div>
       </div>
     </Portal>

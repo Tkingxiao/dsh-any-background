@@ -648,6 +648,46 @@ function removeViewCards(): void {
   })
 }
 
+// ── Wide markdown tables ──────────────────────────────────────────────────────
+// DSH intentionally lets `.md-table-wide` bleed outside the text column (a
+// negative --dsh-table-lead margin + max-width:none, set by a host rule like
+// `.Sxvs8a_body .md-table-wide`; the prefix is a build-time hash class). That
+// bleed only becomes visible once the chat surface gains a visible border, i.e.
+// when the chat region opacity or blur is non-zero (see borderAlpha in
+// applyViewCards). Under that same condition, pull the table back inside the
+// column and let it scroll horizontally. The stable `.md-table-wide` class is
+// targeted with !important so the fix survives DSH's changing hash prefixes.
+
+const TABLE_FIX_RULE = [
+  '.md-table-wide {',
+  '  --dsh-table-spare: 0px !important;',
+  '  --dsh-table-lead: 0px !important;',
+  '  box-sizing: border-box !important;',
+  '  width: 100% !important;',
+  '  max-width: 100% !important;',
+  '  margin-left: 0 !important;',
+  '  padding-left: 0 !important;',
+  '  padding-bottom: 0 !important;',
+  '  overflow-x: auto !important;',
+  '}',
+].join('\n')
+let tableFixStyleEl: HTMLStyleElement | null = null
+
+/** Toggle the wide-table clamp according to the chat region's opacity & blur. */
+function syncTableFix(): void {
+  const needed = rChatTextOpacity() > 0 || rBlurs().chat > 0
+  if (!needed) {
+    if (tableFixStyleEl !== null) { tableFixStyleEl.remove(); tableFixStyleEl = null }
+    return
+  }
+  if (tableFixStyleEl === null) {
+    tableFixStyleEl = document.createElement('style')
+    tableFixStyleEl.dataset.plugin = 'dsh-any-background-table-fix'
+    tableFixStyleEl.textContent = TABLE_FIX_RULE
+  }
+  if (!tableFixStyleEl.isConnected) document.head.appendChild(tableFixStyleEl)
+}
+
 /** Re-derive the conversation view cards from the current config. Cheap
  *  enough for live slider drags; the card structure is applied unconditionally
  *  once the host exists so the layout never reflows when a slider leaves zero. */
@@ -677,6 +717,7 @@ export function applyViewCards(): void {
     target.setAttribute(spec.mark, '1')
     setBlur(target, blurPx)
   })
+  syncTableFix()
 }
 
 let partsObserver: MutationObserver | null = null
@@ -1024,6 +1065,7 @@ export function teardownWp(): void {
   lastBgKey = ''
   if (tokensRaf !== null) { cancelAnimationFrame(tokensRaf); tokensRaf = null }
   pendingOps = null
+  tableFixStyleEl?.remove(); tableFixStyleEl = null
   setBlur(frameEl, 0); setBlur(sidebarEl, 0); setBlur(centerEl, 0); setBlur(detailsEl, 0)
   if (frameEl !== null) frameEl.style.removeProperty('background')
   if (centerEl !== null) centerEl.style.removeProperty('background')

@@ -84,6 +84,28 @@ export async function persistVideo(dataUrl: string | null): Promise<boolean> {
   return res === true
 }
 
+/** Download a wallpaper from a network URL and persist it into the local slot
+ *  (the host replaces wallpaper.jpg). Returns the freshly stored data-URL on
+ *  success, or the host's failure message. */
+export async function setWallpaperFromUrl(url: string): Promise<{ ok: boolean; dataUrl?: string | null; error?: string }> {
+  if (!rpcCallFn) return { ok: false, error: 'rpc not ready' }
+  let res: RpcResultLike | undefined
+  try {
+    res = await rpcCallFn(rpcEndpoint('setWallpaperUrl'), { url })
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+  if (!res) return { ok: false, error: 'no response' }
+  if (res.ok !== true) {
+    const err = (res as { error?: { message?: string } }).error
+    return { ok: false, error: err?.message ?? 'request failed' }
+  }
+  const v = res.value as { ok?: boolean; dataUrl?: string | null; error?: string }
+  return v?.ok === true
+    ? { ok: true, dataUrl: v.dataUrl ?? null }
+    : { ok: false, error: v?.error ?? 'failed' }
+}
+
 /** Upload a video's raw bytes over HTTP (MIME in Content-Type, body untouched
  *  — no base64 inflation that would blow the RPC body limit on large clips). */
 export async function uploadVideo(blob: Blob, mime: string): Promise<boolean> {

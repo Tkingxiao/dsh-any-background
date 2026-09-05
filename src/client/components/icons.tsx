@@ -61,6 +61,10 @@ export const UploadIcon = ({ size, className }: { size?: number; className?: str
   <Glyph size={size} className={className}><path d="M8 10.4V2.6" /><path d="M4.6 5.8L8 2.4l3.4 3.4" /><path d="M2.8 13.8h10.4" /></Glyph>
 )
 
+export const LinkIcon = ({ size, className }: { size?: number; className?: string }) => (
+  <Glyph size={size} className={className}><path d="M6.6 9.4 9.4 6.6" /><path d="M5.9 11.1l-1.4 1.4a2.6 2.6 0 0 1-3.7-3.7L3.5 6.8" /><path d="M10.1 4.9l1.4-1.4a2.6 2.6 0 0 1 3.7 3.7l-2.1 2.1" /></Glyph>
+)
+
 export const LockIcon = ({ size, className }: { size?: number; className?: string }) => (
   <Glyph size={size} className={className}><rect x="3.6" y="7.2" width="8.8" height="6" rx="1.4" /><path d="M5.6 7.2V5.4a2.4 2.4 0 0 1 4.8 0v1.8" /></Glyph>
 )

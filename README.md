@@ -75,18 +75,20 @@ A **DeepSeek Harness** appearance plugin that lets you fully customize the Web U
 
 ## Recent Optimizations
 
+### v0.2.3
+
+- **Network URL wallpaper** — Paste an image URL and the plugin downloads it and writes it to the local wallpaper file (replacing the previous image). Because the remote source lands as a local persisted file, theme export/import keep working with no extra steps: an exported theme embeds the image data, and the receiving side never needs access to the original URL.
+- **Editor confirm button visible in dark mode** — The background-editor "Confirm" button now matches the Cancel/Reset buttons (solid surface with a clear frame and legible label) instead of a translucent primary tint, so it no longer disappears in dark themes.
+- **Maintenance cleanup** — Removed an unused `@deepseek-ai/dsh-client-ui-renderer` entry from the client inject list and aligned self-owned RPC error codes with the new harness convention.
+
 ### v0.2.2
 
 - **Dark host surfaces fully themed** — Message bubbles, setting-box inputs/cards, selectors, ghost/toolbar buttons, and module-platform surfaces now carry explicit dark tokens, eliminating white-on-white and white-icon-on-bright bugs across the conversation view, settings page, and interactive controls.
 - **Refresh white-flash eliminated** — A theme-reset watcher re-asserts the plugin's forced scheme within the same frame the host re-applies its light `:root/body` rules; the `!important` token stylesheet survives host theme resets, so entering, refreshing, and set-changes no longer paint a white frame.
 - **Brand badge & code banner contrast** — The sidebar brand badge and the code-block info banner now use dark surfaces with legible labels and icons.
 - **Placeholder reads as a hint** — The composer placeholder is rendered with the weak caption token and italic styling, clearly distinct from real input text.
+- **Wide tables stay in the column** — When the chat region opacity/blur is raised (which makes the chat border visible), wide markdown tables are pulled back inside the text column and scroll horizontally at the border instead of bleeding past it. Left untouched while the border is invisible, preserving DSH's default behavior.
 - **Dual harness compatibility** — `defineStore` is resolved through a runtime adapter that prefers the new `@deepseek-ai/dsh-client-store` and falls back to the legacy `@deepseek-ai/dsh-client-runtime/client`. A single bundle loads on both the npm release and the new deepseek-harness source, with no "missed the module table" boot failure.
-
-### v0.2.1
-
-- **Instant video playback on import** — A picked video starts playing immediately from a local object URL while its raw bytes stream to disk in the background; the persisted serve URL takes over on the next reload — no upload + first-buffer wait after import.
-- **Option boxes follow the card slider** — The dropdowns, slash-trigger menu, model selector, and popovers around the dialog now follow the "Cards & panels" opacity slider instead of "Input & controls"; the Cordis panel keeps its own input-slider binding.
 
 ## Installation
 

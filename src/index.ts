@@ -25,6 +25,10 @@ const WALLPAPER_FILE = 'wallpaper.jpg'
 const VIDEO_ROUTE = '/dsh-any-background/video'
 const UPLOAD_ROUTE = '/dsh-any-background/video/upload'
 const UPLOAD_TMP = 'wallpaper.upload.tmp'
+// Network-URL wallpaper fetch: cap the download and time it out so a bad link
+// can't stall the UI or fill the drive.
+const WALLPAPER_FETCH_MAX = 25 * 1024 * 1024
+const WALLPAPER_FETCH_TIMEOUT = 20_000
 
 function videoFileName(mime: string | null): string {
   switch (mime) {
@@ -270,6 +274,53 @@ async function writeWallpaper(dataUrl: string | null): Promise<boolean> {
   }
 }
 
+/** Sniff an image's MIME from its leading magic bytes (defaults to JPEG). */
+function sniffImageMime(buf: Buffer): string {
+  if (buf.length >= 4 && buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) return 'image/png'
+  if (buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return 'image/jpeg'
+  if (buf.length >= 6 && buf[0] === 0x47 && buf[1] === 0x49 && buf[2] === 0x46) return 'image/gif'
+  if (buf.length >= 12 && buf[0] === 0x52 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x46 && buf[8] === 0x57 && buf[9] === 0x45 && buf[10] === 0x42 && buf[11] === 0x50) return 'image/webp'
+  return 'image/jpeg'
+}
+
+/** Download a wallpaper from a network URL and persist it into the local
+ *  wallpaper.jpg slot (replacing whatever was stored), so type switches,
+ *  export and import keep working through the existing data-URL path.
+ *  null removes the wallpaper. Returns { ok, dataUrl?, error? }. */
+async function writeWallpaperFromUrl(url: string | null): Promise<{ ok: boolean; dataUrl?: string | null; error?: string }> {
+  if (url === null) {
+    const ok = await writeWallpaper(null)
+    return { ok, dataUrl: null, error: ok ? undefined : 'remove failed' }
+  }
+  let u: URL
+  try { u = new URL(url) } catch { return { ok: false, error: 'invalid url' } }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') return { ok: false, error: 'unsupported scheme' }
+  let res: Response
+  try {
+    const ctl = new AbortController()
+    const timer = setTimeout(() => ctl.abort(), WALLPAPER_FETCH_TIMEOUT)
+    try { res = await fetch(url, { redirect: 'follow', signal: ctl.signal }) }
+    finally { clearTimeout(timer) }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error && e.name === 'AbortError' ? 'timeout' : 'network error' }
+  }
+  if (!res.ok) return { ok: false, error: `http ${res.status}` }
+  const ct = res.headers.get('content-type') ?? ''
+  if (ct && !/^image\//.test(ct)) return { ok: false, error: 'not an image' }
+  let buf: Buffer
+  try {
+    const arr = await res.arrayBuffer()
+    if (arr.byteLength === 0) return { ok: false, error: 'empty response' }
+    if (arr.byteLength > WALLPAPER_FETCH_MAX) return { ok: false, error: 'too large' }
+    buf = Buffer.from(arr)
+  } catch {
+    return { ok: false, error: 'read failed' }
+  }
+  const dataUrl = `data:${sniffImageMime(buf)};base64,${buf.toString('base64')}`
+  const ok = await writeWallpaper(dataUrl)
+  return ok ? { ok: true, dataUrl } : { ok: false, error: 'write failed' }
+}
+
 async function videoUrl(): Promise<string | null> {
   return (await findVideoFile()) ? VIDEO_ROUTE : null
 }
@@ -430,11 +481,13 @@ export function apply(ctx: any): void {
             return { ok: true, value: await writeWallpaper((payload?.dataUrl ?? null) as string | null) }
           case 'setVideo':
             return { ok: true, value: await writeVideo((payload?.dataUrl ?? null) as string | null) }
+          case 'setWallpaperUrl':
+            return { ok: true, value: await writeWallpaperFromUrl((payload?.url ?? null) as string | null) }
           default:
-            return { ok: false, error: { code: 'bad-request', message: `unknown endpoint ${ep}`, details: { issues: [] } } }
-        }
-      } catch (e) {
-        return { ok: false, error: { code: 'internal', message: e instanceof Error ? e.message : String(e), details: {} } }
+            return { ok: false, error: { code: 'dsh-any-background/bad-request', message: `unknown endpoint ${ep}`, details: { issues: [] } } }
+          }
+        } catch (e) {
+        return { ok: false, error: { code: 'dsh-any-background/internal', message: e instanceof Error ? e.message : String(e), details: {} } }
       }
     },
     { authority: 'trusted-host' },

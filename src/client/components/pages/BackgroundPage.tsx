@@ -2,13 +2,13 @@ import { useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import type { ThemeSectionProps, ThemeStoreState, BackgroundType, GeneratedBgParams, BgMode } from '../../types'
 import { cfg, rWop, rBl, rBgMode } from '../../state'
-import { saveConfig } from '../../rpc'
+import { saveConfig, setWallpaperFromUrl } from '../../rpc'
 import { applyWp, setWpOpacity, setWpBlur } from '../../wallpaper'
 import { readImg } from '../../utils/image'
 import { defaultParamsFor } from '../../utils/bg-generators'
 import { BgEditor } from '../BgEditor'
 import { LiveSlider } from '../LiveSlider'
-import { LockIcon, CheckIcon, PhotoIcon, RefreshIcon, SparkleIcon, TrashIcon, UploadIcon, EditIcon, VideoIcon } from '../icons'
+import { LockIcon, CheckIcon, PhotoIcon, RefreshIcon, SparkleIcon, TrashIcon, UploadIcon, EditIcon, VideoIcon, LinkIcon } from '../icons'
 
 const SEG_W = 108
 const BG_MODES: Array<{ mode: BgMode; labelKey: string }> = [
@@ -31,6 +31,10 @@ export function BackgroundPage({ p }: { p: ThemeSectionProps }) {
   const [editorOpen, setEditorOpen] = useState(false)
   const [dragOver, setDragOver] = useState(false)
   const [spinTick, setSpinTick] = useState(0)
+  const [urlOpen, setUrlOpen] = useState(false)
+  const [urlVal, setUrlVal] = useState('')
+  const [urlBusy, setUrlBusy] = useState(false)
+  const [urlErr, setUrlErr] = useState<string | null>(null)
   // Layout mode is owned by cfg (persisted on click); local mirror only so
   // the chip row re-renders on selection.
   const [mode, setModeState] = useState<BgMode>(rBgMode())
@@ -58,6 +62,26 @@ export function BackgroundPage({ p }: { p: ThemeSectionProps }) {
     setDragOver(false)
     const f = e.dataTransfer.files?.[0]
     if (f && (f.type.startsWith('image/') || f.type.startsWith('video/'))) onFileSelect(f)
+  }
+
+  const applyUrl = async () => {
+    const u = urlVal.trim()
+    if (!/^https?:\/\//i.test(u)) { setUrlErr(t('bgUrlBadHttp')); return }
+    setUrlBusy(true)
+    setUrlErr(null)
+    const r = await setWallpaperFromUrl(u)
+    setUrlBusy(false)
+    if (r.ok) {
+      // The host already replaced the local wallpaper file; setWp just
+      // switches the theme to image mode and applies the stored data-URL.
+      setWp(r.dataUrl ?? null)
+      setUrlOpen(false)
+      setUrlVal('')
+    } else {
+      setUrlErr(r.error === 'invalid url' || r.error === 'unsupported scheme'
+        ? t('bgUrlBadHttp')
+        : (r.error ?? t('bgUrlFail')))
+    }
   }
 
   const switchToStatic = () => {
@@ -174,6 +198,9 @@ export function BackgroundPage({ p }: { p: ThemeSectionProps }) {
             <button type="button" className="dab-btn dab-btn-primary" onClick={() => fileRef.current?.click()}>
               <UploadIcon size={14} />{t('bgChoose')}
             </button>
+            <button type="button" className="dab-btn dab-btn-ghost" onClick={() => setUrlOpen(o => !o)}>
+              <LinkIcon size={14} />{t('bgFromUrl')}
+            </button>
             {storeUrl || isVideo ? (
               <>
                 {isStatic && storeUrl ? (
@@ -189,6 +216,23 @@ export function BackgroundPage({ p }: { p: ThemeSectionProps }) {
               </>
             ) : null}
           </div>
+          {urlOpen ? (
+            <div className="dab-urlrow" style={{ marginTop: 12, display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+              <input type="text" className="dab-urlinput" value={urlVal} placeholder={t('bgUrlPlaceholder')}
+                onChange={e => setUrlVal(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); void applyUrl() } }}
+                autoFocus />
+              <button type="button" className="dab-btn dab-btn-primary" disabled={urlBusy} onClick={() => void applyUrl()}>
+                {urlBusy ? t('bgUrlApplying') : t('bgUrlApply')}
+              </button>
+              <button type="button" className="dab-btn" onClick={() => { setUrlOpen(false); setUrlVal(''); setUrlErr(null) }}>
+                {t('bgUrlCancel')}
+              </button>
+            </div>
+          ) : null}
+          {urlErr ? (
+            <p className="dab-urlerr" style={{ marginTop: 8, color: 'var(--dsw-alias-state-error-primary)', fontSize: 12 }}>{urlErr}</p>
+          ) : null}
           {/* Adaptive placement for image/video backgrounds. "fit" keeps the
               editor-committed framing; the pan/zoom editor only applies there. */}
           <div style={{ marginTop: 16 }}>
