@@ -63,6 +63,61 @@ export type BackgroundType = 'image' | 'video' | 'mesh' | 'shader' | 'pattern'
 /** Adaptive placement of a static (image/video) background. */
 export type BgMode = 'fit' | 'fill' | 'stretch' | 'tile' | 'center'
 
+/** Forced interface scheme: 'auto' derives light/dark from the color's lightness. */
+export type SchemeOverride = 'auto' | 'light' | 'dark'
+
+/** Appearance-only snapshot a saved profile (or built-in preset) restores.
+ *  Wallpaper files are machine-local and deliberately excluded. */
+export interface ProfileAppearance {
+  color: [number, number, number] | null
+  opacities: PartOpacities
+  blurs: PartBlurs
+  settingsOpacity: number
+  wallpaperOpacity: number
+  blur: number
+  chatTextOpacity: number
+  trajectoryOpacity: number
+}
+
+/** A named, saved appearance profile. */
+export interface ProfileEntry {
+  id: string
+  name: string
+  createdAt: string
+  config: ProfileAppearance
+}
+
+/** One candidate wallpaper in the rotation pool (server-side file + thumbnail). */
+export interface RotationItem {
+  file: string
+  thumb: string
+}
+
+/** Wallpaper rotation pool + cadence. Advancing copies the chosen file into
+ *  the active wallpaper slot, so the rest of the pipeline is untouched. */
+export interface RotationConfig {
+  enabled: boolean
+  mode: 'shuffle' | 'order'
+  interval: 'reload' | 'daily' | 'weekly'
+  /** Index of the item currently active. */
+  current: number
+  items: RotationItem[]
+  /** ISO timestamp of the last automatic advance (drives daily/weekly cadence). */
+  lastRotate: string | null
+}
+
+/** Day/night profile auto-switch schedule. */
+export interface ScheduleConfig {
+  enabled: boolean
+  /** 'time' switches at fixed clock times; 'system' follows prefers-color-scheme. */
+  mode: 'time' | 'system'
+  dayProfile: string | null
+  nightProfile: string | null
+  /** HH:MM — the day profile applies from dayStart until nightStart. */
+  dayStart: string
+  nightStart: string
+}
+
 export interface MeshGradientParams {
   type: 'mesh'
   seed: number
@@ -136,6 +191,16 @@ export interface ThemeConfig {
   chatTextOpacity: number
   /** Translucent tint over the trajectory view surface (0 = none, 1 = solid). */
   trajectoryOpacity: number
+  /** Saved appearance profiles. */
+  profiles: ProfileEntry[]
+  /** Wallpaper rotation pool + cadence. */
+  rotation: RotationConfig
+  /** Day/night profile auto-switch schedule. */
+  schedule: ScheduleConfig
+  /** Forced interface scheme. */
+  schemeOverride: SchemeOverride
+  /** Id of the profile last applied. */
+  activeProfile: string | null
 }
 
 /** State shape of the section's reactive store (URL, color, background type). */
@@ -148,6 +213,13 @@ export interface ThemeStoreState {
   generatedBg: GeneratedBgParams | null
   bgRev: number
   regenerateOnReload: boolean
+  /** Config metadata snapshot (profiles / rotation / schedule / scheme). */
+  profiles: ProfileEntry[]
+  rotation: RotationConfig
+  schedule: ScheduleConfig
+  schemeOverride: SchemeOverride
+  activeProfile: string | null
+  metaRev: number
 }
 
 /** Props the slots host injects into the theme section. */
@@ -174,6 +246,26 @@ export interface ThemeSectionProps {
   regenerateBg: () => void
   setRegenerateOnReload: (v: boolean) => void
   extractColor: () => Promise<boolean>
+  /** Save the current appearance as a named profile. */
+  saveProfile: (name: string) => boolean
+  /** Apply a saved profile by id. */
+  applyProfile: (id: string) => boolean
+  /** Delete a saved profile by id. */
+  deleteProfile: (id: string) => boolean
+  /** Apply a built-in preset's appearance bundle. */
+  applyPreset: (appearance: ProfileAppearance) => void
+  /** Force the interface scheme ('auto' derives it from the color lightness). */
+  setSchemeOverride: (v: SchemeOverride) => void
+  /** Patch the day/night schedule config. */
+  setSchedule: (patch: Partial<ScheduleConfig>) => void
+  /** Patch the wallpaper rotation config (mode/interval/enabled). */
+  setRotation: (patch: Partial<RotationConfig>) => void
+  /** Add image files to the rotation pool. */
+  addRotationItems: (files: File[]) => Promise<boolean>
+  /** Remove a rotation item by index. */
+  removeRotationItem: (index: number) => Promise<boolean>
+  /** Immediately advance the rotation to the next item. */
+  rotateNow: () => Promise<boolean>
   /** Download the current theme (config + wallpaper data URL) as JSON. */
   exportTheme: () => void
   /** Import a theme JSON: applies config + wallpaper and persists to disk. */
@@ -185,6 +277,7 @@ export interface ThemeSectionProps {
 export interface BoundActions {
   syncBg: (url: string | null, rev: number, backgroundType?: BackgroundType, generatedBg?: GeneratedBgParams | null, bgRev?: number, regenerateOnReload?: boolean) => void
   syncColor: (hsv: [number, number, number], rev: number) => void
+  syncMeta: (profiles: ProfileEntry[], rotation: RotationConfig, schedule: ScheduleConfig, schemeOverride: SchemeOverride, activeProfile: string | null, rev: number) => void
 }
 
 export interface RpcResultLike { ok: boolean; value?: any; error?: any }

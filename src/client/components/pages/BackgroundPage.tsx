@@ -8,7 +8,7 @@ import { readImg } from '../../utils/image'
 import { defaultParamsFor } from '../../utils/bg-generators'
 import { BgEditor } from '../BgEditor'
 import { LiveSlider } from '../LiveSlider'
-import { LockIcon, CheckIcon, PhotoIcon, RefreshIcon, SparkleIcon, TrashIcon, UploadIcon, EditIcon, VideoIcon, LinkIcon } from '../icons'
+import { LockIcon, CheckIcon, PhotoIcon, RefreshIcon, SparkleIcon, TrashIcon, UploadIcon, EditIcon, VideoIcon, LinkIcon, PlusIcon, XIcon } from '../icons'
 
 const SEG_W = 108
 const BG_MODES: Array<{ mode: BgMode; labelKey: string }> = [
@@ -20,17 +20,20 @@ const BG_MODES: Array<{ mode: BgMode; labelKey: string }> = [
 ]
 
 export function BackgroundPage({ p }: { p: ThemeSectionProps }) {
-  const { t, setWp, setVideo, setWop, setBl, setBgType, setGeneratedBg, regenerateBg, setRegenerateOnReload, useStore } = p
+  const { t, setWp, setVideo, setWop, setBl, setBgType, setGeneratedBg, regenerateBg, setRegenerateOnReload, setRotation, addRotationItems, removeRotationItem, rotateNow, useStore } = p
   const store = useStore((s: ThemeStoreState) => s)
   const storeUrl = store.url
   const backgroundType = store.backgroundType
   const generatedBg = store.generatedBg
   const regenerateOnReload = store.regenerateOnReload
+  const rotation = store.rotation
 
   const fileRef = useRef<HTMLInputElement>(null)
+  const rotFileRef = useRef<HTMLInputElement>(null)
   const [editorOpen, setEditorOpen] = useState(false)
   const [dragOver, setDragOver] = useState(false)
   const [spinTick, setSpinTick] = useState(0)
+  const [rotBusy, setRotBusy] = useState(false)
   const [urlOpen, setUrlOpen] = useState(false)
   const [urlVal, setUrlVal] = useState('')
   const [urlBusy, setUrlBusy] = useState(false)
@@ -193,7 +196,8 @@ export function BackgroundPage({ p }: { p: ThemeSectionProps }) {
 
       {/* Mode content */}
       {!isGenerated ? (
-        <section className="dab-card dab-card-hover dab-rise" style={{ '--d': 3 } as CSSProperties}>
+        <>
+      <section className="dab-card dab-card-hover dab-rise" style={{ '--d': 3 } as CSSProperties}>
           <div className="dab-chip-row">
             <button type="button" className="dab-btn dab-btn-primary" onClick={() => fileRef.current?.click()}>
               <UploadIcon size={14} />{t('bgChoose')}
@@ -247,6 +251,60 @@ export function BackgroundPage({ p }: { p: ThemeSectionProps }) {
             </div>
           </div>
         </section>
+
+        {/* Wallpaper rotation pool */}
+        <section className="dab-card dab-rise" style={{ '--d': 4 } as CSSProperties}>
+          <div className="dab-row-head">
+            <div className="dab-swatch-title" style={{ marginBottom: 0 }}>{t('rotTitle')}</div>
+            <button type="button" className={`dab-toggle${rotation.enabled ? ' is-on' : ''}`} role="switch" aria-checked={rotation.enabled}
+              onClick={() => setRotation({ enabled: !rotation.enabled })}>
+              <span className="dab-toggle-knob" />
+            </button>
+          </div>
+          <p className="dab-hint" style={{ marginTop: 8 }}>{t('rotHint')}</p>
+          <div className="dab-thumbstrip">
+            {rotation.items.map((it, i) => (
+              <div key={it.file} className={`dab-thumb${rotation.enabled && i === rotation.current ? ' is-current' : ''}`}>
+                {it.thumb ? <img src={it.thumb} alt="" draggable={false} /> : <PhotoIcon size={15} />}
+                <button type="button" className="dab-thumb-x" title={t('rotRemove')}
+                  disabled={rotBusy} onClick={() => { setRotBusy(true); void removeRotationItem(i).finally(() => setRotBusy(false)) }}>
+                  <XIcon size={10} />
+                </button>
+              </div>
+            ))}
+            <button type="button" className="dab-thumb dab-thumb-add" title={t('rotAdd')} disabled={rotBusy}
+              onClick={() => rotFileRef.current?.click()}>
+              <PlusIcon size={16} />
+            </button>
+          </div>
+          {rotation.items.length > 0 ? (
+            <div className="dab-chip-row" style={{ marginTop: 12 }}>
+              <button type="button" className={`dab-chip${rotation.mode === 'shuffle' ? ' is-active' : ''}`}
+                onClick={() => setRotation({ mode: 'shuffle' })}>{t('rotShuffle')}</button>
+              <button type="button" className={`dab-chip${rotation.mode === 'order' ? ' is-active' : ''}`}
+                onClick={() => setRotation({ mode: 'order' })}>{t('rotOrder')}</button>
+              <span className="dab-chip-sep" />
+              <button type="button" className={`dab-chip${rotation.interval === 'reload' ? ' is-active' : ''}`}
+                onClick={() => setRotation({ interval: 'reload' })}>{t('rotReload')}</button>
+              <button type="button" className={`dab-chip${rotation.interval === 'daily' ? ' is-active' : ''}`}
+                onClick={() => setRotation({ interval: 'daily' })}>{t('rotDaily')}</button>
+              <button type="button" className={`dab-chip${rotation.interval === 'weekly' ? ' is-active' : ''}`}
+                onClick={() => setRotation({ interval: 'weekly' })}>{t('rotWeekly')}</button>
+              <button type="button" className="dab-btn" disabled={rotBusy}
+                onClick={() => { setRotBusy(true); void rotateNow().finally(() => setRotBusy(false)) }}>
+                <RefreshIcon size={13} />{t('rotNow')}
+              </button>
+            </div>
+          ) : null}
+          <input ref={rotFileRef} type="file" accept="image/*" multiple style={{ display: 'none' }} onChange={e => {
+            const files = Array.from(e.target.files ?? [])
+            e.target.value = ''
+            if (files.length === 0) return
+            setRotBusy(true)
+            void addRotationItems(files).finally(() => setRotBusy(false))
+          }} />
+        </section>
+        </>
       ) : (
         <section className="dab-card dab-rise" style={{ '--d': 3 } as CSSProperties}>
           {/* Type cards with animated thumbnails */}
@@ -339,7 +397,7 @@ export function BackgroundPage({ p }: { p: ThemeSectionProps }) {
       )}
 
       {/* Global wallpaper adjustments */}
-      <section className="dab-card dab-card-hover dab-rise" style={{ '--d': 4 } as CSSProperties}>
+      <section className="dab-card dab-card-hover dab-rise" style={{ '--d': 5 } as CSSProperties}>
         <LiveSlider label={t('wpOpacity')} min={0} max={100} step={1} def={Math.round(rWop() * 100)}
           fmt={v => `${v}%`}
           onInput={v => { const op = v / 100; cfg.wallpaperOpacity = op; setWpOpacity(op); saveConfig() }}

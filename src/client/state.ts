@@ -1,4 +1,4 @@
-import type { BgState, ThemeConfig, PartOpacities, PartBlurs, BgMode } from './types'
+import type { BgState, ThemeConfig, PartOpacities, PartBlurs, BgMode, ProfileEntry, RotationConfig, RotationItem, ScheduleConfig, SchemeOverride, ProfileAppearance } from './types'
 
 export const DEFAULT_CONFIG: ThemeConfig = {
   color: null,
@@ -17,6 +17,11 @@ export const DEFAULT_CONFIG: ThemeConfig = {
   chatTextOpacity: 0,
   // 100% = untouched host surface; zero would blank the page by default.
   trajectoryOpacity: 1,
+  profiles: [],
+  rotation: { enabled: false, mode: 'shuffle', interval: 'daily', current: 0, items: [], lastRotate: null },
+  schedule: { enabled: false, mode: 'time', dayProfile: null, nightProfile: null, dayStart: '07:00', nightStart: '19:00' },
+  schemeOverride: 'auto',
+  activeProfile: null,
 }
 
 const clamp01 = (n: unknown, def: number): number =>
@@ -113,9 +118,124 @@ export function rSop(): number { return clamp01(cfg.settingsOpacity, DEFAULT_CON
 export function rBgState(): BgState { return cfg.bgState }
 export function rVideoBgState(): BgState { return cfg.videoBgState }
 
+// ── Profiles / rotation / schedule / scheme ──────────────────────────────────
+export function rProfiles(): ProfileEntry[] { return Array.isArray(cfg.profiles) ? cfg.profiles : [] }
+export function rRotation(): RotationConfig {
+  const r = cfg.rotation
+  return r && typeof r === 'object'
+    ? { ...DEFAULT_CONFIG.rotation, ...r, items: Array.isArray(r.items) ? r.items : [] }
+    : { ...DEFAULT_CONFIG.rotation, items: [] }
+}
+export function rSchedule(): ScheduleConfig {
+  return cfg.schedule && typeof cfg.schedule === 'object' ? { ...DEFAULT_CONFIG.schedule, ...cfg.schedule } : { ...DEFAULT_CONFIG.schedule }
+}
+export function rSchemeOverride(): SchemeOverride {
+  return cfg.schemeOverride === 'light' || cfg.schemeOverride === 'dark' ? cfg.schemeOverride : 'auto'
+}
+export function rActiveProfile(): string | null { return cfg.activeProfile }
+
+/** Effective interface scheme: a forced override wins; otherwise the active
+ *  background's brightness verdict (the text sits on the wallpaper), then the
+ *  picked color's lightness. Without any of those, stay light. All genTokens
+ *  call sites pass this so the palette and the scheme flag never diverge. */
+export function rScheme(): 'light' | 'dark' {
+  const o = rSchemeOverride()
+  if (o !== 'auto') return o
+  const dark = rBgDark() ?? (rHasColor() ? rColor()[2] < 0.55 : false)
+  return dark ? 'dark' : 'light'
+}
+
+/** Snapshot of the appearance fields a profile/preset restores. */
+export function currentAppearance(): ProfileAppearance {
+  return {
+    color: cfg.color,
+    opacities: { ...rOps() },
+    blurs: { ...rBlurs() },
+    settingsOpacity: rSop(),
+    wallpaperOpacity: rWop(),
+    blur: rBl(),
+    chatTextOpacity: rChatTextOpacity(),
+    trajectoryOpacity: rTrajectoryOpacity(),
+  }
+}
+
+/** Apply an appearance snapshot onto cfg (meta fields untouched). */
+export function applyAppearance(ap: ProfileAppearance): void {
+  cfg.color = Array.isArray(ap.color) && ap.color.length === 3 ? [...ap.color] as [number, number, number] : null
+  cfg.opacities = { ...DEFAULT_CONFIG.opacities, ...(ap.opacities ?? {}) }
+  cfg.blurs = { ...DEFAULT_CONFIG.blurs, ...(ap.blurs ?? {}) }
+  cfg.settingsOpacity = clamp01(ap.settingsOpacity, DEFAULT_CONFIG.settingsOpacity)
+  cfg.wallpaperOpacity = clamp01(ap.wallpaperOpacity, DEFAULT_CONFIG.wallpaperOpacity)
+  cfg.blur = typeof ap.blur === 'number' ? Math.min(60, Math.max(0, ap.blur)) : DEFAULT_CONFIG.blur
+  cfg.chatTextOpacity = clamp01(ap.chatTextOpacity, DEFAULT_CONFIG.chatTextOpacity)
+  cfg.trajectoryOpacity = clamp01(ap.trajectoryOpacity, DEFAULT_CONFIG.trajectoryOpacity)
+}
+
 const num = (n: unknown, def: number): number => typeof n === 'number' ? n : def
 const cl = (n: unknown, lo: number, hi: number, def: number): number =>
   typeof n === 'number' ? Math.min(hi, Math.max(lo, n)) : def
+
+const HHMM_RE = /^([01]\d|2[0-3]):[0-5]\d$/
+
+function adoptProfiles(raw: unknown): ProfileEntry[] {
+  if (!Array.isArray(raw)) return []
+  const out: ProfileEntry[] = []
+  for (const item of raw.slice(0, 20)) {
+    const p = (item ?? {}) as Partial<ProfileEntry>
+    if (typeof p.id !== 'string' || p.id.length === 0 || p.id.length > 64) continue
+    if (out.some(e => e.id === p.id)) continue
+    const ac = (p.config ?? {}) as Partial<ProfileAppearance>
+    out.push({
+      id: p.id,
+      name: typeof p.name === 'string' && p.name.trim() ? p.name.slice(0, 60) : 'Profile',
+      createdAt: typeof p.createdAt === 'string' ? p.createdAt : '',
+      config: {
+        color: Array.isArray(ac.color) && ac.color.length === 3 ? [...ac.color] as [number, number, number] : null,
+        opacities: { ...DEFAULT_CONFIG.opacities, ...(ac.opacities ?? {}) },
+        blurs: { ...DEFAULT_CONFIG.blurs, ...(ac.blurs ?? {}) },
+        settingsOpacity: clamp01(ac.settingsOpacity, DEFAULT_CONFIG.settingsOpacity),
+        wallpaperOpacity: clamp01(ac.wallpaperOpacity, DEFAULT_CONFIG.wallpaperOpacity),
+        blur: num(ac.blur, DEFAULT_CONFIG.blur),
+        chatTextOpacity: clamp01(ac.chatTextOpacity, DEFAULT_CONFIG.chatTextOpacity),
+        trajectoryOpacity: clamp01(ac.trajectoryOpacity, DEFAULT_CONFIG.trajectoryOpacity),
+      },
+    })
+  }
+  return out
+}
+
+function adoptRotation(raw: unknown): RotationConfig {
+  const r = (raw ?? {}) as Partial<RotationConfig>
+  const items: RotationItem[] = Array.isArray(r.items)
+    ? r.items
+      .filter((it): it is RotationItem => {
+        const i = (it ?? {}) as Partial<RotationItem>
+        return typeof i?.file === 'string' && /^[\w-]+\.(jpg|jpeg|png|gif|webp)$/i.test(i.file)
+      })
+      .slice(0, 30)
+      .map(it => ({ file: it.file, thumb: typeof it.thumb === 'string' && it.thumb.startsWith('data:image/') && it.thumb.length <= 65536 ? it.thumb : '' }))
+    : []
+  return {
+    enabled: r.enabled === true,
+    mode: r.mode === 'order' ? 'order' : 'shuffle',
+    interval: r.interval === 'reload' || r.interval === 'weekly' ? r.interval : 'daily',
+    current: num(r.current, 0),
+    items,
+    lastRotate: typeof r.lastRotate === 'string' ? r.lastRotate : null,
+  }
+}
+
+function adoptSchedule(raw: unknown): ScheduleConfig {
+  const r = (raw ?? {}) as Partial<ScheduleConfig>
+  return {
+    enabled: r.enabled === true,
+    mode: r.mode === 'system' ? 'system' : 'time',
+    dayProfile: typeof r.dayProfile === 'string' ? r.dayProfile : null,
+    nightProfile: typeof r.nightProfile === 'string' ? r.nightProfile : null,
+    dayStart: typeof r.dayStart === 'string' && HHMM_RE.test(r.dayStart) ? r.dayStart : DEFAULT_CONFIG.schedule.dayStart,
+    nightStart: typeof r.nightStart === 'string' && HHMM_RE.test(r.nightStart) ? r.nightStart : DEFAULT_CONFIG.schedule.nightStart,
+  }
+}
 
 function adoptBgState(s: Partial<BgState>): BgState {
   return {
@@ -172,6 +292,11 @@ export function adoptConfig(raw: unknown): void {
     regenerateOnReload: typeof c.regenerateOnReload === 'boolean' ? c.regenerateOnReload : DEFAULT_CONFIG.regenerateOnReload,
     chatTextOpacity: clamp01(c.chatTextOpacity, DEFAULT_CONFIG.chatTextOpacity),
     trajectoryOpacity: clamp01(c.trajectoryOpacity, DEFAULT_CONFIG.trajectoryOpacity),
+    profiles: adoptProfiles(c.profiles),
+    rotation: adoptRotation(c.rotation),
+    schedule: adoptSchedule(c.schedule),
+    schemeOverride: c.schemeOverride === 'light' || c.schemeOverride === 'dark' ? c.schemeOverride : 'auto',
+    activeProfile: typeof c.activeProfile === 'string' ? c.activeProfile : null,
   }
 }
 

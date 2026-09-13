@@ -109,3 +109,19 @@ export const InputIcon = ({ size, className }: { size?: number; className?: stri
   <Glyph size={size} className={className}><rect x="2.2" y="4" width="11.6" height="8" rx="2" /><path d="M8 6.6v2M7 8h2" /></Glyph>
 )
 
+export const PlusIcon = ({ size, className }: { size?: number; className?: string }) => (
+  <Glyph size={size} className={className}><path d="M8 3v10M3 8h10" /></Glyph>
+)
+
+export const MoonIcon = ({ size, className }: { size?: number; className?: string }) => (
+  <Glyph size={size} className={className}><path d="M13.2 9.6A5.6 5.6 0 0 1 6.4 2.8a5.6 5.6 0 1 0 6.8 6.8z" /></Glyph>
+)
+
+export const ClockIcon = ({ size, className }: { size?: number; className?: string }) => (
+  <Glyph size={size} className={className}><circle cx="8" cy="8" r="5.8" /><path d="M8 4.8V8l2.2 1.6" /></Glyph>
+)
+
+export const XIcon = ({ size, className }: { size?: number; className?: string }) => (
+  <Glyph size={size} className={className}><path d="M4 4l8 8M12 4l-8 8" /></Glyph>
+)
+

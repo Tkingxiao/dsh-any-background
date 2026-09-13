@@ -1,4 +1,4 @@
-import { rWp, rWpImage, rWpVideo, rBgState, rVideoBgState, rBl, rWop, rOps, rSop, rColor, rHasColor, rBlurs, rBgMode, rChatTextOpacity, rTrajectoryOpacity, cfg, setWpUrl, rBgDark, setBgDark, disposeVideoObjectUrl } from './state'
+import { rWp, rWpImage, rWpVideo, rBgState, rVideoBgState, rBl, rWop, rOps, rSop, rColor, rHasColor, rBlurs, rBgMode, rChatTextOpacity, rTrajectoryOpacity, rScheme, rSchemeOverride, cfg, setWpUrl, rBgDark, setBgDark, disposeVideoObjectUrl } from './state'
 import type { BackgroundType, GeneratedBgParams, PartOpacities, PartBlurs } from './types'
 import { genTokens, toRgba, extractWallpaperColor, analyzeFrameDark } from './utils/color'
 import { createDynamicBackground, defaultParamsFor } from './utils/bg-generators'
@@ -36,11 +36,22 @@ function clearCustomTokens(): void {
   appliedTokenNames = []
 }
 
-/** Label tokens flipped by the generated-background brightness verdict. The
- *  faint tiers (caption/dimmed) are deliberately NOT flipped: they back
- *  placeholder/hint text, which must stay visibly weaker than real input even
- *  when the wallpaper brightness flips the main label direction. */
-const LABEL_TOKENS = [
+/** Drop every applied custom token and forget the token fingerprint, so a
+ *  later color-less profile (system theme) leaves no stale rule behind. */
+export function clearThemeTokens(): void {
+  clearCustomTokens()
+  baseTokenKey = ''
+  lastBgKey = ''
+  document.body.removeAttribute('data-ds-dark-theme')
+  document.body.style.removeProperty('color-scheme')
+}
+
+/** Label tokens flipped by the background brightness verdict. The faint tiers
+ *  (caption/dimmed) are deliberately NOT flipped: they back placeholder/hint
+ *  text, which must stay visibly weaker than real input even when the wallpaper
+ *  brightness flips the main label direction. Exported so the skin registration
+ *  (index) can flip fonts through the host theme service too. */
+export const LABEL_TOKENS = [
   '--dsw-alias-label-primary',
   '--dsw-alias-label-secondary',
   '--dsw-alias-label-tertiary',
@@ -102,22 +113,43 @@ export function applyCustomTokens(ops: PartOpacities): void {
 // baseTokenKey + ops.bg so a sidebar/card/input drag never rewrites them.
 let lastBgKey = ''
 
+/** Palette source for the token rule: the picked color; a forced scheme
+ *  without a picked color builds a neutral near-gray palette in that
+ *  direction; auto without a color keeps the host's own palette (null — only
+ *  the label direction gets asserted). */
+function paletteTokens(): Record<string, string> | null {
+  const scheme = rScheme()
+  if (rHasColor()) {
+    const [h, s, l] = rColor()
+    return genTokens(h, s, l, scheme).tokens
+  }
+  if (rSchemeOverride() !== 'auto') {
+    return genTokens(220, 0.04, scheme === 'dark' ? 0.14 : 0.92, scheme).tokens
+  }
+  return null
+}
+
 function applyCustomTokensNow(ops: PartOpacities): void {
+  const hasColor = rHasColor()
+  const override = rSchemeOverride()
   const [h, s, l] = rColor()
-  let { tokens } = genTokens(h, s, l)
+  const scheme = rScheme()
+  const verdict = rBgDark()
+  const palette = paletteTokens()
+  // Clone: the verdict below mutates, and genTokens' result is cached/shared.
+  const tokens: Record<string, string> = { ...palette }
+  // The background brightness verdict (wallpaper frame or generated frame)
+  // owns the label direction while the scheme is automatic — the text sits on
+  // the background, so its actual brightness wins over any heuristic.
+  if (verdict !== null && override === 'auto') {
+    const font = verdict ? '#fff' : '#000'
+    for (const name of LABEL_TOKENS) tokens[name] = font
+  }
   try {
-    // The generated background's brightness verdict overrides only the font
-    // direction; genTokens' result is cached and shared, so clone before
-    // overriding.
-    const dark = rBgDark()
-    if (dark !== null) {
-      tokens = { ...tokens }
-      const font = dark ? '#fff' : '#000'
-      for (const name of LABEL_TOKENS) tokens[name] = font
-    }
-    const forceDark = dark ?? l < 0.55
-    if (`${h}|${s}|${l}|${dark}` !== baseTokenKey) {
-      baseTokenKey = `${h}|${s}|${l}|${dark}`
+    const forceDark = scheme === 'dark'
+    const key = `${h}|${s}|${l}|${verdict}|${scheme}|${hasColor}`
+    if (key !== baseTokenKey) {
+      baseTokenKey = key
       // Drive the base-palette switch with a plugin-specific value so the
       // gradient rule never matches a host dark-mode flag; color-scheme makes
       // native controls (select popups) follow the forced palette. Both ride the
@@ -136,6 +168,9 @@ function applyCustomTokensNow(ops: PartOpacities): void {
       for (const name of appliedTokenNames) document.body.style.removeProperty(name)
       appliedTokenNames = Object.keys(tokens)
     }
+    // Without a palette there are no surface alphas to re-emit — the host
+    // palette stays untouched and only the label direction was asserted.
+    if (palette === null) return
     // Cheap per-drag update: only the surface alpha vars move on <html>.
     const root = document.documentElement
     for (const g of OPACITY_TOKEN_GROUPS) {
@@ -212,7 +247,7 @@ export function applySettingsOverrides(op: number): void {
   // SETTINGS_STYLE_RULE fall back to the body layer tokens that
   // applyCustomTokens rewrites with the homepage card alpha.
   const [h, s, l] = rColor()
-  const tokens = genTokens(h, s, l).tokens
+  const tokens = genTokens(h, s, l, rScheme()).tokens
   const layer1 = tokens['--dsw-alias-bg-layer-1']
   const layer2 = tokens['--dsw-alias-bg-layer-2']
   const layer3 = tokens['--dsw-alias-bg-layer-3']
@@ -246,7 +281,7 @@ export const TRAJECTORY_STYLE_RULE =
 export function applyTrajectoryOverrides(op: number): void {
   // Always written explicitly so the view stays owned by this slider at 100%.
   const [h, s, l] = rColor()
-  const tokens = genTokens(h, s, l).tokens
+  const tokens = genTokens(h, s, l, rScheme()).tokens
   const layer1 = tokens['--dsw-alias-bg-layer-1']
   const layer2 = tokens['--dsw-alias-bg-layer-2']
   const layer3 = tokens['--dsw-alias-bg-layer-3']
@@ -353,7 +388,7 @@ function applyGeneratedBg(params: GeneratedBgParams): void {
     setBgDark(null)
     void analyzeFrameDark(frame).then(dark => {
       if (dark === null || wpController !== controller) return
-      setBgDark(dark)
+      applyVerdict(dark)
       applyCustomTokens(rOps())
     })
   })
@@ -442,11 +477,11 @@ function applySettingsBlur(px: number): void {
  *  reducing the main-bg opacity stacked a second alpha onto the sidebar; moving
  *  the alpha onto the columns keeps the sidebar owned by its own slider. */
 function applyPartOpacities(ops: PartOpacities): void {
-  if (!(rHasColor() || rBgDark() !== null)) return
+  const tokens = paletteTokens()
+  if (tokens === null) return
   discoverParts()
   if (frameEl === null) return
-  const [h, s, l] = rColor()
-  const base = genTokens(h, s, l).tokens['--dsw-alias-bg-base']
+  const base = tokens['--dsw-alias-bg-base']
   frameEl.style.background = 'transparent'
   if (centerEl !== null) centerEl.style.background = base !== undefined ? toRgba(base, ops.bg) : 'transparent'
   if (detailsEl !== null) detailsEl.style.background = base !== undefined ? toRgba(base, ops.bg) : 'transparent'
@@ -695,7 +730,7 @@ export function applyViewCards(): void {
   discoverParts()
   if (centerEl === null) return
   const [h, s, l] = rColor()
-  const surface = genTokens(h, s, l).tokens['--dsw-alias-bg-layer-1']
+  const surface = genTokens(h, s, l, rScheme()).tokens['--dsw-alias-bg-layer-1']
   VIEW_CARDS.forEach((spec, i) => {
     const target = discoverViewTarget(i, spec)
     if (target === null) return
@@ -754,8 +789,7 @@ let themeObserver: MutationObserver | null = null
 let themeRaf = 0
 
 function reassertScheme(): void {
-  const [, , l] = rColor()
-  const dark = rBgDark() ?? l < 0.55
+  const dark = rScheme() === 'dark'
   if (dark) document.body.setAttribute('data-ds-dark-theme', 'dsh-any-background')
   else document.body.removeAttribute('data-ds-dark-theme')
   applyCustomTokens(rOps())
@@ -768,7 +802,7 @@ export function watchThemeResets(): () => void {
   if (themeObserver !== null || typeof MutationObserver === 'undefined') return () => undefined
   themeObserver = new MutationObserver(() => {
     if (document.body.getAttribute('data-ds-dark-theme') === 'dsh-any-background') return
-    if (!(rHasColor() || rBgDark() !== null)) return
+    if (!(rHasColor() || rBgDark() !== null || rSchemeOverride() !== 'auto')) return
     if (themeRaf !== 0) return
     themeRaf = requestAnimationFrame(() => {
       themeRaf = 0
@@ -881,6 +915,36 @@ export function watchWallpaperDragQuality(): () => void {
   }
 }
 
+// ── Wallpaper brightness verdict ─────────────────────────────────────────────
+// Image/video wallpapers get the same one-shot brightness verdict generated
+// backgrounds analyze from their captured frame: decoded once per URL (cached),
+// it drives the label direction and the auto scheme, so a light wallpaper gets
+// dark fonts even when no theme color is picked and the host preference is dark.
+let wpVerdict: { url: string; dark: boolean } | null = null
+let verdictListener: (() => void) | null = null
+
+/** Register a callback fired when the background brightness verdict CHANGES
+ *  (a new wallpaper was analyzed, a generated bg regenerated), so the skin can
+ *  be re-registered through the host theme service. */
+export function onVerdictApplied(cb: () => void): void { verdictListener = cb }
+
+function applyVerdict(dark: boolean | null): void {
+  if (rBgDark() === dark) return
+  setBgDark(dark)
+  if (dark !== null) verdictListener?.()
+}
+
+function updateWpVerdict(url: string | null): void {
+  if (url === null) { applyVerdict(null); return }
+  if (wpVerdict !== null && wpVerdict.url === url) { applyVerdict(wpVerdict.dark); return }
+  void analyzeFrameDark(url).then(dark => {
+    if (dark === null) return
+    wpVerdict = { url, dark }
+    applyVerdict(dark)
+    applyCustomTokens(rOps())
+  })
+}
+
 function applyImageWp(url: string): void {
   clearDynamicBg()
   clearVideoEl()
@@ -939,6 +1003,7 @@ function applyImageWp(url: string): void {
   // a decode hitch (the original is already loaded, so this hits the cache).
   captureLowRes(url, () => undefined)
   applyWpEffects()
+  updateWpVerdict(url)
 }
 
 /** Video wallpaper: a muted looping <video> inside the wallpaper layer.
@@ -984,6 +1049,10 @@ function applyVideoWp(url: string): void {
     videoEl.style.objectFit = mode === 'stretch' ? 'fill' : (mode === 'fill' || mode === 'tile') ? 'cover' : 'contain'
   }
   applyWpEffects()
+  // Video mode has no still Image-decodable source; the captured frame
+  // snapshot stands in for the brightness verdict (null until it lands, then
+  // re-analyzed through the next apply).
+  updateWpVerdict(rWp())
 }
 
 function applyWpEffects(): void {
@@ -1024,11 +1093,13 @@ export function applyWp(): void {
     clearDynamicBg()
     clearVideoEl()
     wpEl?.remove(); wpEl = null
+    wpVerdict = null
+    setBgDark(null)
   }
-  // Write tokens only when there is a color to derive them from (a saved pick,
-  // or a generated background whose brightness verdict is known) — on boot the
+  // Write tokens only when there is something to derive them from (a saved
+  // pick, a background brightness verdict, or a forced scheme) — on boot the
   // persisted state has not loaded yet, and rColor() would flash the default.
-  if (rHasColor() || rBgDark() !== null) {
+  if (rHasColor() || rBgDark() !== null || rSchemeOverride() !== 'auto') {
     applyCustomTokens(rOps())
   }
   if (rHasColor()) {
@@ -1043,6 +1114,7 @@ export function teardownWp(): void {
   clearVideoEl()
   disposeVideoObjectUrl()
   setBgDark(null)
+  wpVerdict = null
   wpEl?.remove(); wpEl = null
   clearCustomTokens()
   tokenStyleEl?.remove(); tokenStyleEl = null

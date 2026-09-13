@@ -22,6 +22,9 @@ export const inject = ['connection', 'webServer']
 const DATA_DIR = '.dsh-any-background-data'
 const CONFIG_FILE = 'theme-config.json'
 const WALLPAPER_FILE = 'wallpaper.jpg'
+// Rotation pool: each candidate wallpaper lives here as its own file; the
+// config index stores { file, thumb } entries pointing into this directory.
+const ROTATION_DIR = 'rotation'
 const VIDEO_ROUTE = '/dsh-any-background/video'
 const UPLOAD_ROUTE = '/dsh-any-background/video/upload'
 const UPLOAD_TMP = 'wallpaper.upload.tmp'
@@ -53,10 +56,42 @@ interface PartBlurs {
 }
 type BackgroundType = 'image' | 'video' | 'mesh' | 'shader' | 'pattern'
 type BgMode = 'fit' | 'fill' | 'stretch' | 'tile' | 'center'
+type SchemeOverride = 'auto' | 'light' | 'dark'
 type GeneratedBgParams =
   | { type: 'mesh'; seed: number; scale: number; intensity: number }
   | { type: 'shader'; preset: 'aurora' | 'nebula' | 'noise'; speed: number; scale: number; seed: number }
   | { type: 'pattern'; preset: 'dots' | 'waves' | 'poly'; density: number; scale: number; seed: number }
+
+/** Appearance-only snapshot a saved profile restores (wallpaper files are
+ *  machine-local and deliberately excluded). */
+interface ProfileAppearance {
+  color: [number, number, number] | null
+  opacities: PartOpacities
+  blurs: PartBlurs
+  settingsOpacity: number
+  wallpaperOpacity: number
+  blur: number
+  chatTextOpacity: number
+  trajectoryOpacity: number
+}
+interface ProfileEntry { id: string; name: string; createdAt: string; config: ProfileAppearance }
+interface RotationItem { file: string; thumb: string }
+interface RotationConfig {
+  enabled: boolean
+  mode: 'shuffle' | 'order'
+  interval: 'reload' | 'daily' | 'weekly'
+  current: number
+  items: RotationItem[]
+  lastRotate: string | null
+}
+interface ScheduleConfig {
+  enabled: boolean
+  mode: 'time' | 'system'
+  dayProfile: string | null
+  nightProfile: string | null
+  dayStart: string
+  nightStart: string
+}
 
 interface ThemeConfig {
   /** Saved HSL theme color; null means "use the system theme". */
@@ -75,6 +110,16 @@ interface ThemeConfig {
   regenerateOnReload: boolean
   chatTextOpacity: number
   trajectoryOpacity: number
+  /** Saved appearance profiles (name + appearance snapshot). */
+  profiles: ProfileEntry[]
+  /** Wallpaper rotation pool + cadence. */
+  rotation: RotationConfig
+  /** Day/night profile auto-switch schedule. */
+  schedule: ScheduleConfig
+  /** Forced interface scheme ('auto' derives from the color's lightness). */
+  schemeOverride: SchemeOverride
+  /** Id of the profile last applied (drives schedule no-op detection). */
+  activeProfile: string | null
 }
 
 const DEFAULT_CONFIG: ThemeConfig = {
@@ -93,6 +138,11 @@ const DEFAULT_CONFIG: ThemeConfig = {
   regenerateOnReload: false,
   chatTextOpacity: 0,
   trajectoryOpacity: 1,
+  profiles: [],
+  rotation: { enabled: false, mode: 'shuffle', interval: 'daily', current: 0, items: [], lastRotate: null },
+  schedule: { enabled: false, mode: 'time', dayProfile: null, nightProfile: null, dayStart: '07:00', nightStart: '19:00' },
+  schemeOverride: 'auto',
+  activeProfile: null,
 }
 
 const dataDir = (): string => dshHomePath(DATA_DIR)
@@ -184,6 +234,11 @@ function normalizeConfig(raw: unknown): ThemeConfig {
     regenerateOnReload: typeof r.regenerateOnReload === 'boolean' ? r.regenerateOnReload : DEFAULT_CONFIG.regenerateOnReload,
     chatTextOpacity: clamp(r.chatTextOpacity, 0, 1, DEFAULT_CONFIG.chatTextOpacity),
     trajectoryOpacity: clamp(r.trajectoryOpacity, 0, 1, DEFAULT_CONFIG.trajectoryOpacity),
+    profiles: normalizeProfiles(r.profiles),
+    rotation: normalizeRotation(r.rotation),
+    schedule: normalizeSchedule(r.schedule),
+    schemeOverride: r.schemeOverride === 'light' || r.schemeOverride === 'dark' ? r.schemeOverride : 'auto',
+    activeProfile: typeof r.activeProfile === 'string' ? r.activeProfile : null,
   }
 }
 
@@ -215,6 +270,102 @@ function normalizeGeneratedBg(p: GeneratedBgParams): GeneratedBgParams | null {
     }
   }
   return null
+}
+
+// ── Profiles / rotation / schedule normalization ──────────────────────────────
+const MAX_PROFILES = 20
+const MAX_ROTATION_ITEMS = 30
+const MAX_THUMB_BYTES = 64 * 1024
+const HHMM_RE = /^([01]\d|2[0-3]):[0-5]\d$/
+
+/** Coerce an unknown value into a ProfileAppearance (appearance subset only). */
+function normalizeProfileAppearance(raw: unknown): ProfileAppearance {
+  const a = (raw ?? {}) as Partial<ProfileAppearance>
+  const c = a.color
+  const ops = (a.opacities ?? {}) as Partial<PartOpacities>
+  const bl = (a.blurs ?? {}) as Partial<PartBlurs>
+  const blurs = {} as PartBlurs
+  for (const k of ['bg', 'sidebar', 'card', 'settings', 'chat', 'trajectory', 'input'] as const) {
+    blurs[k] = clamp(bl[k], 0, 60, DEFAULT_CONFIG.blurs[k])
+  }
+  return {
+    color: Array.isArray(c) && c.length === 3 && c.every(x => typeof x === 'number' && isFinite(x))
+      ? [clamp(c[0], 0, 360, 220), clamp(c[1], 0, 1, 0.55), clamp(c[2], 0, 1, 0.25)]
+      : null,
+    opacities: {
+      bg: clamp(ops.bg, 0, 1, DEFAULT_CONFIG.opacities.bg),
+      sidebar: clamp(ops.sidebar, 0, 1, DEFAULT_CONFIG.opacities.sidebar),
+      card: clamp(ops.card, 0, 1, DEFAULT_CONFIG.opacities.card),
+      input: clamp(ops.input, 0, 1, DEFAULT_CONFIG.opacities.input),
+    },
+    blurs,
+    settingsOpacity: clamp(a.settingsOpacity, 0, 1, DEFAULT_CONFIG.settingsOpacity),
+    wallpaperOpacity: clamp(a.wallpaperOpacity, 0, 1, DEFAULT_CONFIG.wallpaperOpacity),
+    blur: clamp(a.blur, 0, 60, DEFAULT_CONFIG.blur),
+    chatTextOpacity: clamp(a.chatTextOpacity, 0, 1, DEFAULT_CONFIG.chatTextOpacity),
+    trajectoryOpacity: clamp(a.trajectoryOpacity, 0, 1, DEFAULT_CONFIG.trajectoryOpacity),
+  }
+}
+
+function normalizeProfiles(raw: unknown): ProfileEntry[] {
+  if (!Array.isArray(raw)) return []
+  const out: ProfileEntry[] = []
+  for (const item of raw.slice(0, MAX_PROFILES)) {
+    const p = (item ?? {}) as Partial<ProfileEntry>
+    if (typeof p.id !== 'string' || p.id.length === 0 || p.id.length > 64) continue
+    if (out.some(e => e.id === p.id)) continue
+    out.push({
+      id: p.id,
+      name: typeof p.name === 'string' && p.name.trim() ? p.name.slice(0, 60) : 'Profile',
+      createdAt: typeof p.createdAt === 'string' ? p.createdAt : '',
+      config: normalizeProfileAppearance(p.config),
+    })
+  }
+  return out
+}
+
+/** Rotation items live as files under the rotation dir; only the server
+ *  creates those names, so a stored `file` is accepted only when it is a bare
+ *  filename with a known image extension (no path traversal). */
+function safeRotationFile(name: unknown): string | null {
+  if (typeof name !== 'string' || !/^[\w-]+\.(jpg|jpeg|png|gif|webp)$/i.test(name)) return null
+  return name
+}
+
+function normalizeRotation(raw: unknown): RotationConfig {
+  const r = (raw ?? {}) as Partial<RotationConfig>
+  const items: RotationItem[] = []
+  if (Array.isArray(r.items)) {
+    for (const item of r.items.slice(0, MAX_ROTATION_ITEMS)) {
+      const it = (item ?? {}) as Partial<RotationItem>
+      const file = safeRotationFile(it.file)
+      if (file === null) continue
+      items.push({
+        file,
+        thumb: typeof it.thumb === 'string' && it.thumb.startsWith('data:image/') && it.thumb.length <= MAX_THUMB_BYTES ? it.thumb : '',
+      })
+    }
+  }
+  return {
+    enabled: r.enabled === true,
+    mode: r.mode === 'order' ? 'order' : 'shuffle',
+    interval: r.interval === 'reload' || r.interval === 'weekly' ? r.interval : 'daily',
+    current: typeof r.current === 'number' && isFinite(r.current) && r.current >= 0 ? Math.floor(r.current) : 0,
+    items,
+    lastRotate: typeof r.lastRotate === 'string' ? r.lastRotate : null,
+  }
+}
+
+function normalizeSchedule(raw: unknown): ScheduleConfig {
+  const r = (raw ?? {}) as Partial<ScheduleConfig>
+  return {
+    enabled: r.enabled === true,
+    mode: r.mode === 'system' ? 'system' : 'time',
+    dayProfile: typeof r.dayProfile === 'string' ? r.dayProfile : null,
+    nightProfile: typeof r.nightProfile === 'string' ? r.nightProfile : null,
+    dayStart: typeof r.dayStart === 'string' && HHMM_RE.test(r.dayStart) ? r.dayStart : DEFAULT_CONFIG.schedule.dayStart,
+    nightStart: typeof r.nightStart === 'string' && HHMM_RE.test(r.nightStart) ? r.nightStart : DEFAULT_CONFIG.schedule.nightStart,
+  }
 }
 
 async function ensureDir(): Promise<void> {
@@ -250,7 +401,10 @@ async function writeConfig(config: ThemeConfig): Promise<boolean> {
 async function readWallpaper(): Promise<string | null> {
   try {
     const buf = await readFile(wallpaperPath())
-    return `data:image/jpeg;base64,${buf.toString('base64')}`
+    // Sniff the real format from the magic bytes: PNG/WebP/GIF bytes written
+    // under the .jpg name must not be re-declared as image/jpeg (an animated
+    // GIF would break, and decoders should not rely on content sniffing).
+    return `data:${sniffImageMime(buf)};base64,${buf.toString('base64')}`
   } catch {
     return null
   }
@@ -319,6 +473,100 @@ async function writeWallpaperFromUrl(url: string | null): Promise<{ ok: boolean;
   const dataUrl = `data:${sniffImageMime(buf)};base64,${buf.toString('base64')}`
   const ok = await writeWallpaper(dataUrl)
   return ok ? { ok: true, dataUrl } : { ok: false, error: 'write failed' }
+}
+
+// ── Wallpaper rotation pool ───────────────────────────────────────────────────
+// Each candidate wallpaper is its own file under rotation/; the config's
+// rotation.items holds { file, thumb } entries. Advancing copies the chosen
+// file over wallpaper.jpg, so every downstream path (boot restore, theme
+// export, color extraction) keeps working through the single active slot.
+
+const rotationDir = (): string => dshHomePath(DATA_DIR, ROTATION_DIR)
+
+async function ensureRotationDir(): Promise<void> {
+  try { await mkdir(rotationDir(), { recursive: true }) } catch { /* read paths tolerate absence */ }
+}
+
+function imageExtFor(mime: string): string {
+  if (mime === 'image/png') return 'png'
+  if (mime === 'image/gif') return 'gif'
+  if (mime === 'image/webp') return 'webp'
+  return 'jpg'
+}
+
+/** Accept only an inline base64 image data URL (same fence as writeWallpaper). */
+function decodeImageDataUrl(dataUrl: unknown): Buffer | null {
+  if (typeof dataUrl !== 'string') return null
+  const m = /^data:image\/[a-zA-Z0-9.+-]+;base64,([A-Za-z0-9+/=]+)$/.exec(dataUrl)
+  if (!m) return null
+  const buf = Buffer.from(m[1]!, 'base64')
+  return buf.length > 0 ? buf : null
+}
+
+/** Persist a thumbnail string only when it is a small inline image data URL. */
+function sanitizeThumb(thumb: unknown): string {
+  return typeof thumb === 'string' && thumb.startsWith('data:image/') && thumb.length <= MAX_THUMB_BYTES ? thumb : ''
+}
+
+async function handleRotationAdd(payload: unknown): Promise<{ ok: boolean; index?: number; items?: RotationItem[]; error?: string }> {
+  const buf = decodeImageDataUrl((payload as { dataUrl?: unknown } | null)?.dataUrl)
+  if (buf === null) return { ok: false, error: 'invalid image' }
+  const thumb = sanitizeThumb((payload as { thumb?: unknown } | null)?.thumb)
+  await ensureDir()
+  await ensureRotationDir()
+  const cfg = await readConfig()
+  if (cfg.rotation.items.length >= MAX_ROTATION_ITEMS) return { ok: false, error: 'too many items' }
+  const file = `wp-${Date.now().toString(36)}.${imageExtFor(sniffImageMime(buf))}`
+  try {
+    await writeFile(dshHomePath(DATA_DIR, ROTATION_DIR, file), buf)
+  } catch (e) {
+    console.error('dsh-any-background: failed to write a rotation wallpaper', e)
+    return { ok: false, error: 'write failed' }
+  }
+  // Read-modify-write so a concurrent client config write cannot drop the item.
+  const fresh = await readConfig()
+  fresh.rotation.items.push({ file, thumb })
+  if (!(await writeConfig(fresh))) return { ok: false, error: 'config write failed' }
+  return { ok: true, index: fresh.rotation.items.length - 1, items: fresh.rotation.items }
+}
+
+async function handleRotationRemove(payload: unknown): Promise<{ ok: boolean; items?: RotationItem[]; error?: string }> {
+  const idx = (payload as { index?: unknown } | null)?.index
+  if (typeof idx !== 'number' || !isFinite(idx)) return { ok: false, error: 'invalid index' }
+  const cfg = await readConfig()
+  const i = Math.floor(idx)
+  if (i < 0 || i >= cfg.rotation.items.length) return { ok: false, error: 'not found' }
+  const [removed] = cfg.rotation.items.splice(i, 1)
+  cfg.rotation.current = Math.max(0, Math.min(cfg.rotation.current >= i ? cfg.rotation.current - 1 : cfg.rotation.current, Math.max(0, cfg.rotation.items.length - 1)))
+  if (removed !== undefined) {
+    try { await rm(dshHomePath(DATA_DIR, ROTATION_DIR, removed.file), { force: true }) } catch { /* already gone */ }
+  }
+  if (!(await writeConfig(cfg))) return { ok: false, error: 'config write failed' }
+  return { ok: true, items: cfg.rotation.items }
+}
+
+/** Activate a rotation item: copy its bytes over the active wallpaper slot and
+ *  return the freshly sniffed data URL so the client can apply it live. */
+async function handleRotationSet(payload: unknown): Promise<{ ok: boolean; dataUrl?: string; error?: string }> {
+  const idx = (payload as { index?: unknown } | null)?.index
+  if (typeof idx !== 'number' || !isFinite(idx)) return { ok: false, error: 'invalid index' }
+  const cfg = await readConfig()
+  const i = Math.floor(idx)
+  const item = cfg.rotation.items[i]
+  if (item === undefined) return { ok: false, error: 'not found' }
+  let buf: Buffer
+  try {
+    buf = await readFile(dshHomePath(DATA_DIR, ROTATION_DIR, item.file))
+  } catch {
+    return { ok: false, error: 'file missing' }
+  }
+  try {
+    await writeFile(wallpaperPath(), buf)
+  } catch (e) {
+    console.error('dsh-any-background: failed to activate a rotation wallpaper', e)
+    return { ok: false, error: 'write failed' }
+  }
+  return { ok: true, dataUrl: `data:${sniffImageMime(buf)};base64,${buf.toString('base64')}` }
 }
 
 async function videoUrl(): Promise<string | null> {
@@ -485,6 +733,12 @@ async function handleRpcMethod(
         return { ok: true, value: await writeVideo(((payload as { dataUrl?: unknown } | null)?.dataUrl ?? null) as string | null) }
       case 'setWallpaperUrl':
         return { ok: true, value: await writeWallpaperFromUrl(((payload as { url?: unknown } | null)?.url ?? null) as string | null) }
+      case 'rotationAdd':
+        return { ok: true, value: await handleRotationAdd(payload) }
+      case 'rotationRemove':
+        return { ok: true, value: await handleRotationRemove(payload) }
+      case 'rotationSet':
+        return { ok: true, value: await handleRotationSet(payload) }
       default:
         return { ok: false, error: { code: 'dsh-any-background/bad-request', message: `unknown endpoint ${endpoint}`, details: { issues: [] } } }
     }

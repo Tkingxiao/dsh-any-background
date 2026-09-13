@@ -121,3 +121,44 @@ export async function uploadVideo(blob: Blob, mime: string): Promise<boolean> {
     return false
   }
 }
+
+// ── Wallpaper rotation RPCs ──────────────────────────────────────────────────
+
+export interface RotationAddResult { ok: boolean; index?: number; items?: Array<{ file: string; thumb: string }>; error?: string }
+
+/** Add an image (data URL + small thumbnail) to the server-side rotation pool. */
+export async function rotationAdd(dataUrl: string, thumb: string): Promise<RotationAddResult> {
+  if (!rpcCallFn) return { ok: false, error: 'rpc not ready' }
+  try {
+    const res = await rpcCallFn(rpcEndpoint('rotationAdd'), { dataUrl, thumb })
+    if (res && res.ok === true) return (res.value ?? { ok: false, error: 'no value' }) as RotationAddResult
+    return { ok: false, error: (res as { error?: { message?: string } })?.error?.message ?? 'request failed' }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+}
+
+/** Remove a rotation item by index. Returns the updated items list. */
+export async function rotationRemove(index: number): Promise<{ ok: boolean; items?: Array<{ file: string; thumb: string }>; error?: string }> {
+  if (!rpcCallFn) return { ok: false, error: 'rpc not ready' }
+  try {
+    const res = await rpcCallFn(rpcEndpoint('rotationRemove'), { index })
+    if (res && res.ok === true) return (res.value ?? { ok: false, error: 'no value' }) as { ok: boolean; items?: Array<{ file: string; thumb: string }>; error?: string }
+    return { ok: false, error: (res as { error?: { message?: string } })?.error?.message ?? 'request failed' }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+}
+
+/** Activate a rotation item: the server copies its bytes into the wallpaper
+ *  slot and returns the freshly sniffed data URL for immediate display. */
+export async function rotationActivate(index: number): Promise<{ ok: boolean; dataUrl?: string; error?: string }> {
+  if (!rpcCallFn) return { ok: false, error: 'rpc not ready' }
+  try {
+    const res = await rpcCallFn(rpcEndpoint('rotationSet'), { index })
+    if (res && res.ok === true) return (res.value ?? { ok: false, error: 'no value' }) as { ok: boolean; dataUrl?: string; error?: string }
+    return { ok: false, error: (res as { error?: { message?: string } })?.error?.message ?? 'request failed' }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+}

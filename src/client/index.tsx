@@ -6,13 +6,14 @@
  * lifting lives in the sibling modules (state/rpc/wallpaper/utils/components).
  */
 import { defineStore } from './runtime'
-import type { Ctx, RpcResultLike, BoundActions, ThemeSectionProps, PartOpacities, PartBlurs, BackgroundType, GeneratedBgParams } from './types'
+import type { Ctx, RpcResultLike, BoundActions, ThemeSectionProps, PartOpacities, PartBlurs, BackgroundType, GeneratedBgParams, ProfileAppearance, ProfileEntry, RotationItem, ScheduleConfig, SchemeOverride } from './types'
 import { NS, zh, en } from './i18n'
-import { cfg, rHasColor, rColor, rWp, rWpImage, rWpVideo, rBgState, rVideoBgState, setWpUrl, setWpImageUrl, setWpVideoUrl, setWpVideoSnapshot, setBgState, adoptConfig, DEFAULT_CONFIG, setBgDark } from './state'
-import { RPC_CHANNEL, VIDEO_SERVE_URL, initRpc, saveConfig, flushSave, loadPersisted, persistWallpaper, persistVideo, persistConfig, uploadVideo } from './rpc'
-import { applyWp, teardownWp, applySettingsOverrides, SETTINGS_STYLE_RULE, TRAJECTORY_STYLE_RULE, INPUT_BLUR_RULE, PLACEHOLDER_RULE, watchParts, watchThemeResets, regenerateGeneratedBg, setBackgroundType, updateGeneratedBg, applyThemeColor, onGeneratedSnapshot, watchWallpaperDragQuality } from './wallpaper'
+import { cfg, rHasColor, rColor, rWp, rWpImage, rWpVideo, rBgState, rVideoBgState, setWpUrl, setWpImageUrl, setWpVideoUrl, setWpVideoSnapshot, setBgState, adoptConfig, DEFAULT_CONFIG, setBgDark, rBgDark, rProfiles, rRotation, rSchedule, rScheme, rSchemeOverride, currentAppearance, applyAppearance } from './state'
+import { RPC_CHANNEL, VIDEO_SERVE_URL, initRpc, saveConfig, flushSave, loadPersisted, persistWallpaper, persistVideo, persistConfig, uploadVideo, rotationAdd, rotationRemove, rotationActivate } from './rpc'
+import { applyWp, teardownWp, applySettingsOverrides, SETTINGS_STYLE_RULE, TRAJECTORY_STYLE_RULE, INPUT_BLUR_RULE, PLACEHOLDER_RULE, watchParts, watchThemeResets, regenerateGeneratedBg, setBackgroundType, updateGeneratedBg, applyThemeColor, onGeneratedSnapshot, watchWallpaperDragQuality, clearThemeTokens, onVerdictApplied, LABEL_TOKENS } from './wallpaper'
 import { genTokens, hslToHsv, hsvToHsl, extractWallpaperColor } from './utils/color'
 import { captureVideoSnapshot } from './utils/video'
+import { readImgAsync, makeThumb } from './utils/image'
 import { ThemeSection } from './components/ThemeSection'
 import { SUN_PATHS } from './components/icons'
 
@@ -28,15 +29,40 @@ export function apply(ctx: Ctx): void {
     ctx.connection.rpc.call(RPC_CHANNEL, endpoint, payload).then((res: any) => res as RpcResultLike | undefined)
   )
 
-  // 1. Restore custom color and register as a skin. The saved color's
-  // lightness decides the scheme (dark pick → white text, light → black).
+  // 1. Restore custom color and register as a skin. The skin MUST go through
+  // the host theme service — the host presenter paints fonts from the
+  // registered theme, so a stylesheet-only override loses to it.
+  //   · picked color  → genTokens in the effective scheme;
+  //   · forced scheme → neutral palette in the forced direction;
+  //   · auto, no color→ adopt the host's own palette in the background
+  //                     brightness verdict's direction, fonts flipped to match
+  //                     the wallpaper (perceptual luma, threshold 0.5).
   const [initH, initS, initL] = rColor()
   let customDispose: (() => void) | null = null
   // registerCustom takes HSL (the storage/wheel space and genTokens space).
-  const registerCustom = (h: number, s: number, l: number) => {
+  const registerCustom = (h?: number, s?: number, l?: number): boolean => {
     customDispose?.()
     try {
-      const { colorScheme, tokens } = genTokens(h, s, l)
+      let colorScheme: 'light' | 'dark'
+      let tokens: Record<string, string>
+      if (rHasColor()) {
+        ;({ colorScheme, tokens } = genTokens(h ?? rColor()[0], s ?? rColor()[1], l ?? rColor()[2], rScheme()))
+      } else if (rSchemeOverride() !== 'auto') {
+        const dark = rScheme() === 'dark'
+        ;({ colorScheme, tokens } = genTokens(220, 0.04, dark ? 0.14 : 0.92, dark ? 'dark' : 'light'))
+      } else {
+        const verdict = rBgDark()
+        if (verdict === null) { customDispose = null; return false }
+        const snap = ctx.theme.getTheme()
+        const wantScheme = verdict ? 'dark' : 'light'
+        const source = snap.themes.find(t => t.id !== CUSTOM_ID && t.colorScheme === wantScheme)
+          ?? snap.themes.find(t => t.id !== CUSTOM_ID)
+        if (source === undefined) { customDispose = null; return false }
+        colorScheme = wantScheme
+        tokens = { ...source.tokens }
+        const font = verdict ? '#fff' : '#000'
+        for (const name of LABEL_TOKENS) tokens[name] = font
+      }
       customDispose = ctx.theme.register({ id: CUSTOM_ID, colorScheme, tokens })
     } catch {
       // A live registration from an earlier HMR apply pass cannot be torn down
@@ -45,12 +71,18 @@ export function apply(ctx: Ctx): void {
       customDispose = null
     }
     // Only activate the custom theme if it is actually registered.
-    if (ctx.theme.getTheme().themes.some(t => t.id === CUSTOM_ID)) {
-      ctx.theme.setTheme(CUSTOM_ID)
-    }
+    const present = ctx.theme.getTheme().themes.some(t => t.id === CUSTOM_ID)
+    if (present) ctx.theme.setTheme(CUSTOM_ID)
+    return present
   }
   // Restore saved color on boot.
   if (rHasColor()) registerCustom(initH, initS, initL)
+  // A fresh background brightness verdict (wallpaper swapped in, generated bg
+  // regenerated) re-registers the skin: without a picked color the adopted
+  // skin must be rebuilt so its fonts follow the new wallpaper.
+  onVerdictApplied(() => {
+    if (!rHasColor()) registerCustom()
+  })
   ctx.effect(() => () => {
     customDispose?.()
     if (colorTimerRef.current !== null) window.clearTimeout(colorTimerRef.current)
@@ -84,6 +116,12 @@ export function apply(ctx: Ctx): void {
       generatedBg: cfg.generatedBg,
       bgRev: -1,
       regenerateOnReload: cfg.regenerateOnReload,
+      profiles: [] as ProfileEntry[],
+      rotation: { ...DEFAULT_CONFIG.rotation, items: [] },
+      schedule: { ...DEFAULT_CONFIG.schedule },
+      schemeOverride: 'auto' as SchemeOverride,
+      activeProfile: null as string | null,
+      metaRev: -1,
     }),
     actions: {
       syncBg: (d: any, url: string | null, r: number, bgType?: BackgroundType, genBg?: GeneratedBgParams | null, bgr?: number, reload?: boolean) => {
@@ -92,6 +130,12 @@ export function apply(ctx: Ctx): void {
         if (reload !== undefined) { d.regenerateOnReload = reload }
       },
       syncColor: (d: any, hsv: [number, number, number], r: number) => { if (r > d.colorRev) { d.color = hsv; d.colorRev = r } },
+      syncMeta: (d: any, profiles: ProfileEntry[], rotation: typeof cfg.rotation, schedule: typeof cfg.schedule, schemeOverride: SchemeOverride, activeProfile: string | null, r: number) => {
+        if (r > d.metaRev) {
+          d.profiles = profiles; d.rotation = rotation; d.schedule = schedule
+          d.schemeOverride = schemeOverride; d.activeProfile = activeProfile; d.metaRev = r
+        }
+      },
     },
   })
   let bound: BoundActions | null = null
@@ -103,6 +147,132 @@ export function apply(ctx: Ctx): void {
   // the display/preview URL — re-sync the store so the preview follows.
   onGeneratedSnapshot(syncBg)
 
+  // ── Profiles / presets / scheme / rotation / schedule ────────────────────────
+  let metaRev = 0
+  const syncMetaNow = (): void => {
+    metaRev++
+    bound?.syncMeta(rProfiles(), rRotation(), rSchedule(), rSchemeOverride(), cfg.activeProfile, metaRev)
+  }
+
+  /** Apply an appearance snapshot (profile or built-in preset) to the whole
+   *  interface: re-register the skin, re-emit tokens, persist. */
+  const applyAppearanceLive = (ap: ProfileAppearance): void => {
+    applyAppearance(ap)
+    if (rHasColor()) {
+      const [h, s, l] = rColor()
+      registerCustom(h, s, l)
+    } else if (!registerCustom()) {
+      // Nothing to assert (no color, auto, no verdict): hand the palette back
+      // to the host theme.
+      customDispose?.()
+      customDispose = null
+      clearThemeTokens()
+      const snap = ctx.theme.getTheme()
+      const fallback = snap.themes.find(t => t.id !== CUSTOM_ID)
+      if (fallback !== undefined && snap.preference === CUSTOM_ID) ctx.theme.setTheme(fallback.id)
+    }
+    applyWp()
+  }
+
+  const applyProfileById = (id: string): boolean => {
+    const entry = rProfiles().find(p => p.id === id)
+    if (entry === undefined) return false
+    applyAppearanceLive(entry.config)
+    cfg.activeProfile = id
+    applyWp()
+    persistConfig()
+    syncMetaNow()
+    return true
+  }
+
+  // ── Wallpaper rotation ───────────────────────────────────────────────────────
+  /** Activate a rotation item: the server copies its bytes into the wallpaper
+   *  slot; the client applies the returned data URL through the normal image
+   *  path (theme re-extraction included). */
+  const applyRotationIndex = async (idx: number, auto: boolean): Promise<boolean> => {
+    const rot = rRotation()
+    if (idx < 0 || idx >= rot.items.length) return false
+    const r = await rotationActivate(idx)
+    if (!r.ok || !r.dataUrl) {
+      console.warn('dsh-any-background: rotation activate failed', r.error)
+      return false
+    }
+    setWpImageUrl(r.dataUrl)
+    if (cfg.backgroundType === 'image') setWpUrl(r.dataUrl)
+    cfg.rotation = { ...rot, current: idx, lastRotate: auto || rot.lastRotate === null ? new Date().toISOString() : rot.lastRotate }
+    applyThemeColor()
+    syncBg()
+    saveConfig()
+    syncMetaNow()
+    return true
+  }
+
+  const isoWeekKey = (d: Date): string => {
+    const t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()))
+    const day = t.getUTCDay() || 7
+    t.setUTCDate(t.getUTCDate() + 4 - day)
+    const yearStart = new Date(Date.UTC(t.getUTCFullYear(), 0, 1))
+    const week = Math.ceil(((t.getTime() - yearStart.getTime()) / 86400000 + 1) / 7)
+    return `${t.getUTCFullYear()}-W${week}`
+  }
+
+  const rotationDue = (): boolean => {
+    const rot = rRotation()
+    if (!rot.enabled || rot.items.length === 0) return false
+    if (rot.interval === 'reload') return true
+    const last = rot.lastRotate !== null ? new Date(rot.lastRotate) : null
+    if (last === null || isNaN(last.getTime())) return true
+    const now = new Date()
+    if (rot.interval === 'daily') return last.toDateString() !== now.toDateString()
+    return isoWeekKey(last) !== isoWeekKey(now)
+  }
+
+  const pickNextRotationIndex = (): number => {
+    const rot = rRotation()
+    const n = rot.items.length
+    if (n === 0) return -1
+    if (rot.mode === 'shuffle' && n > 1) {
+      let idx = rot.current
+      while (idx === rot.current) idx = Math.floor(Math.random() * n)
+      return idx
+    }
+    return (rot.current + 1) % n
+  }
+
+  const maybeRotate = async (): Promise<void> => {
+    if (!rotationDue()) return
+    await applyRotationIndex(pickNextRotationIndex(), true)
+  }
+
+  // ── Day/night profile schedule ───────────────────────────────────────────────
+  const parseHHMM = (s: string): number => {
+    const m = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(s)
+    return m === null ? -1 : Number(m[1]) * 60 + Number(m[2])
+  }
+
+  const isNightNow = (sc: ScheduleConfig): boolean => {
+    const now = new Date()
+    const cur = now.getHours() * 60 + now.getMinutes()
+    const day = parseHHMM(sc.dayStart)
+    const night = parseHHMM(sc.nightStart)
+    if (day < 0 || night < 0) return false
+    // Normal window (day 07:00 → night 19:00): night wraps midnight.
+    if (day <= night) return cur >= night || cur < day
+    // Overnight window (e.g. day 22:00 → night 06:00): night is the middle span.
+    return cur >= night && cur < day
+  }
+
+  const scheduleTick = (): void => {
+    const sc = rSchedule()
+    if (!sc.enabled) return
+    const night = sc.mode === 'system'
+      ? (window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false)
+      : isNightNow(sc)
+    const want = night ? sc.nightProfile : sc.dayProfile
+    if (!want || want === cfg.activeProfile) return
+    applyProfileById(want)
+  }
+
   // 4. Wallpaper.
   applyWp(); syncBg()
   // The AppFrame mounts after this apply; watch for it so persisted per-part
@@ -110,12 +280,16 @@ export function apply(ctx: Ctx): void {
   watchParts()
   // Load the file-backed theme and re-apply once it lands (defaults are already
   // applied above; the deferred restore below re-asserts too).
-  void loadPersisted().then(() => {
+  void loadPersisted().then(async () => {
+    syncMetaNow()
     // Re-register the skin with the restored color so UI and theme never diverge.
     if (rHasColor()) {
       const [h, s, l] = rColor()
       registerCustom(h, s, l)
     }
+    // Wallpaper rotation: advance before the branch restore below so the freshly
+    // rotated wallpaper (not the stale persisted one) is what gets re-applied.
+    await maybeRotate()
     // Regenerate on reload if enabled, else reconstruct from saved params.
     if (cfg.backgroundType === 'video') {
       const v = rWpVideo()
@@ -147,15 +321,26 @@ export function apply(ctx: Ctx): void {
       applyThemeColor()
     }
     syncBg()
+    scheduleTick()
     if (rHasColor()) { colorRev++; bound?.syncColor(hslToHsv(...rColor()), colorRev) }
   })
+  // Schedule cadence: check every 30s (covers fixed-clock switches) and react
+  // immediately when the OS scheme flips in 'system' mode.
+  const schemeMq = window.matchMedia?.('(prefers-color-scheme: dark)')
+  const scheduleTimer = window.setInterval(scheduleTick, 30_000)
+  schemeMq?.addEventListener?.('change', scheduleTick)
+  ctx.effect(() => () => {
+    window.clearInterval(scheduleTimer)
+    schemeMq?.removeEventListener?.('change', scheduleTick)
+  }, 'dsh-any-background: schedule timer')
   ctx.effect(() => () => { teardownWp() }, 'dsh-any-background: wp cleanup')
   ctx.effect(() => ctx.on('theme/change', () => {
     // The custom theme's preference lives in memory, so a host adoption can
-    // silently reset it; re-assert it while a color is saved. Guard on registry
+    // silently reset it; re-assert it while the skin has anything to say (a
+    // color, a brightness verdict, or a forced scheme). Guard on registry
     // presence — registerCustom disposes the old skin first, so during that
     // transient the registry lacks CUSTOM_ID.
-    if (rHasColor()) {
+    if (rHasColor() || rBgDark() !== null || rSchemeOverride() !== 'auto') {
       const snapshot = ctx.theme.getTheme()
       if (snapshot.preference !== CUSTOM_ID && snapshot.themes.some(t => t.id === CUSTOM_ID)) {
         ctx.theme.setTheme(CUSTOM_ID)
@@ -192,6 +377,10 @@ export function apply(ctx: Ctx): void {
   // 6. Section injection.
   const sectionInject = (actions: BoundActions): Omit<ThemeSectionProps, 'useStore'> => {
     bound = actions; syncBg()
+    // The panel opens long after boot: push the current meta snapshot so the
+    // profiles/rotation/schedule/scheme controls render live state, not the
+    // store's boot-time defaults.
+    syncMetaNow()
     // Play a picked/imported video instantly from a local object URL while its
     // raw bytes stream to disk in the background — no upload + first-buffer
     // wait after import. The serve URL takes over on the next reload.
@@ -459,6 +648,107 @@ export function apply(ctx: Ctx): void {
           return false
         }
       },
+      // Save the current appearance as a named profile (oldest dropped at 20).
+      saveProfile: (name: string): boolean => {
+        const trimmed = name.trim()
+        if (!trimmed) return false
+        const profiles = [...rProfiles()]
+        if (profiles.length >= 20) profiles.shift()
+        const id = `p-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+        profiles.push({ id, name: trimmed.slice(0, 60), createdAt: new Date().toISOString(), config: currentAppearance() })
+        cfg.profiles = profiles
+        cfg.activeProfile = id
+        persistConfig()
+        syncMetaNow()
+        return true
+      },
+      applyProfile: (id: string): boolean => applyProfileById(id),
+      deleteProfile: (id: string): boolean => {
+        const before = rProfiles()
+        if (!before.some(p => p.id === id)) return false
+        cfg.profiles = before.filter(p => p.id !== id)
+        if (cfg.activeProfile === id) cfg.activeProfile = null
+        // Clear schedule references so the tick never targets a dead id.
+        const sc = rSchedule()
+        if (sc.dayProfile === id || sc.nightProfile === id) {
+          cfg.schedule = {
+            ...sc,
+            dayProfile: sc.dayProfile === id ? null : sc.dayProfile,
+            nightProfile: sc.nightProfile === id ? null : sc.nightProfile,
+          }
+        }
+        persistConfig()
+        syncMetaNow()
+        return true
+      },
+      applyPreset: (appearance: ProfileAppearance): void => {
+        applyAppearanceLive(appearance)
+        cfg.activeProfile = null
+        applyWp()
+        persistConfig()
+        syncMetaNow()
+      },
+      setSchemeOverride: (v: SchemeOverride): void => {
+        cfg.schemeOverride = v
+        // Re-register the skin in every case: with a color the palette follows
+        // the forced direction; without one a neutral palette is registered so
+        // the host presenter flips the fonts too.
+        registerCustom()
+        applyWp()
+        saveConfig()
+        syncMetaNow()
+      },
+      setSchedule: (patch: Partial<ScheduleConfig>): void => {
+        cfg.schedule = { ...rSchedule(), ...patch }
+        if (patch.enabled === true) scheduleTick()
+        persistConfig()
+        syncMetaNow()
+      },
+      setRotation: (patch: Partial<Pick<typeof cfg.rotation, 'enabled' | 'mode' | 'interval'>>): void => {
+        cfg.rotation = { ...rRotation(), ...patch }
+        if (patch.enabled === true) void maybeRotate()
+        persistConfig()
+        syncMetaNow()
+      },
+      addRotationItems: async (files: File[]): Promise<boolean> => {
+        let added = false
+        for (const f of files) {
+          if (!f.type.startsWith('image/')) continue
+          const dataUrl = await readImgAsync(f)
+          if (!dataUrl) continue
+          const thumb = await makeThumb(dataUrl)
+          const r = await rotationAdd(dataUrl, thumb ?? '')
+          if (r.ok && r.items !== undefined) {
+            cfg.rotation = { ...rRotation(), items: r.items as RotationItem[] }
+            added = true
+          }
+        }
+        if (added) {
+          // Server already wrote the items into its config copy; re-persist so
+          // the client's full config (meta included) stays authoritative.
+          persistConfig()
+          syncMetaNow()
+          syncBg()
+        }
+        return added
+      },
+      removeRotationItem: async (index: number): Promise<boolean> => {
+        const r = await rotationRemove(index)
+        if (!r.ok || r.items === undefined) return false
+        const rot = rRotation()
+        cfg.rotation = {
+          ...rot,
+          items: r.items as RotationItem[],
+          current: Math.max(0, Math.min(rot.current >= index ? rot.current - 1 : rot.current, Math.max(0, r.items.length - 1))),
+        }
+        persistConfig()
+        syncMetaNow()
+        return true
+      },
+      rotateNow: async (): Promise<boolean> => {
+        if (rRotation().items.length === 0) return false
+        return applyRotationIndex(pickNextRotationIndex(), true)
+      },
     }
   }
   ctx.slots.inject('settings.section', () => ctx.slots.register({
@@ -545,16 +835,16 @@ export function apply(ctx: Ctx): void {
   // 8. Theme watchdog: the theme service keeps only built-in preferences in
   // memory, so ANY host-scope adoption can silently drop the custom theme —
   // reverting the label colors (white/black) and the inner surfaces to the
-  // system palette. While a color is saved, re-register and re-assert the
-  // custom theme on a slow interval so the theme state always matches the
-  // saved color and the active scheme, independent of which event resets it.
+  // system palette. While the skin has anything to say (a color, a brightness
+  // verdict, or a forced scheme), re-register and re-assert the custom theme
+  // on a slow interval so the theme state always matches it, independent of
+  // which event resets it.
   const watchdogId = window.setInterval(() => {
-    if (!rHasColor()) return
+    if (!rHasColor() && rBgDark() === null && rSchemeOverride() === 'auto') return
     const snapshot = ctx.theme.getTheme()
     let changed = false
     if (!snapshot.themes.some(t => t.id === CUSTOM_ID)) {
-      const [h, s, l] = rColor()
-      registerCustom(h, s, l)
+      registerCustom()
       changed = true
     } else if (snapshot.preference !== CUSTOM_ID) {
       ctx.theme.setTheme(CUSTOM_ID)

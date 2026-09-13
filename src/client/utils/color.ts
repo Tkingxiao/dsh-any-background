@@ -20,21 +20,23 @@ let tokensCacheKey = ''
 let tokensCache: { colorScheme: 'light' | 'dark'; tokens: Record<string, string> } | null = null
 
 /**
- * Memoized token generation: the same (hue, sat, lit) input always yields the
- * same token set, and applyWp / applyCustomTokens / applySettingsOverrides call
- * this repeatedly (slider drags, viewport re-applies), so cache the last result
- * and skip the 30+ hsl() string builds when nothing changed.
+ * Memoized token generation: the same (hue, sat, lit, scheme) input always
+ * yields the same token set, and applyWp / applyCustomTokens /
+ * applySettingsOverrides call this repeatedly (slider drags, viewport
+ * re-applies), so cache the last result and skip the 30+ hsl() string builds
+ * when nothing changed. The optional scheme forces the palette direction
+ * (light/dark) independently of the color's own lightness.
  */
-export function genTokens(hue: number, sat: number, lit: number): { colorScheme: 'light' | 'dark'; tokens: Record<string, string> } {
-  const key = `${hue}|${sat}|${lit}`
+export function genTokens(hue: number, sat: number, lit: number, scheme?: 'light' | 'dark'): { colorScheme: 'light' | 'dark'; tokens: Record<string, string> } {
+  const key = `${hue}|${sat}|${lit}|${scheme ?? 'auto'}`
   if (tokensCacheKey === key && tokensCache) return tokensCache
   tokensCacheKey = key
-  tokensCache = buildTokens(hue, sat, lit)
+  tokensCache = buildTokens(hue, sat, lit, scheme)
   return tokensCache
 }
 
-function buildTokens(hue: number, sat: number, lit: number): { colorScheme: 'light' | 'dark'; tokens: Record<string, string> } {
-  const dark = lit < 0.55
+function buildTokens(hue: number, sat: number, lit: number, scheme?: 'light' | 'dark'): { colorScheme: 'light' | 'dark'; tokens: Record<string, string> } {
+  const dark = scheme ?? lit < 0.55
   const h = (d: number) => ((hue + d) % 360 + 360) % 360
   const s = (d: number) => Math.max(0, Math.min(1, sat + d))
   const l = (d: number) => Math.max(0, Math.min(1, lit + d))

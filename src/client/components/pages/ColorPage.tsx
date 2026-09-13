@@ -18,9 +18,10 @@ function toHex(rgb: [number, number, number]): string {
 }
 
 export function ColorPage({ p, notify }: { p: ThemeSectionProps; notify: (msg: string, ok?: boolean) => void }) {
-  const { t, hue, sat, lit, setColor, extractColor, useStore } = p
+  const { t, hue, sat, lit, setColor, extractColor, setSchemeOverride, useStore } = p
   const store = useStore((s: ThemeStoreState) => s)
   const storeUrl = store.url
+  const schemeOverride = store.schemeOverride
   const [pickerOpen, setPickerOpen] = useState(false)
   const [extracting, setExtracting] = useState(false)
 
@@ -107,6 +108,18 @@ export function ColorPage({ p, notify }: { p: ThemeSectionProps; notify: (msg: s
             )
           })}
         </div>
+      </section>
+
+      {/* Forced interface scheme */}
+      <section className="dab-card dab-rise" style={{ '--d': 4 } as CSSProperties}>
+        <div className="dab-swatch-title">{t('schemeTitle')}</div>
+        <div className="dab-seg" style={{ '--w': '86px' } as CSSProperties}>
+          <div className="dab-seg-thumb" style={{ transform: `translateX(${schemeOverride === 'light' ? 0 : schemeOverride === 'dark' ? 86 : 172}px)` }} />
+          <button type="button" className={`dab-seg-item${schemeOverride === 'light' ? ' is-active' : ''}`} onClick={() => setSchemeOverride('light')}>{t('schemeLight')}</button>
+          <button type="button" className={`dab-seg-item${schemeOverride === 'dark' ? ' is-active' : ''}`} onClick={() => setSchemeOverride('dark')}>{t('schemeDark')}</button>
+          <button type="button" className={`dab-seg-item${schemeOverride === 'auto' ? ' is-active' : ''}`} onClick={() => setSchemeOverride('auto')}>{t('schemeAuto')}</button>
+        </div>
+        <p className="dab-hint" style={{ marginTop: 10 }}>{t('schemeHint')}</p>
       </section>
 
       {/* Eyedropper modal */}

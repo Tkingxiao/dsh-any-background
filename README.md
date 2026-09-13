@@ -70,24 +70,25 @@ A **DeepSeek Harness** appearance plugin that lets you fully customize the Web U
 - **Per-part Interface Blur** — Frosted-glass `backdrop-filter` blur (0–60 px) for each interface part, including a real backdrop on the composer and Cordis panel via stable host selectors.
 - **Conversation View Cards** — The message list is wrapped in a translucent card automatically, and the trajectory page gets whole-page opacity & blur controls, letting the wallpaper shine through the content.
 - **Theme Export / Import** — One-click export to a self-contained `dsh-any-theme.json` (config + wallpaper, video embedded as a data URL) and import to restore it anywhere.
+- **Appearance Presets & Profiles** — Six one-click presets (Default / Frosted glass / Minimal / Midnight / Cyber / Warm daylight) plus named profiles: save the current look and re-apply it anytime. A two-step confirm guards deletion.
+- **Wallpaper Rotation** — Add images to a rotation pool (thumbnail picker included) and let the wallpaper change by shuffle or order on every refresh, daily, or weekly. Advancing copies the chosen image into the active wallpaper slot, so export/import and color extraction keep working unchanged.
+- **Day/Night Auto Switch** — Assign a day profile and a night profile; the plugin switches automatically at fixed clock times or by following the OS dark mode.
+- **Forced Interface Scheme** — Force light or dark token palettes regardless of the accent color's lightness; `Auto` keeps the previous lightness-derived behavior.
+- **Scheme detection fix** — The scheme is now derived from the wallpaper's actual brightness (analyzed once per wallpaper frame) even when no theme color is picked, fixing light wallpapers showing with the host's dark-theme white fonts; forcing light/dark without a picked color now builds a neutral palette instead of doing nothing.
 - **File-based Persistence** — All settings are stored on the filesystem under `~/.dsh/.dsh-any-background-data/`, not `localStorage`.
 - **Bilingual** — Full Chinese / English UI with automatic locale detection.
 - **Theme Watchdog** — Re-asserts the custom theme if the host resets it.
 
 ## Recent Optimizations
 
-### v0.2.4
+### v0.2.5
 
-- **dsh 0.1.5 persistence fixed** — The theme/wallpaper RPC channel is now registered directly in the plugin's own `webServer` scope as a prefix route (keeping the same Host/Origin auth fence), instead of through `connection.rpc.handle`, whose effect binds to the connection service's context and never mounted on some 0.1.5 hosts — requests that previously dropped to the SPA fallback with 405 and never reached the disk now persist again. Verified working on both 0.1.2 and 0.1.5.
-- **Host compatibility declared** — Added `engines.dsh: ">=0.1.2-rc.1"` to declare which DeepSeek Harness host versions the plugin supports.
-- **Dark badge tokens fixed (issue #9)** — In the dark preset, the `*-tertiary` badge surfaces (trajectory tool/context badges, connection pill, plan chip) were tinted nearly the same as their background, making light label text unreadable. They now use the native dark 800/900 steps, so bright text sits on a properly dark badge.
-
-### v0.2.3
-
-- **Wide tables stay in the column** — When the chat region opacity/blur is raised (which makes the chat border visible), wide markdown tables are pulled back inside the text column and scroll horizontally at the border instead of bleeding past it. Left untouched while the border is invisible, preserving DSH's default behavior.
-- **Network URL wallpaper** — Paste an image URL and the plugin downloads it and writes it to the local wallpaper file (replacing the previous image). Because the remote source lands as a local persisted file, theme export/import keep working with no extra steps: an exported theme embeds the image data, and the receiving side never needs access to the original URL.
-- **Editor confirm button visible in dark mode** — The background-editor "Confirm" button now matches the Cancel/Reset buttons (solid surface with a clear frame and legible label) instead of a translucent primary tint, so it no longer disappears in dark themes.
-- **Maintenance cleanup** — Removed an unused `@deepseek-ai/dsh-client-ui-renderer` entry from the client inject list and aligned self-owned RPC error codes with the new harness convention.
+- **Wallpaper MIME fixed — GIF/APNG wallpapers now work** — `readWallpaper` unconditionally re-declared every stored image as `image/jpeg`, even though URL-fetched PNG/WebP/GIF bytes are written under the same file. The real format is now sniffed from the magic bytes on every read, so animated GIF wallpapers (and PNG/WebP color profiles) survive refreshes correctly.
+- **Appearance presets** — Six built-in one-click looks (Default, Frosted glass, Minimal, Midnight, Cyber, Warm daylight) on the Profile page, each bundling the theme color, per-part opacities, blurs and tints — never touching your wallpaper.
+- **Saved profiles** — Save the current appearance as a named profile, apply/delete with a two-step confirm, and let the day/night schedule (below) swap between them.
+- **Wallpaper rotation** — A rotation pool on the Background page: add images (thumbnail strip), choose shuffle/in-order and every-refresh/daily/weekly cadence, or hit "Switch now". The chosen image is copied into the active wallpaper slot server-side, so all existing pipelines (boot restore, export, color extraction) work unchanged.
+- **Day/night auto switch** — Pick a day and a night profile and a trigger — fixed clock times or the OS `prefers-color-scheme` — and the plugin applies the matching profile automatically (checked every 30 s; appearance only, wallpaper untouched).
+- **Forced interface scheme** — A Light/Dark/Auto segmented control on the Color page regenerates the whole token palette in the forced direction instead of deriving it from the accent lightness.
 
 ## Installation
 
