@@ -1,4 +1,4 @@
-import { rWp, rWpImage, rWpVideo, rBgState, rVideoBgState, rBl, rWop, rOps, rSop, rColor, rHasColor, rBlurs, rBgMode, rChatTextOpacity, rTrajectoryOpacity, rScheme, rSchemeOverride, cfg, setWpUrl, rBgDark, setBgDark, disposeVideoObjectUrl } from './state'
+import { rWp, rWpImage, rWpVideo, rBgState, rVideoBgState, rBl, rWop, rOps, rSop, rColor, rHasColor, rBlurs, rBgMode, rChatTextOpacity, rTrajectoryOpacity, rScheme, rColorScheme, rSchemeOverride, cfg, setWpUrl, rBgDark, setBgDark, disposeVideoObjectUrl } from './state'
 import type { BackgroundType, GeneratedBgParams, PartOpacities, PartBlurs } from './types'
 import { genTokens, toRgba, extractWallpaperColor, analyzeFrameDark } from './utils/color'
 import { createDynamicBackground, defaultParamsFor } from './utils/bg-generators'
@@ -116,9 +116,11 @@ let lastBgKey = ''
 /** Palette source for the token rule: the picked color; a forced scheme
  *  without a picked color builds a neutral near-gray palette in that
  *  direction; auto without a color keeps the host's own palette (null — only
- *  the label direction gets asserted). */
+ *  the label direction gets asserted). The palette direction follows the
+ *  color's own lightness (rColorScheme), not the wallpaper verdict, so the
+ *  surfaces keep contrasting with the fonts. */
 function paletteTokens(): Record<string, string> | null {
-  const scheme = rScheme()
+  const scheme = rColorScheme()
   if (rHasColor()) {
     const [h, s, l] = rColor()
     return genTokens(h, s, l, scheme).tokens
@@ -138,12 +140,17 @@ function applyCustomTokensNow(ops: PartOpacities): void {
   const palette = paletteTokens()
   // Clone: the verdict below mutates, and genTokens' result is cached/shared.
   const tokens: Record<string, string> = { ...palette }
-  // The background brightness verdict (wallpaper frame or generated frame)
-  // owns the label direction while the scheme is automatic — the text sits on
-  // the background, so its actual brightness wins over any heuristic.
-  if (verdict !== null && override === 'auto') {
-    const font = verdict ? '#fff' : '#000'
-    for (const name of LABEL_TOKENS) tokens[name] = font
+  // Font direction while the scheme is automatic: a picked color owns it —
+  // its palette direction (rColorScheme) keeps the labels contrasted with the
+  // surfaces they sit on, so a very dark pick flips to white fonts even over
+  // a light wallpaper (and vice versa). Without a pick the wallpaper
+  // brightness verdict decides: the text then sits directly on the wallpaper.
+  if (override === 'auto') {
+    const fontDark = hasColor ? rColorScheme() === 'dark' : verdict
+    if (fontDark !== null && fontDark !== undefined) {
+      const font = fontDark ? '#fff' : '#000'
+      for (const name of LABEL_TOKENS) tokens[name] = font
+    }
   }
   try {
     const forceDark = scheme === 'dark'
@@ -247,7 +254,7 @@ export function applySettingsOverrides(op: number): void {
   // SETTINGS_STYLE_RULE fall back to the body layer tokens that
   // applyCustomTokens rewrites with the homepage card alpha.
   const [h, s, l] = rColor()
-  const tokens = genTokens(h, s, l, rScheme()).tokens
+  const tokens = genTokens(h, s, l, rColorScheme()).tokens
   const layer1 = tokens['--dsw-alias-bg-layer-1']
   const layer2 = tokens['--dsw-alias-bg-layer-2']
   const layer3 = tokens['--dsw-alias-bg-layer-3']
@@ -281,7 +288,7 @@ export const TRAJECTORY_STYLE_RULE =
 export function applyTrajectoryOverrides(op: number): void {
   // Always written explicitly so the view stays owned by this slider at 100%.
   const [h, s, l] = rColor()
-  const tokens = genTokens(h, s, l, rScheme()).tokens
+  const tokens = genTokens(h, s, l, rColorScheme()).tokens
   const layer1 = tokens['--dsw-alias-bg-layer-1']
   const layer2 = tokens['--dsw-alias-bg-layer-2']
   const layer3 = tokens['--dsw-alias-bg-layer-3']
@@ -296,6 +303,13 @@ export function applyTrajectoryOverrides(op: number): void {
   }
 }
 
+/** Register a callback fired when a wallpaper-extracted theme color is
+ *  adopted by the auto-adaptation path, so the section can re-register the
+ *  host skin, sync the editor UI and persist the pick (wallpaper.ts cannot
+ *  do those itself — they live in the section). */
+let colorAdoptedListener: ((hsl: [number, number, number]) => void) | null = null
+export function onColorAdopted(cb: (hsl: [number, number, number]) => void): void { colorAdoptedListener = cb }
+
 /** Apply the theme color: use the saved pick directly, or fall back to
  *  extracting a dominant color from the current wallpaper. */
 export function applyThemeColor(): void {
@@ -309,7 +323,12 @@ export function applyThemeColor(): void {
     // state; the image slot's framing does not apply to the snapshot.
     const st = cfg.backgroundType === 'video' ? rVideoBgState() : rBgState()
     void extractWallpaperColor(url, st).then(hsl => {
-      if (hsl) cfg.color = hsl
+      if (hsl) {
+        cfg.color = hsl
+        // The listener runs before applyWp so the freshly registered skin and
+        // the token pass below describe the same color.
+        colorAdoptedListener?.(hsl)
+      }
       applyWp()
     })
   } else {
@@ -730,7 +749,7 @@ export function applyViewCards(): void {
   discoverParts()
   if (centerEl === null) return
   const [h, s, l] = rColor()
-  const surface = genTokens(h, s, l, rScheme()).tokens['--dsw-alias-bg-layer-1']
+  const surface = genTokens(h, s, l, rColorScheme()).tokens['--dsw-alias-bg-layer-1']
   VIEW_CARDS.forEach((spec, i) => {
     const target = discoverViewTarget(i, spec)
     if (target === null) return

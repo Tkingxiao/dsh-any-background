@@ -134,15 +134,27 @@ export function rSchemeOverride(): SchemeOverride {
 }
 export function rActiveProfile(): string | null { return cfg.activeProfile }
 
-/** Effective interface scheme: a forced override wins; otherwise the active
- *  background's brightness verdict (the text sits on the wallpaper), then the
- *  picked color's lightness. Without any of those, stay light. All genTokens
- *  call sites pass this so the palette and the scheme flag never diverge. */
+/** Effective interface scheme (drives data-ds-dark-theme / color-scheme): a
+ *  forced override wins; in auto a picked color decides through its palette
+ *  direction (keeps native controls aligned with the drawn surfaces), and
+ *  without a pick the background's brightness verdict does. Stay light as the
+ *  last fallback. */
 export function rScheme(): 'light' | 'dark' {
   const o = rSchemeOverride()
   if (o !== 'auto') return o
-  const dark = rBgDark() ?? (rHasColor() ? rColor()[2] < 0.55 : false)
-  return dark ? 'dark' : 'light'
+  if (rHasColor()) return rColorScheme()
+  return rBgDark() ? 'dark' : 'light'
+}
+
+/** Direction the color palette itself is built in: a forced override wins; in
+ *  auto the theme color's own lightness decides (0.2.4 behavior) so surfaces
+ *  always contrast with the palette's label fonts — the wallpaper verdict must
+ *  not drag a dark color's surfaces into a light build (and vice versa) or
+ *  text and surfaces converge. */
+export function rColorScheme(): 'light' | 'dark' {
+  const o = rSchemeOverride()
+  if (o !== 'auto') return o
+  return rHasColor() && rColor()[2] < 0.55 ? 'dark' : 'light'
 }
 
 /** Snapshot of the appearance fields a profile/preset restores. */

@@ -54,11 +54,13 @@ export function persistConfig(): void {
   void rpcCall('writeConfig', { config: cfg })
 }
 
-/** Load the persisted theme (config + wallpaper + video URL) from the node half. */
-export async function loadPersisted(): Promise<void> {
+/** Load the persisted theme (config + wallpaper + video URL) from the node half.
+ *  Resolves true when the server advanced a due wallpaper rotation during the
+ *  read — the restored wallpaper is then already the new pick. */
+export async function loadPersisted(): Promise<boolean> {
   const data = await rpcCall('read', {})
   if (data && typeof data === 'object') {
-    const d = data as { config?: unknown; wallpaper?: unknown; videoUrl?: unknown }
+    const d = data as { config?: unknown; wallpaper?: unknown; videoUrl?: unknown; rotated?: unknown }
     if (d.config) adoptConfig(d.config)
     // Uploaded image and video keep their own slots so type switches never
     // discard them; in image mode the caller points wpUrl at it.
@@ -69,7 +71,9 @@ export async function loadPersisted(): Promise<void> {
     if (typeof d.videoUrl === 'string') setWpVideoUrl(d.videoUrl, cfg.videoMime)
     else if (d.videoUrl === null) setWpVideoUrl(null, null)
     if (cfg.backgroundType === 'image') setWpUrl(d.wallpaper === null ? null : d.wallpaper as string | null)
+    return d.rotated === true
   }
+  return false
 }
 
 /** Persist a wallpaper (null removes it); one-shot, no debounce. */

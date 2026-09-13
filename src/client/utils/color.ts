@@ -36,7 +36,19 @@ export function genTokens(hue: number, sat: number, lit: number, scheme?: 'light
 }
 
 function buildTokens(hue: number, sat: number, lit: number, scheme?: 'light' | 'dark'): { colorScheme: 'light' | 'dark'; tokens: Record<string, string> } {
-  const dark = scheme ?? lit < 0.55
+  // `scheme ?? lit < 0.55` would hand back the STRING 'light' (truthy) and
+  // route both forced directions into the dark branch — compare explicitly.
+  const dark = scheme !== undefined ? scheme === 'dark' : lit < 0.55
+  // Every token is an offset around the base lightness, so a scheme that
+  // contradicts the pick's band (a forced dark over a light color) would
+  // build "dark" surfaces that stay light. Mirror the lightness into the
+  // target band instead — hue/saturation carry over, the stored pick itself
+  // is untouched (this is a display-time remap, not a config change).
+  if (scheme !== undefined && (lit < 0.55) !== dark) {
+    lit = dark
+      ? Math.min(0.44, Math.max(0.14, 1 - lit))
+      : Math.max(0.6, Math.min(0.88, 1 - lit))
+  }
   const h = (d: number) => ((hue + d) % 360 + 360) % 360
   const s = (d: number) => Math.max(0, Math.min(1, sat + d))
   const l = (d: number) => Math.max(0, Math.min(1, lit + d))
@@ -256,7 +268,10 @@ function extractWallpaperPalette(dataUrl: string, bgState: BgState): Promise<Col
           const s = max === 0 ? 0 : (max - min) / max
           // Include all non-extreme pixels in luminance; only vivid pixels in
           // palette buckets so we don't theme around gray/black/white.
-          totalLum += v
+          // Rec.709 luma — the SAME measure analyzeFrameDark uses for the
+          // brightness verdict, so the extracted lightness band and the
+          // verdict can never disagree on a saturated frame.
+          totalLum += (0.2126 * r + 0.7152 * gg + 0.0722 * b) / 255
           sampled++
           if (s < 0.08 || v < 0.12 || v > 0.97) continue
           const key = ((r >> 4) << 8) | ((gg >> 4) << 4) | (b >> 4)

@@ -73,7 +73,7 @@ A **DeepSeek Harness** appearance plugin that lets you fully customize the Web U
 - **Appearance Presets & Profiles** — Six one-click presets (Default / Frosted glass / Minimal / Midnight / Cyber / Warm daylight) plus named profiles: save the current look and re-apply it anytime. A two-step confirm guards deletion.
 - **Wallpaper Rotation** — Add images to a rotation pool (thumbnail picker included) and let the wallpaper change by shuffle or order on every refresh, daily, or weekly. Advancing copies the chosen image into the active wallpaper slot, so export/import and color extraction keep working unchanged.
 - **Day/Night Auto Switch** — Assign a day profile and a night profile; the plugin switches automatically at fixed clock times or by following the OS dark mode.
-- **Forced Interface Scheme** — Force light or dark token palettes regardless of the accent color's lightness; `Auto` keeps the previous lightness-derived behavior.
+- **Forced Interface Scheme** — Force light or dark token palettes regardless of the accent color's lightness; in `Auto` both the surface and font directions follow the accent's lightness (dark pick → light fonts, light pick → dark fonts), falling back to the wallpaper's perceived brightness when no color is picked.
 - **Scheme detection fix** — The scheme is now derived from the wallpaper's actual brightness (analyzed once per wallpaper frame) even when no theme color is picked, fixing light wallpapers showing with the host's dark-theme white fonts; forcing light/dark without a picked color now builds a neutral palette instead of doing nothing.
 - **File-based Persistence** — All settings are stored on the filesystem under `~/.dsh/.dsh-any-background-data/`, not `localStorage`.
 - **Bilingual** — Full Chinese / English UI with automatic locale detection.
@@ -89,6 +89,14 @@ A **DeepSeek Harness** appearance plugin that lets you fully customize the Web U
 - **Wallpaper rotation** — A rotation pool on the Background page: add images (thumbnail strip), choose shuffle/in-order and every-refresh/daily/weekly cadence, or hit "Switch now". The chosen image is copied into the active wallpaper slot server-side, so all existing pipelines (boot restore, export, color extraction) work unchanged.
 - **Day/night auto switch** — Pick a day and a night profile and a trigger — fixed clock times or the OS `prefers-color-scheme` — and the plugin applies the matching profile automatically (checked every 30 s; appearance only, wallpaper untouched).
 - **Forced interface scheme** — A Light/Dark/Auto segmented control on the Color page regenerates the whole token palette in the forced direction instead of deriving it from the accent lightness.
+
+### v0.2.5 fixes & polish
+
+- **Forced light/dark now actually differ — truthiness bug in the scheme check** — `buildTokens` derived the direction with `scheme ?? lit < 0.55`; a `scheme='light'` string is truthy, so both forced directions rendered the dark branch. The comparison is now explicit and the two token sets (78 of 79 entries) differ correctly.
+- **Accent lightness remapping under a forced scheme** — When the forced direction contradicts the pick's band (a light accent under forced dark), the lightness is mirrored into the target band (dark 0.14–0.44 / light 0.6–0.88) before building tokens; hue and saturation carry over and the stored pick itself is untouched.
+- **Auto-mode light/dark rules rebuilt** — With a picked color, the font and surface directions both follow the accent lightness (very dark → white fonts, very light → black fonts; no more fighting the wallpaper verdict). Without a pick, the font direction follows the wallpaper's perceived (Rec.709) brightness, and the global scheme flag (native controls, `color-scheme`) stays aligned with the palette direction.
+- **Auto color-extraction pipeline completed** — A wallpaper-extracted theme color used to land in the in-memory config only: the host skin was never re-registered (and never would be again), the pick was never persisted, and the editor wheel never synced. The auto path now performs the full adaptation, and extraction measures brightness with the same Rec.709 luma as the wallpaper verdict so both always agree on one image.
+- **Flash-free wallpaper rotation** — A due rotation now advances server-side during the refresh itself (the `read` handler advances the pool before returning the wallpaper), so the first paint already shows the new picture — no more "old wallpaper flashes, then suddenly switches". The client re-extracts the theme color from the new picture and persists it; the client-side advance remains as a fallback.
 
 ## Installation
 

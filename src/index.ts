@@ -713,6 +713,57 @@ const NS = 'dshAnyBackground'
 const RPC_CHANNEL = '/dsh-any-background'
 const RPC_BODY_MAX = 300 * 1024 * 1024
 
+/** ISO week key — mirrors the client's rotationDue so daily/weekly cadence
+ *  decisions agree across both halves. */
+function isoWeekKey(d: Date): string {
+  const t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()))
+  const day = t.getUTCDay() || 7
+  t.setUTCDate(t.getUTCDate() + 4 - day)
+  const yearStart = new Date(Date.UTC(t.getUTCFullYear(), 0, 1))
+  const week = Math.ceil(((t.getTime() - yearStart.getTime()) / 86400000 + 1) / 7)
+  return `${t.getUTCFullYear()}-W${week}`
+}
+
+/** Advance the rotation pool when its cadence is due: pick the next item,
+ *  copy it over the active wallpaper slot, and persist the rotation state.
+ *  Runs inside `read` so a reload restores the NEW wallpaper directly — the
+ *  old one never reaches the screen. The client's maybeRotate stays as a
+ *  fallback and skips when this already advanced (the `rotated` flag). */
+async function advanceRotationIfDue(): Promise<boolean> {
+  const cfg = await readConfig()
+  const rot = cfg.rotation
+  if (!rot.enabled || rot.items.length === 0) return false
+  const now = new Date()
+  const last = rot.lastRotate !== null ? new Date(rot.lastRotate) : null
+  const due = rot.interval === 'reload'
+    || last === null || isNaN(last.getTime())
+    || (rot.interval === 'daily'
+      ? last.toDateString() !== now.toDateString()
+      : isoWeekKey(last) !== isoWeekKey(now))
+  if (!due) return false
+  const n = rot.items.length
+  let idx = rot.current
+  if (rot.mode === 'shuffle' && n > 1) {
+    while (idx === rot.current) idx = Math.floor(Math.random() * n)
+  } else {
+    idx = (rot.current + 1) % n
+  }
+  const item = rot.items[idx]
+  if (item === undefined) return false
+  try {
+    const buf = await readFile(dshHomePath(DATA_DIR, ROTATION_DIR, item.file))
+    await writeFile(wallpaperPath(), buf)
+  } catch (e) {
+    console.error('dsh-any-background: failed to advance the rotation pool', e)
+    return false
+  }
+  cfg.rotation = { ...rot, current: idx, lastRotate: now.toISOString() }
+  // A failed write means lastRotate/current never land on disk — report "not
+  // advanced" so the client-side fallback performs (and persists) the switch.
+  if (!(await writeConfig(cfg))) return false
+  return true
+}
+
 /** Dispatch one decoded RPC method to the matching persistence routine and
  *  return the wire `result` half of the server-response envelope. */
 async function handleRpcMethod(
@@ -722,9 +773,13 @@ async function handleRpcMethod(
   const method = endpoint.slice(`${NS}/`.length)
   try {
     switch (method) {
-      case 'read':
+      case 'read': {
+        // Advance a due rotation BEFORE reading the wallpaper slot, so the
+        // restore on (re)load paints the new picture from the first apply.
+        const rotated = await advanceRotationIfDue()
         // The video travels as a URL, never as bytes.
-        return { ok: true, value: { config: await readConfig(), wallpaper: await readWallpaper(), videoUrl: await videoUrl() } }
+        return { ok: true, value: { config: await readConfig(), wallpaper: await readWallpaper(), videoUrl: await videoUrl(), rotated } }
+      }
       case 'writeConfig':
         return { ok: true, value: await writeConfig((payload as { config?: unknown } | null)?.config as ThemeConfig ?? {}) }
       case 'setWallpaper':

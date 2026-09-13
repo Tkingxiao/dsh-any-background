@@ -8,9 +8,9 @@
 import { defineStore } from './runtime'
 import type { Ctx, RpcResultLike, BoundActions, ThemeSectionProps, PartOpacities, PartBlurs, BackgroundType, GeneratedBgParams, ProfileAppearance, ProfileEntry, RotationItem, ScheduleConfig, SchemeOverride } from './types'
 import { NS, zh, en } from './i18n'
-import { cfg, rHasColor, rColor, rWp, rWpImage, rWpVideo, rBgState, rVideoBgState, setWpUrl, setWpImageUrl, setWpVideoUrl, setWpVideoSnapshot, setBgState, adoptConfig, DEFAULT_CONFIG, setBgDark, rBgDark, rProfiles, rRotation, rSchedule, rScheme, rSchemeOverride, currentAppearance, applyAppearance } from './state'
+import { cfg, rHasColor, rColor, rWp, rWpImage, rWpVideo, rBgState, rVideoBgState, setWpUrl, setWpImageUrl, setWpVideoUrl, setWpVideoSnapshot, setBgState, adoptConfig, DEFAULT_CONFIG, setBgDark, rBgDark, rProfiles, rRotation, rSchedule, rScheme, rColorScheme, rSchemeOverride, currentAppearance, applyAppearance } from './state'
 import { RPC_CHANNEL, VIDEO_SERVE_URL, initRpc, saveConfig, flushSave, loadPersisted, persistWallpaper, persistVideo, persistConfig, uploadVideo, rotationAdd, rotationRemove, rotationActivate } from './rpc'
-import { applyWp, teardownWp, applySettingsOverrides, SETTINGS_STYLE_RULE, TRAJECTORY_STYLE_RULE, INPUT_BLUR_RULE, PLACEHOLDER_RULE, watchParts, watchThemeResets, regenerateGeneratedBg, setBackgroundType, updateGeneratedBg, applyThemeColor, onGeneratedSnapshot, watchWallpaperDragQuality, clearThemeTokens, onVerdictApplied, LABEL_TOKENS } from './wallpaper'
+import { applyWp, teardownWp, applySettingsOverrides, SETTINGS_STYLE_RULE, TRAJECTORY_STYLE_RULE, INPUT_BLUR_RULE, PLACEHOLDER_RULE, watchParts, watchThemeResets, regenerateGeneratedBg, setBackgroundType, updateGeneratedBg, applyThemeColor, onGeneratedSnapshot, watchWallpaperDragQuality, clearThemeTokens, onVerdictApplied, onColorAdopted, LABEL_TOKENS } from './wallpaper'
 import { genTokens, hslToHsv, hsvToHsl, extractWallpaperColor } from './utils/color'
 import { captureVideoSnapshot } from './utils/video'
 import { readImgAsync, makeThumb } from './utils/image'
@@ -46,7 +46,7 @@ export function apply(ctx: Ctx): void {
       let colorScheme: 'light' | 'dark'
       let tokens: Record<string, string>
       if (rHasColor()) {
-        ;({ colorScheme, tokens } = genTokens(h ?? rColor()[0], s ?? rColor()[1], l ?? rColor()[2], rScheme()))
+        ;({ colorScheme, tokens } = genTokens(h ?? rColor()[0], s ?? rColor()[1], l ?? rColor()[2], rColorScheme()))
       } else if (rSchemeOverride() !== 'auto') {
         const dark = rScheme() === 'dark'
         ;({ colorScheme, tokens } = genTokens(220, 0.04, dark ? 0.14 : 0.92, dark ? 'dark' : 'light'))
@@ -82,6 +82,16 @@ export function apply(ctx: Ctx): void {
   // skin must be rebuilt so its fonts follow the new wallpaper.
   onVerdictApplied(() => {
     if (!rHasColor()) registerCustom()
+  })
+  // A wallpaper-extracted color adopted by the auto path (applyThemeColor's
+  // no-saved-pick branch) must finish the full adaptation here: register the
+  // skin in the color's direction, persist, and sync the editor wheel — the
+  // bare cfg.color write in wallpaper.ts cannot reach any of those.
+  onColorAdopted(hsl => {
+    registerCustom(hsl[0], hsl[1], hsl[2])
+    saveConfig()
+    colorRev++
+    bound?.syncColor(hslToHsv(hsl[0], hsl[1], hsl[2]), colorRev)
   })
   ctx.effect(() => () => {
     customDispose?.()
@@ -186,9 +196,21 @@ export function apply(ctx: Ctx): void {
   }
 
   // ── Wallpaper rotation ───────────────────────────────────────────────────────
+  /** Extract the theme color once from a freshly activated wallpaper and run
+   *  the full adaptation (host skin + editor wheel sync); the caller persists. */
+  const adoptWallpaperColor = async (dataUrl: string): Promise<void> => {
+    const hsl = await extractWallpaperColor(dataUrl, rBgState())
+    if (!hsl) return
+    cfg.color = hsl
+    registerCustom(hsl[0], hsl[1], hsl[2])
+    colorRev++
+    bound?.syncColor(hslToHsv(hsl[0], hsl[1], hsl[2]), colorRev)
+  }
+
   /** Activate a rotation item: the server copies its bytes into the wallpaper
    *  slot; the client applies the returned data URL through the normal image
-   *  path (theme re-extraction included). */
+   *  path, then re-extracts the theme color from the new picture so the
+   *  palette follows the rotation. */
   const applyRotationIndex = async (idx: number, auto: boolean): Promise<boolean> => {
     const rot = rRotation()
     if (idx < 0 || idx >= rot.items.length) return false
@@ -200,6 +222,11 @@ export function apply(ctx: Ctx): void {
     setWpImageUrl(r.dataUrl)
     if (cfg.backgroundType === 'image') setWpUrl(r.dataUrl)
     cfg.rotation = { ...rot, current: idx, lastRotate: auto || rot.lastRotate === null ? new Date().toISOString() : rot.lastRotate }
+    // The picture just switched, so any saved pick describes the old wallpaper:
+    // extract once from the new one to re-adapt (placement state matches the
+    // previous image, so a size mismatch makes the extractor fall back to the
+    // whole picture — the desired behavior for a fresh wallpaper).
+    if (cfg.backgroundType === 'image') await adoptWallpaperColor(r.dataUrl)
     applyThemeColor()
     syncBg()
     saveConfig()
@@ -279,17 +306,32 @@ export function apply(ctx: Ctx): void {
   // blurs land as soon as the shell renders.
   watchParts()
   // Load the file-backed theme and re-apply once it lands (defaults are already
-  // applied above; the deferred restore below re-asserts too).
-  void loadPersisted().then(async () => {
+  // applied above; the deferred restore below re-asserts too). The server
+  // advances a due rotation inside the read itself, so the restored wallpaper
+  // is already the new pick and paints from the first apply — no old→new flash.
+  void loadPersisted().then(async (serverRotated) => {
     syncMetaNow()
     // Re-register the skin with the restored color so UI and theme never diverge.
     if (rHasColor()) {
       const [h, s, l] = rColor()
       registerCustom(h, s, l)
     }
-    // Wallpaper rotation: advance before the branch restore below so the freshly
-    // rotated wallpaper (not the stale persisted one) is what gets re-applied.
-    await maybeRotate()
+    if (serverRotated) {
+      // The wallpaper was swapped server-side while the theme color still
+      // describes the previous picture: re-extract once so the palette
+      // follows the rotation (same adaptation as a client-side advance).
+      // Persist the extracted pick — the disk still holds the old color, and
+      // without this every later reload would restore it over the new
+      // wallpaper.
+      if (cfg.backgroundType === 'image' && rWp()) {
+        await adoptWallpaperColor(rWp()!)
+        saveConfig()
+      }
+    } else {
+      // Fallback client-side advance (server flag missing / older half), still
+      // before the branch restore so the fresh wallpaper is what gets applied.
+      await maybeRotate()
+    }
     // Regenerate on reload if enabled, else reconstruct from saved params.
     if (cfg.backgroundType === 'video') {
       const v = rWpVideo()
