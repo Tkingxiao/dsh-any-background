@@ -1,13 +1,18 @@
 # dsh-any-background
 
 <p align="center">
+  <a href="https://www.npmjs.com/package/dsh-any-background"><img alt="npm version" src="https://img.shields.io/npm/v/dsh-any-background?color=4d6bfe"></a>
+  <a href="https://www.npmjs.com/package/dsh-any-background"><img alt="npm monthly downloads" src="https://img.shields.io/npm/dm/dsh-any-background?color=4d6bfe"></a>
+  <a href="https://github.com/Tkingxiao/dsh-any-background/blob/main/LICENSE"><img alt="License: MIT" src="https://img.shields.io/npm/l/dsh-any-background?color=4d6bfe"></a>
+  <a href="https://www.npmjs.com/package/@deepseek-ai/dsh?activeTab=versions"><img alt="Supported DSH version: 0.1.5-rc.2" src="https://img.shields.io/badge/DSH-0.1.5--rc.2-4d6bfe" /></a>
+  <a href="https://github.com/topics/dsh-better-sidebar"><img alt="Plugin ecosystem: GitHub topic dsh-better-sidebar" src="https://img.shields.io/badge/plugin%20ecosystem-topic%20dsh--better--sidebar-4d6bfe" /></a><br /><br />
   <a href="https://github.com/Tkingxiao/dsh-any-background"><img src="https://img.shields.io/github/stars/Tkingxiao/dsh-any-background?style=social" alt="GitHub stars"></a>
   <a href="https://dsh.directory/plugins/tkingxiao/dsh-any-background"><img src="https://dsh.directory/badges/listed.svg" alt="dsh.directory listed"></a>
 </p>
 
 English | [中文](README.zh.md)
 
-A **DeepSeek Harness** appearance plugin that lets you fully customize the Web UI — custom theme color, background wallpaper, and fine-grained per-part opacity & blur controls.
+A **DeepSeek Harness** appearance plugin: custom theme color, background wallpaper (image / video / algorithmically generated), and fine-grained per-surface opacity & blur controls. This release targets **DSH 0.1.5-rc.2**.
 
 ---
 
@@ -66,20 +71,29 @@ A **DeepSeek Harness** appearance plugin that lets you fully customize the Web U
 - **Position Editor** — One shared editor for images and videos: drag to pan, scroll to zoom, one-click reset. Image and video placements are stored separately and never overwrite each other.
 - **Layout Modes** — Fit / Fill / Stretch / Tile / Center for both images and videos; in Fit mode the editor-committed framing stays consistent across window resizes and cross-monitor moves.
 - **Generated Dynamic Backgrounds** — Choose mesh gradient, Shader, or geometric patterns with adjustable spread, intensity, and seed locking.
-- **Per-part Interface Opacity** — Independent sliders for the main background, sidebar, cards & panels (including the dropdowns and menus around the dialog), the input & controls (composer box, Cordis panel), plus the settings panel and wallpaper.
-- **Per-part Interface Blur** — Frosted-glass `backdrop-filter` blur (0–60 px) for each interface part, including a real backdrop on the composer and Cordis panel via stable host selectors.
+- **Per-surface Interface Opacity** — Independent sliders for the main background, sidebar, cards & panels (including the dropdowns and menus around the dialog), the input & controls (composer box, Cordis panel), the settings panel, the conversation text frame, the trajectory view, the better-sidebar workbench, and produced / highlighted content.
+- **Per-surface Interface Blur** — Frosted-glass `backdrop-filter` blur (0–60 px) per surface, including a real backdrop on the composer, the Cordis panel and popover surfaces via stable host selectors.
+- **Produced / Highlights** — Code blocks in conversation content (with their language banner), inline `code` highlight chips and produced chips share one opacity + blur slider. The opacity is the alpha of **each surface's own background color** (no second color stacked on top of the original), and the blur frosts that same layer so the wallpaper shows through the content.
+- **better-sidebar workbench** — With dsh-better-sidebar installed, a dedicated slider pair (`panelOpacity` / `blurs.panel`) takes over its bottom workbench panel and the native right sidebar's surface tokens. Without that plugin the row is hidden and the sliders are inert.
 - **Conversation View Cards** — The message list is wrapped in a translucent card automatically, and the trajectory page gets whole-page opacity & blur controls, letting the wallpaper shine through the content.
 - **Theme Export / Import** — One-click export to a self-contained `dsh-any-theme.json` (config + wallpaper, video embedded as a data URL) and import to restore it anywhere.
 - **Appearance Presets & Profiles** — Six one-click presets (Default / Frosted glass / Minimal / Midnight / Cyber / Warm daylight) plus named profiles: save the current look and re-apply it anytime. A two-step confirm guards deletion.
 - **Wallpaper Rotation** — Add images to a rotation pool (thumbnail picker included) and let the wallpaper change by shuffle or order on every refresh, daily, or weekly. Advancing copies the chosen image into the active wallpaper slot, so export/import and color extraction keep working unchanged.
 - **Day/Night Auto Switch** — Assign a day profile and a night profile; the plugin switches automatically at fixed clock times or by following the OS dark mode.
 - **Forced Interface Scheme** — Force light or dark token palettes regardless of the accent color's lightness; in `Auto` both the surface and font directions follow the accent's lightness (dark pick → light fonts, light pick → dark fonts), falling back to the wallpaper's perceived brightness when no color is picked.
-- **Scheme detection fix** — The scheme is now derived from the wallpaper's actual brightness (analyzed once per wallpaper frame) even when no theme color is picked, fixing light wallpapers showing with the host's dark-theme white fonts; forcing light/dark without a picked color now builds a neutral palette instead of doing nothing.
 - **File-based Persistence** — All settings are stored on the filesystem under `~/.dsh/.dsh-any-background-data/`, not `localStorage`.
 - **Bilingual** — Full Chinese / English UI with automatic locale detection.
 - **Theme Watchdog** — Re-asserts the custom theme if the host resets it.
 
-## Recent Optimizations
+## Changelog
+
+### v0.2.7
+
+- **New "Produced / Highlights" sliders** — Code blocks in conversation content (language banner included), inline `code` highlight chips and produced chips now share one opacity + blur slider. The opacity is the alpha of each surface's **own background color**: 100% reproduces the host look byte-for-byte, and lowering it fades exactly that color out instead of stacking a second one on top of the original (previously the code block's outer wrapper stayed opaque, so the slider merely blended the plugin palette into it and the blur had nothing to reveal). The blur frosts that same layer with `backdrop-filter`. Code blocks in the document preview — which live outside `.md-code-block` and take their color from `--shiki-background` alone — are covered too.
+- **New better-sidebar workbench sliders** — `panelOpacity` / `blurs.panel` drive dsh-better-sidebar's bottom workbench panel through `[data-dsh-bottom-panel]` and the native right sidebar through `[data-sidebar-right-panel]`, re-scoping the panel's surface tokens to the plugin palette (dedicated token remap + panel blur rules). Without that plugin the row is hidden and the sliders are inert.
+- **Popover blur fixed** — A new `POPOVER_BLUR_RULE` makes the "card" blur slider land on dropdown / popover surfaces as well, not just the panels inside the dialog.
+- **Host support narrowed to DSH 0.1.5-rc.2** — `engines.dsh` and `dsh.compatibility.dshReleases` now declare that single release (verified on it) and the old 8-version matrix is gone from the README. `panelOpacity` joined the full profile / export / day-night-schedule pipeline.
+- **Six presets carry the new parameters** — workbench opacity follows each preset (Frosted glass 0.85, Midnight 0.8, Warm daylight 0.75, …); the produced slider defaults to 100% (the untouched host look).
 
 ### v0.2.6
 
@@ -95,28 +109,16 @@ A **DeepSeek Harness** appearance plugin that lets you fully customize the Web U
 - **Network video URL wallpaper** — The "From URL" flow now recognizes video links: the server streams the download into the video slot (2 GB cap, 60 s inactivity timeout, MIME taken from Content-Type or the file extension) and records the MIME in the config; playback, snapshot capture and color extraction continue through the existing serve route.
 - **Cleanup** — Removed the boot performance probe and dead static-snapshot helpers; URL-downloaded wallpapers are written to disk directly with no transient base64 string.
 
-### v0.2.5
-
-- **Wallpaper MIME fixed — GIF/APNG wallpapers now work** — `readWallpaper` unconditionally re-declared every stored image as `image/jpeg`, even though URL-fetched PNG/WebP/GIF bytes are written under the same file. The real format is now sniffed from the magic bytes on every read, so animated GIF wallpapers (and PNG/WebP color profiles) survive refreshes correctly.
-- **Appearance presets** — Six built-in one-click looks (Default, Frosted glass, Minimal, Midnight, Cyber, Warm daylight) on the Profile page, each bundling the theme color, per-part opacities, blurs and tints — never touching your wallpaper.
-- **Saved profiles** — Save the current appearance as a named profile, apply/delete with a two-step confirm, and let the day/night schedule (below) swap between them.
-- **Wallpaper rotation** — A rotation pool on the Background page: add images (thumbnail strip), choose shuffle/in-order and every-refresh/daily/weekly cadence, or hit "Switch now". The chosen image is copied into the active wallpaper slot server-side, so all existing pipelines (boot restore, export, color extraction) work unchanged.
-- **Day/night auto switch** — Pick a day and a night profile and a trigger — fixed clock times or the OS `prefers-color-scheme` — and the plugin applies the matching profile automatically (checked every 30 s; appearance only, wallpaper untouched).
-- **Forced interface scheme** — A Light/Dark/Auto segmented control on the Color page regenerates the whole token palette in the forced direction instead of deriving it from the accent lightness.
-- **Forced light/dark now actually differ — truthiness bug in the scheme check** — `buildTokens` derived the direction with `scheme ?? lit < 0.55`; a `scheme='light'` string is truthy, so both forced directions rendered the dark branch. The comparison is now explicit and the two token sets (78 of 79 entries) differ correctly.
-- **Accent lightness remapping under a forced scheme** — When the forced direction contradicts the pick's band (a light accent under forced dark), the lightness is mirrored into the target band (dark 0.14–0.44 / light 0.6–0.88) before building tokens; hue and saturation carry over and the stored pick itself is untouched.
-- **Auto-mode light/dark rules rebuilt** — With a picked color, the font and surface directions both follow the accent lightness (very dark → white fonts, very light → black fonts; no more fighting the wallpaper verdict). Without a pick, the font direction follows the wallpaper's perceived (Rec.709) brightness, and the global scheme flag (native controls, `color-scheme`) stays aligned with the palette direction.
-- **Auto color-extraction pipeline completed** — A wallpaper-extracted theme color used to land in the in-memory config only: the host skin was never re-registered (and never would be again), the pick was never persisted, and the editor wheel never synced. The auto path now performs the full adaptation, and extraction measures brightness with the same Rec.709 luma as the wallpaper verdict so both always agree on one image.
-- **Flash-free wallpaper rotation** — A due rotation now advances server-side during the refresh itself (the `read` handler advances the pool before returning the wallpaper), so the first paint already shows the new picture — no more "old wallpaper flashes, then suddenly switches". The client re-extracts the theme color from the new picture and persists it; the client-side advance remains as a fallback.
-
 ## Installation
 
 ### Method 1: npm install (Recommended)
 
 ```sh
-dsh plugin --profile web add github:Tkingxiao/dsh-any-background
-# or, if published to the registry:
+# published on the npm registry
 dsh plugin --profile web add dsh-any-background
+
+# or straight from the GitHub repository
+dsh plugin --profile web add github:Tkingxiao/dsh-any-background
 ```
 
 Then launch:
@@ -130,7 +132,7 @@ The plugin appears as a **"Theme"** section in Settings.
 ### Method 2: npx (No Global Install)
 
 ```sh
-npx @deepseek-ai/dsh plugin --profile web add github:Tkingxiao/dsh-any-background
+npx @deepseek-ai/dsh plugin --profile web add dsh-any-background
 npx @deepseek-ai/dsh web
 ```
 
@@ -149,8 +151,7 @@ pnpm dsh web
 
 ## Compatibility
 
-- **[`dsh web`](https://github.com/deepseek-ai/deepseek-harness)** — Full support on both the npm release and the new source build. The plugin auto-detects which client-module table the host ships (the new `@deepseek-ai/dsh-client-store` or the legacy `@deepseek-ai/dsh-client-runtime`) and resolves `defineStore` accordingly at runtime.
-- **Declared release matrix** — `dsh.compatibility.dshReleases` in `package.json` declares all 8 public npm releases from `0.1.2-alpha.4` through `0.1.5-rc.2` (`0.1.2-alpha.4`, `0.1.2-alpha.5`, `0.1.2-rc.1`, `0.1.3-alpha.2`, `0.1.5-alpha.1`, `0.1.5-alpha.2`, `0.1.5-rc.1`, `0.1.5-rc.2`) individually as `compatible`.
+- **[`dsh web`](https://github.com/deepseek-ai/deepseek-harness) 0.1.5-rc.2** — This release targets `0.1.5-rc.2` only (verified on it); `engines.dsh` and `dsh.compatibility.dshReleases` in `package.json` declare that single release as well.
 - **[deepseek-harness-desktop](https://github.com/anywhere-labs/deepseek-harness-desktop)** — Supported
 
 ## Star History

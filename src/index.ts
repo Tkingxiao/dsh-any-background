@@ -64,7 +64,7 @@ interface PartOpacities {
   bg: number; sidebar: number; card: number; input: number
 }
 interface PartBlurs {
-  bg: number; sidebar: number; card: number; settings: number; chat: number; trajectory: number; input: number
+  bg: number; sidebar: number; card: number; settings: number; chat: number; trajectory: number; input: number; panel: number
 }
 type BackgroundType = 'image' | 'video' | 'mesh' | 'shader' | 'pattern'
 type BgMode = 'fit' | 'fill' | 'stretch' | 'tile' | 'center'
@@ -85,6 +85,7 @@ interface ProfileAppearance {
   blur: number
   chatTextOpacity: number
   trajectoryOpacity: number
+  panelOpacity: number
 }
 interface ProfileEntry { id: string; name: string; createdAt: string; config: ProfileAppearance }
 interface RotationItem { file: string; thumb: string }
@@ -122,6 +123,8 @@ interface ThemeConfig {
   regenerateOnReload: boolean
   chatTextOpacity: number
   trajectoryOpacity: number
+  /** Opacity of the dsh-better-sidebar workbench panel. */
+  panelOpacity: number
   /** Saved appearance profiles (name + appearance snapshot). */
   profiles: ProfileEntry[]
   /** Wallpaper rotation pool + cadence. */
@@ -137,7 +140,7 @@ interface ThemeConfig {
 const DEFAULT_CONFIG: ThemeConfig = {
   color: null,
   opacities: { bg: 0.85, sidebar: 0.93, card: 1, input: 1 },
-  blurs: { bg: 0, sidebar: 0, card: 0, settings: 0, chat: 0, trajectory: 0, input: 0 },
+  blurs: { bg: 0, sidebar: 0, card: 0, settings: 0, chat: 0, trajectory: 0, input: 0, panel: 0 },
   settingsOpacity: 1,
   wallpaperOpacity: 1,
   blur: 0,
@@ -150,6 +153,7 @@ const DEFAULT_CONFIG: ThemeConfig = {
   regenerateOnReload: false,
   chatTextOpacity: 0,
   trajectoryOpacity: 1,
+  panelOpacity: 1,
   profiles: [],
   rotation: { enabled: false, mode: 'shuffle', interval: 'daily', current: 0, items: [], lastRotate: null },
   schedule: { enabled: false, mode: 'time', dayProfile: null, nightProfile: null, dayStart: '07:00', nightStart: '19:00' },
@@ -222,7 +226,7 @@ function normalizeConfig(raw: unknown): ThemeConfig {
   const ops = (r.opacities ?? {}) as Partial<PartOpacities>
   const bl = (r.blurs ?? {}) as Partial<PartBlurs>
   const blurs = {} as PartBlurs
-  for (const k of ['bg', 'sidebar', 'card', 'settings', 'chat', 'trajectory', 'input'] as const) {
+  for (const k of ['bg', 'sidebar', 'card', 'settings', 'chat', 'trajectory', 'input', 'panel'] as const) {
     blurs[k] = clamp(bl[k], 0, 60, DEFAULT_CONFIG.blurs[k])
   }
   return {
@@ -246,6 +250,7 @@ function normalizeConfig(raw: unknown): ThemeConfig {
     regenerateOnReload: typeof r.regenerateOnReload === 'boolean' ? r.regenerateOnReload : DEFAULT_CONFIG.regenerateOnReload,
     chatTextOpacity: clamp(r.chatTextOpacity, 0, 1, DEFAULT_CONFIG.chatTextOpacity),
     trajectoryOpacity: clamp(r.trajectoryOpacity, 0, 1, DEFAULT_CONFIG.trajectoryOpacity),
+    panelOpacity: clamp(r.panelOpacity, 0, 1, DEFAULT_CONFIG.panelOpacity),
     profiles: normalizeProfiles(r.profiles),
     rotation: normalizeRotation(r.rotation),
     schedule: normalizeSchedule(r.schedule),
@@ -297,7 +302,7 @@ function normalizeProfileAppearance(raw: unknown): ProfileAppearance {
   const ops = (a.opacities ?? {}) as Partial<PartOpacities>
   const bl = (a.blurs ?? {}) as Partial<PartBlurs>
   const blurs = {} as PartBlurs
-  for (const k of ['bg', 'sidebar', 'card', 'settings', 'chat', 'trajectory', 'input'] as const) {
+  for (const k of ['bg', 'sidebar', 'card', 'settings', 'chat', 'trajectory', 'input', 'panel'] as const) {
     blurs[k] = clamp(bl[k], 0, 60, DEFAULT_CONFIG.blurs[k])
   }
   return {
@@ -316,6 +321,7 @@ function normalizeProfileAppearance(raw: unknown): ProfileAppearance {
     blur: clamp(a.blur, 0, 60, DEFAULT_CONFIG.blur),
     chatTextOpacity: clamp(a.chatTextOpacity, 0, 1, DEFAULT_CONFIG.chatTextOpacity),
     trajectoryOpacity: clamp(a.trajectoryOpacity, 0, 1, DEFAULT_CONFIG.trajectoryOpacity),
+    panelOpacity: clamp(a.panelOpacity, 0, 1, DEFAULT_CONFIG.panelOpacity),
   }
 }
 

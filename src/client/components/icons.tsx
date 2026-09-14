@@ -41,6 +41,11 @@ export const TrajectoryIcon = ({ size, className }: { size?: number; className?:
   <Glyph size={size} className={className}><path d="M2.5 3.2h11M2.5 6.6h11M2.5 10h11" /><circle cx="4.4" cy="3.2" r="1.1" /><circle cx="8" cy="6.6" r="1.1" /><circle cx="11.4" cy="10" r="1.1" /></Glyph>
 )
 
+/** Bottom workbench panel (dsh-better-sidebar): a window with a docked strip. */
+export const PanelIcon = ({ size, className }: { size?: number; className?: string }) => (
+  <Glyph size={size} className={className}><path d="M2.4 2.7h11.2v10.6H2.4z" /><path d="M2.4 10.1h11.2" /></Glyph>
+)
+
 export const SlidersIcon = ({ size, className }: { size?: number; className?: string }) => (
   <Glyph size={size} className={className}><path d="M2.5 4.5h4.9M11.6 4.5h1.9M2.5 11.5h1.9M8.6 11.5h4.9" /><circle cx="9.5" cy="4.5" r="1.7" /><circle cx="5.5" cy="11.5" r="1.7" /></Glyph>
 )

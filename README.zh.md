@@ -1,13 +1,18 @@
 # dsh-any-background
 
 <p align="center">
+  <a href="https://www.npmjs.com/package/dsh-any-background"><img alt="npm 版本" src="https://img.shields.io/npm/v/dsh-any-background?color=4d6bfe"></a>
+  <a href="https://www.npmjs.com/package/dsh-any-background"><img alt="npm 月下载量" src="https://img.shields.io/npm/dm/dsh-any-background?color=4d6bfe"></a>
+  <a href="https://github.com/Tkingxiao/dsh-any-background/blob/main/LICENSE"><img alt="License: MIT" src="https://img.shields.io/npm/l/dsh-any-background?color=4d6bfe"></a>
+  <a href="https://www.npmjs.com/package/@deepseek-ai/dsh?activeTab=versions"><img alt="支持的 DSH 版本：0.1.5-rc.2" src="https://img.shields.io/badge/DSH-0.1.5--rc.2-4d6bfe" /></a>
+  <a href="https://github.com/topics/dsh-better-sidebar"><img alt="插件生态：GitHub topic dsh-better-sidebar" src="https://img.shields.io/badge/%E6%8F%92%E4%BB%B6%E7%94%9F%E6%80%81-topic%20dsh--better--sidebar-4d6bfe" /></a><br /><br />
   <a href="https://github.com/Tkingxiao/dsh-any-background"><img src="https://img.shields.io/github/stars/Tkingxiao/dsh-any-background?style=social" alt="GitHub stars"></a>
   <a href="https://dsh.directory/plugins/tkingxiao/dsh-any-background"><img src="https://dsh.directory/badges/listed.svg" alt="dsh.directory listed"></a>
 </p>
 
 [English](README.md) | 中文
 
-一个 **DeepSeek Harness** 外观插件，让你完全自定义 Web 端的主题色、背景壁纸，以及分部位精细的透明度与模糊度控制。
+一个 **DeepSeek Harness** 外观插件：自定义主题色、背景壁纸（图片 / 视频 / 算法动态生成），以及逐表面的透明度与模糊度控制。当前版本面向 **DSH 0.1.5-rc.2**。
 
 ---
 
@@ -66,20 +71,29 @@
 - **位置编辑器** — 图片与视频共用同一套编辑器：拖动平移、滚轮缩放、一键重置；图片与视频的位置状态各自独立保存，互不覆盖。
 - **布局模式** — 适应 / 填充 / 拉伸 / 平铺 / 居中五种排布，图片与视频通用；「适应」模式下编辑器提交的构图在窗口缩放、跨屏移动后保持一致。
 - **动态生成背景** — 支持网格渐变、Shader、几何图案，可调节扩散范围、色彩强度并锁定种子。
-- **分部位界面透明度** — 主背景、侧边栏、卡片面板（含对话框周围的选项框/菜单）、输入框与控件（发送框、Cordis 插件面板）、设置面板与壁纸各自独立滑块。
-- **分部位界面模糊度** — 每个界面部位可独立调整毛玻璃 `backdrop-filter` 模糊（0–60 px），并通过宿主的稳定选择器为发送框与 Cordis 面板提供真实背景模糊。
+- **分部位界面透明度** — 主背景、侧边栏、卡片面板（含对话框周围的选项框/菜单）、输入框与控件（发送框、Cordis 插件面板）、设置面板、对话文本框、轨迹页、better-sidebar 工作台、产出物/高亮内容各自独立滑块。
+- **分部位界面模糊度** — 每个界面部位可独立调整毛玻璃 `backdrop-filter` 模糊（0–60 px），并通过宿主的稳定选择器为发送框、Cordis 面板与弹出层提供真实背景模糊。
+- **产出物 / 高亮内容** — 对话正文里的代码块（含语言顶栏）、行内 `code` 高亮芯片与产出物 chip 共用一支滑块：透明度只**调制这些表面原本的背景色**（不会在旧背景上再叠一层新色），模糊度给同一层表面加磨砂，壁纸从内容后方透出来。
+- **better-sidebar 工作台** — 安装 dsh-better-sidebar 时出现独立滑块（`panelOpacity` / `blurs.panel`），接管其底部工作台面板与原生右侧栏的表面令牌；未安装该插件时该行不显示，滑块无副作用。
 - **对话视图卡片** — 消息列表自动包裹为半透明卡片，轨迹页可整页调节透明度与模糊，让壁纸从内容后方透出来。
 - **主题导出 / 导入** — 一键导出为自包含的 `dsh-any-theme.json`（配置 + 壁纸，视频以 data URL 内嵌），可随时导入还原。
 - **外观预设与配置档案** — 六套一键预设（默认 / 毛玻璃 / 极简白 / 暗夜紫 / 赛博 / 暖阳），外加自定义命名档案：随时保存当前观感、随时套回，删除有二次确认保护。
 - **壁纸轮换** — 把多张图片加入轮换池（缩略图选择器），按随机或顺序、每次刷新 / 每天 / 每周的频率自动更换；切换时服务端把所选图片复制进当前壁纸槽，导出/导入与取色管线完全不用改。
 - **昼夜自动切换** — 指定日间与夜间两套配置，按固定时段或跟随系统深色模式自动切换。
 - **强制界面明暗** — 无论主题色明暗如何，都能强制生成亮色/暗色整套令牌；「自动」下配色与字体方向由主题色明度驱动（深色 → 浅字，浅色 → 深字），未选主题色时按壁纸画面亮度判断。
-- **明暗判断修复** — 即使未选主题色，界面明暗现在也会依据壁纸画面的实际亮度（每张壁纸分析一次）自动判断，修复浅色壁纸配宿主深色主题导致的全白字体；未选主题色时强制亮色/暗色也会生成中性灰配色，而不再完全无效。
 - **文件持久化** — 所有设置保存到文件系统 `~/.dsh/.dsh-any-background-data/`，不再依赖 `localStorage`。
 - **中英双语** — 完整的中英文界面，自动跟随语言设置。
 - **主题守护** — 宿主重置主题后自动重新激活自定义主题。
 
-## 近期优化
+## 更新日志
+
+### v0.2.7
+
+- **新增「产出物 / 高亮内容」滑块** — 对话里的代码块（含语言顶栏）、行内 `code` 高亮芯片与产出物 chip 现在共用一支透明度 + 模糊度滑块。透明度是这些表面**自身背景色的 alpha**：100% 与宿主原样逐色一致，下调时淡出的就是它原本那块颜色，而不是在旧背景上再叠一层新色（此前代码块外层仍不透明，滑块只是在原色上混入插件调色板颜色，模糊也因此看不见效果）；模糊度用 `backdrop-filter` 给同一层表面加磨砂。文档预览里不在 `.md-code-block` 内、只靠 `--shiki-background` 上色的代码块也一并覆盖。
+- **新增 better-sidebar 工作台滑块** — 通过 `[data-dsh-bottom-panel]` 与 `[data-sidebar-right-panel]` 为 dsh-better-sidebar 的底部工作台面板提供独立的透明度（`panelOpacity`）与模糊度（`blurs.panel`）；面板表面按插件调色板重新着色，并新增强度更高的可复用规则（面板令牌重映射 + 面板模糊）。未安装该插件时该行不显示，滑块无副作用。
+- **弹出层模糊归位** — 新增 `POPOVER_BLUR_RULE`：「卡片」模糊滑块现在同时落到下拉菜单 / 弹出层这类弹出表面，不再只影响对话框内的面板。
+- **宿主支持收敛** — 只面向 **DSH 0.1.5-rc.2**（已在该版本上验证）：`engines.dsh` 与 `dsh.compatibility.dshReleases` 只声明这一项，README 删除旧的 8 版本矩阵；`panelOpacity` 进入档案 / 导出导入 / 昼夜切换的完整链路。
+- **六套预设同步新参数** — 工作台透明度随预设给出（毛玻璃 0.85 / 暗夜紫 0.8 / 暖阳 0.75 等），产出物滑块默认 100%（即宿主原样）。
 
 ### v0.2.6
 
@@ -95,28 +109,16 @@
 - **网络视频 URL 壁纸** — 「从网址」流程现可识别视频链接：服务端以流式下载写入视频槽（上限 2 GB、60 秒无数据超时，MIME 取自 Content-Type 或扩展名）并写入配置；播放、截帧与取色沿用既有 serve 路由。
 - **清理** — 移除启动性能探针与静态快照死代码；网址下载的壁纸直接写盘，不再经过临时 base64 字符串。
 
-### v0.2.5
-
-- **修复壁纸 MIME 错标 — GIF/APNG 壁纸可用了** — `readWallpaper` 此前无条件把所有图片按 `image/jpeg` 回读，而经网址抓取的 PNG/WebP/GIF 字节都写在同一个文件里。现在每次读取都从文件头嗅探真实格式，动图 GIF 壁纸（以及 PNG/WebP 的色彩配置）在刷新后可以正确保留。
-- **外观预设** — 「配置」页新增六套一键预设（默认、毛玻璃、极简白、暗夜紫、赛博、暖阳），每套打包主题色、分部位透明度、模糊度与色彩叠加——绝不动你的壁纸。
-- **配置档案** — 可将当前外观保存为命名档案，一键套用/删除（删除有二次确认），并可供昼夜调度（见下）自动切换。
-- **壁纸轮换** — 「背景」页新增轮换池：添加图片（缩略图条）、选择随机/顺序与每次刷新/每天/每周频率，或点「立即切换」。服务端把所选图片复制进当前壁纸槽，启动还原、主题导出、取色等既有管线零改动。
-- **昼夜自动切换** — 选定日间/夜间两套档案与触发方式（固定时段或系统 `prefers-color-scheme`），插件自动套用匹配的档案（每 30 秒检查一次；只切换外观，不动壁纸）。
-- **强制界面明暗** — 「色彩」页新增亮色/暗色/自动分段控件，强制后整套配色令牌按所选方向重新生成，而不再依据主题色明度推导。
-- **修复强制亮/暗无差别 — 方向判定真值 bug** — `buildTokens` 此前用 `scheme ?? lit < 0.55` 推导方向，`scheme='light'` 时字符串真值导致亮色/暗色都走深色分支。现改为显式比较，两套令牌（79 项中 78 项）正确区分。
-- **强制方向自动重映射主题色明度** — 强制方向与主题色明度冲突时（如浅色主题色 + 强制暗色），把明度镜像映射进目标区间（深色带 0.14–0.44 / 亮色带 0.6–0.88）再构建令牌，色相与饱和度保留，保存的主题色本身不变。
-- **自动模式明暗规则重构** — 有主题色时字体与表面方向统一由主题色明度驱动（过深 → 白字，过浅 → 黑字，与壁纸判定结果不再打架）；未选主题色时按壁纸感知亮度（Rec.709）判断字体方向；全局明暗标志（`color-scheme`、原生控件）与配色方向保持一致。
-- **自动提取主题色的链路补全** — 无保存主题色时从壁纸自动提取的结果，此前只写入内存配置：不注册宿主皮肤（且此后永久不再更新）、不落盘、不同步取色轮盘。现补全为完整自适应（注册皮肤 + 持久化 + UI 同步），并把提取时的亮度度量统一为 Rec.709，与壁纸判定对同一张图永远给出一致方向。
-- **壁纸轮换零闪现** — 到期的轮换改在刷新阶段由服务端直接完成（读取配置时先推进轮换池再返回壁纸），首次上屏即新壁纸，消除「旧壁纸闪现后突然切换」；客户端随后自动从新壁纸重提取主题色并持久化，配色跟随轮换。客户端推进逻辑保留作兜底。
-
 ## 安装
 
 ### 方式一：npm 安装（推荐）
 
 ```sh
-dsh plugin --profile web add github:Tkingxiao/dsh-any-background
-# 若已发布到 registry：
+# 已发布到 npm registry
 dsh plugin --profile web add dsh-any-background
+
+# 或直接安装 GitHub 仓库
+dsh plugin --profile web add github:Tkingxiao/dsh-any-background
 ```
 
 然后启动：
@@ -130,7 +132,7 @@ dsh web
 ### 方式二：npx（无需全局安装）
 
 ```sh
-npx @deepseek-ai/dsh plugin --profile web add github:Tkingxiao/dsh-any-background
+npx @deepseek-ai/dsh plugin --profile web add dsh-any-background
 npx @deepseek-ai/dsh web
 ```
 
@@ -149,8 +151,7 @@ pnpm dsh web
 
 ## 兼容性
 
-- **[`dsh web`](https://github.com/deepseek-ai/deepseek-harness)** — 同时兼容 npm 发布版与新版源码构建。插件会自动检测宿主携带的客户端模块表（新版 `@deepseek-ai/dsh-client-store` 或旧版 `@deepseek-ai/dsh-client-runtime`），并在运行时据此解析 `defineStore`。
-- **兼容版本声明** — `package.json` 的 `dsh.compatibility.dshReleases` 对 npm 上 `0.1.2-alpha.4` 至 `0.1.5-rc.2` 间的全部 8 个公开发布版本（`0.1.2-alpha.4`、`0.1.2-alpha.5`、`0.1.2-rc.1`、`0.1.3-alpha.2`、`0.1.5-alpha.1`、`0.1.5-alpha.2`、`0.1.5-rc.1`、`0.1.5-rc.2`）逐项声明为 `compatible`。
+- **[`dsh web`](https://github.com/deepseek-ai/deepseek-harness) 0.1.5-rc.2** — 当前版本只面向 `0.1.5-rc.2`（已在该版本上验证）；`package.json` 的 `engines.dsh` 与 `dsh.compatibility.dshReleases` 也只声明这一项。
 - **[deepseek-harness-desktop](https://github.com/anywhere-labs/deepseek-harness-desktop)** — 支持
 
 ## Star History

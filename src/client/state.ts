@@ -3,7 +3,7 @@ import type { BgState, ThemeConfig, PartOpacities, PartBlurs, BgMode, ProfileEnt
 export const DEFAULT_CONFIG: ThemeConfig = {
   color: null,
   opacities: { bg: 0.85, sidebar: 0.93, card: 1, input: 1 },
-  blurs: { bg: 0, sidebar: 0, card: 0, settings: 0, chat: 0, trajectory: 0, input: 0 },
+  blurs: { bg: 0, sidebar: 0, card: 0, settings: 0, chat: 0, trajectory: 0, input: 0, panel: 0, produced: 0 },
   settingsOpacity: 1,
   wallpaperOpacity: 1,
   blur: 0,
@@ -17,6 +17,11 @@ export const DEFAULT_CONFIG: ThemeConfig = {
   chatTextOpacity: 0,
   // 100% = untouched host surface; zero would blank the page by default.
   trajectoryOpacity: 1,
+  // Same contract for the workbench panel: fully opaque by default.
+  panelOpacity: 1,
+  // Produced/artifact surfaces (code highlights + produced chips): opacity is
+  // the surface's own backdrop alpha, so 1 (opaque) leaves the host untouched.
+  producedOpacity: 1,
   profiles: [],
   rotation: { enabled: false, mode: 'shuffle', interval: 'daily', current: 0, items: [], lastRotate: null },
   schedule: { enabled: false, mode: 'time', dayProfile: null, nightProfile: null, dayStart: '07:00', nightStart: '19:00' },
@@ -119,7 +124,7 @@ export function rOps(): PartOpacities {
 export function rBlurs(): PartBlurs {
   const b = cfg.blurs ?? {}
   const out = {} as PartBlurs
-  for (const k of ['bg', 'sidebar', 'card', 'settings', 'chat', 'trajectory', 'input'] as const) {
+  for (const k of ['bg', 'sidebar', 'card', 'settings', 'chat', 'trajectory', 'input', 'panel', 'produced'] as const) {
     const v = b[k]
     out[k] = typeof v === 'number' ? Math.min(60, Math.max(0, v)) : DEFAULT_CONFIG.blurs[k]
   }
@@ -130,6 +135,8 @@ export function rBl(): number {
   return typeof cfg.blur === 'number' ? Math.min(60, Math.max(0, cfg.blur)) : DEFAULT_CONFIG.blur
 }
 export function rSop(): number { return clamp01(cfg.settingsOpacity, DEFAULT_CONFIG.settingsOpacity) }
+export function rPanelOpacity(): number { return clamp01(cfg.panelOpacity, DEFAULT_CONFIG.panelOpacity) }
+export function rProducedOpacity(): number { return clamp01(cfg.producedOpacity, DEFAULT_CONFIG.producedOpacity) }
 export function rBgState(): BgState { return cfg.bgState }
 export function rVideoBgState(): BgState { return cfg.videoBgState }
 
@@ -183,6 +190,8 @@ export function currentAppearance(): ProfileAppearance {
     blur: rBl(),
     chatTextOpacity: rChatTextOpacity(),
     trajectoryOpacity: rTrajectoryOpacity(),
+    panelOpacity: rPanelOpacity(),
+    producedOpacity: rProducedOpacity(),
   }
 }
 
@@ -196,6 +205,8 @@ export function applyAppearance(ap: ProfileAppearance): void {
   cfg.blur = typeof ap.blur === 'number' ? Math.min(60, Math.max(0, ap.blur)) : DEFAULT_CONFIG.blur
   cfg.chatTextOpacity = clamp01(ap.chatTextOpacity, DEFAULT_CONFIG.chatTextOpacity)
   cfg.trajectoryOpacity = clamp01(ap.trajectoryOpacity, DEFAULT_CONFIG.trajectoryOpacity)
+  cfg.panelOpacity = clamp01(ap.panelOpacity, DEFAULT_CONFIG.panelOpacity)
+  cfg.producedOpacity = clamp01(ap.producedOpacity, DEFAULT_CONFIG.producedOpacity)
 }
 
 const num = (n: unknown, def: number): number => typeof n === 'number' ? n : def
@@ -225,6 +236,8 @@ function adoptProfiles(raw: unknown): ProfileEntry[] {
         blur: num(ac.blur, DEFAULT_CONFIG.blur),
         chatTextOpacity: clamp01(ac.chatTextOpacity, DEFAULT_CONFIG.chatTextOpacity),
         trajectoryOpacity: clamp01(ac.trajectoryOpacity, DEFAULT_CONFIG.trajectoryOpacity),
+        panelOpacity: clamp01(ac.panelOpacity, DEFAULT_CONFIG.panelOpacity),
+        producedOpacity: clamp01(ac.producedOpacity, DEFAULT_CONFIG.producedOpacity),
       },
     })
   }
@@ -286,7 +299,7 @@ export function adoptConfig(raw: unknown): void {
   const ops = (c.opacities ?? {}) as Partial<PartOpacities>
   const bl = (c.blurs ?? {}) as Partial<PartBlurs>
   const blurs = {} as PartBlurs
-  for (const k of ['bg', 'sidebar', 'card', 'settings', 'chat', 'trajectory', 'input'] as const) {
+  for (const k of ['bg', 'sidebar', 'card', 'settings', 'chat', 'trajectory', 'input', 'panel', 'produced'] as const) {
     blurs[k] = num(bl[k], DEFAULT_CONFIG.blurs[k])
   }
   const bgType = ['video', 'mesh', 'shader', 'pattern'].includes(c.backgroundType as string)
@@ -319,6 +332,8 @@ export function adoptConfig(raw: unknown): void {
     regenerateOnReload: typeof c.regenerateOnReload === 'boolean' ? c.regenerateOnReload : DEFAULT_CONFIG.regenerateOnReload,
     chatTextOpacity: clamp01(c.chatTextOpacity, DEFAULT_CONFIG.chatTextOpacity),
     trajectoryOpacity: clamp01(c.trajectoryOpacity, DEFAULT_CONFIG.trajectoryOpacity),
+    panelOpacity: clamp01(c.panelOpacity, DEFAULT_CONFIG.panelOpacity),
+    producedOpacity: clamp01(c.producedOpacity, DEFAULT_CONFIG.producedOpacity),
     profiles: adoptProfiles(c.profiles),
     rotation: adoptRotation(c.rotation),
     schedule: adoptSchedule(c.schedule),

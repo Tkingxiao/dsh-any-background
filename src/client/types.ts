@@ -46,7 +46,7 @@ export interface PartBlurs {
   bg: number
   /** Sidebar column. */
   sidebar: number
-  /** Cards/panels (center + details columns). */
+  /** Cards/panels (the center column's option boxes inside the settings dialog). */
   card: number
   /** Settings panel. */
   settings: number
@@ -56,6 +56,10 @@ export interface PartBlurs {
   trajectory: number
   /** Input/control surfaces ([data-composer-card], [data-cordis-panel]). */
   input: number
+  /** Third-party workbench panel (dsh-better-sidebar bottom panel). */
+  panel: number
+  /** Produced/artifact surfaces (highlighted code blocks + produced chips). */
+  produced: number
 }
 
 export type BackgroundType = 'image' | 'video' | 'mesh' | 'shader' | 'pattern'
@@ -77,6 +81,9 @@ export interface ProfileAppearance {
   blur: number
   chatTextOpacity: number
   trajectoryOpacity: number
+  panelOpacity: number
+  /** Opacity of produced/artifact surfaces (0 = none, 1 = solid). */
+  producedOpacity: number
 }
 
 /** A named, saved appearance profile. */
@@ -191,6 +198,10 @@ export interface ThemeConfig {
   chatTextOpacity: number
   /** Translucent tint over the trajectory view surface (0 = none, 1 = solid). */
   trajectoryOpacity: number
+  /** Opacity of the dsh-better-sidebar workbench panel (0 = none, 1 = solid). */
+  panelOpacity: number
+  /** Opacity of produced/artifact surfaces (0 = none, 1 = solid). */
+  producedOpacity: number
   /** Saved appearance profiles. */
   profiles: ProfileEntry[]
   /** Wallpaper rotation pool + cadence. */
@@ -243,6 +254,7 @@ export interface ThemeSectionProps {
   setWop: (v: number) => void
   setBl: (v: number) => void
   setSop: (v: number) => void
+  setPanelOp: (v: number) => void
   setBgType: (type: BackgroundType) => void
   setGeneratedBg: (params: GeneratedBgParams) => void
   regenerateBg: () => void

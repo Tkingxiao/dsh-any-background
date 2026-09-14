@@ -1,4 +1,4 @@
-import { rWp, rWpImage, rWpVideo, rBgState, rVideoBgState, rBl, rWop, rOps, rSop, rColor, rHasColor, rBlurs, rBgMode, rChatTextOpacity, rTrajectoryOpacity, rScheme, rColorScheme, rSchemeOverride, cfg, setWpUrl, rBgDark, setBgDark, disposeVideoObjectUrl } from './state'
+import { rWp, rWpImage, rWpVideo, rBgState, rVideoBgState, rBl, rWop, rOps, rSop, rColor, rHasColor, rBlurs, rBgMode, rChatTextOpacity, rTrajectoryOpacity, rPanelOpacity, rProducedOpacity, rScheme, rColorScheme, rSchemeOverride, cfg, setWpUrl, rBgDark, setBgDark, disposeVideoObjectUrl } from './state'
 import type { BackgroundType, GeneratedBgParams, PartOpacities, PartBlurs } from './types'
 import { genTokens, toRgba, extractWallpaperColor, analyzeFrameDark } from './utils/color'
 import { loadImage } from './utils/image'
@@ -116,8 +116,8 @@ export function applyCustomTokens(ops: PartOpacities): void {
   })
 }
 
-// Only the main-bg slider retints the center/details columns; keys on
-// baseTokenKey + ops.bg so a sidebar/card/input drag never rewrites them.
+// Only the main-bg slider retints the center column; keys on
+// baseTokenKey + ops.bg so a sidebar/card/input drag never rewrites it.
 let lastBgKey = ''
 
 /** Palette source for the token rule: the picked color; a forced scheme
@@ -220,6 +220,73 @@ export const SETTINGS_STYLE_RULE =
   // Option-panel blur inside the dialog, owned by the card blur slider.
   `${SETTINGS_PANEL_SEL} .dab-card{backdrop-filter:var(--dsh-any-blur-card-panels,none);-webkit-backdrop-filter:var(--dsh-any-blur-card-panels,none)}`
 
+// ── Popover / popover-style surface blur (the "card" slider's true target) ────
+// The "card" opacity slider does not bind to the settings dialog's .dab-card —
+// the comments at OPACITY_TOKEN_GROUPS note that --dsw-specific-menu (the
+// dropdown / popover / menu surface token) is owned by the card slider, and
+// the body-level re-scope in `applyCustomTokensNow` retints every consumer
+// of that token globally. The host uses --dsw-specific-menu for the "popovers
+// around the dialog" — the model selector (ModelSelect), the per-session
+// permission preset row (PermissionRow → Menu portal), the composer
+// permission seat (PermissionSelect → in-place Menu, `side="top"`), the
+// stat dialog (TurnUsagePanel / StatsPills → useStatDialog), the schedule
+// catalog, the subagent lineage tree, the /model command panel, the
+// @-trigger suggestion list, the job list, etc.
+//
+// The card-blur slider has to land on the same surfaces for the visible
+// effect to follow the slider.
+//
+// The host uses three ARIA roles for these surfaces, and one stable
+// data-attribute to disqualify a non-target:
+//
+//   [role="menu"]   · every Menu primitive surface (.list, .submenu),
+//                    ModelSelect's `.menu`.  These are the picker-style
+//                    popovers, both portal-mode (rendered to body via
+//                    createPortal) and in-place (rendered where the React
+//                    subtree is — PermissionSelect keeps its `side="top"`
+//                    list inside the composer card).
+//   [role="listbox"]· the /model command panel (PopupSelectView) and the
+//                    @-trigger suggestion list (MenuView).  Both live
+//                    inside the composer card.  No other host element
+//                    uses role="listbox".
+//   [role="tree"]   · the subagent lineage tree (portaled to body) and
+//                    the sidebar's workspace browser (ui-workspace).  The
+//                    `body >` qualifier restricts this to the portaled
+//                    variant and keeps the sidebar tree out.
+//   [role="dialog"]:not([aria-modal="true"])
+//                  · stat-dialog (TurnUsagePanel / StatsPills).  The
+//                    settings modal is `role="dialog"` with
+//                    `aria-modal="true"` and is owned by
+//                    SETTINGS_STYLE_RULE; the `:not()` excludes it.
+//
+// The one element the rule must NOT touch is the dockkit per-tab
+// right-click menu (ui-dockkit TabMenu.tsx).  It uses `role="menu"` and
+// is portaled to body, and its background paints from
+// `--dsw-alias-bg-layer-3` (a layer token, not the menu token) — it is a
+// tab control, not a "popover around the dialog", and it carries a stable
+// `data-dockkit-tab-menu` attribute.  `:not([data-dockkit-tab-menu])`
+// trims it out of the menu rule.
+//
+// Stacking-context caveat: the in-place menus (PermissionSelect's
+// `side="top"` list, MenuView's listbox, PopupSelectView's listbox) live
+// inside .composerSeat, which is `position: sticky` and therefore a
+// stacking-context root.  Their backdrop-filter cannot see the wallpaper
+// (z-index: -1 in body) because they are trapped in that context.  The
+// effect they get is "frost the composer card chrome", which the card
+// slider drives just as visibly as a wallpaper-facing blur because the
+// card's own surface sits in the same context.
+//
+// The portaled menus (ModelSelect, Menu portal mode, stat-dialog,
+// SubagentHeaderLineage) are in body's stacking context and see the
+// wallpaper directly through the (transparent) AppFrame.
+export const POPOVER_BLUR_RULE =
+  `[role="menu"]:not([data-dockkit-tab-menu]),` +
+  `[role="listbox"],` +
+  `body > [role="tree"],` +
+  `body > [role="dialog"]:not([aria-modal="true"])` +
+  `{backdrop-filter:var(--dsh-any-blur-card-panels,none);` +
+  `-webkit-backdrop-filter:var(--dsh-any-blur-card-panels,none)}`
+
 // Input/control surface blur. The composer card and the Cordis panel expose
 // stable host data attributes ([data-composer-card], [data-cordis-panel]), so
 // the backdrop is attached via a stylesheet rule rather than element discovery.
@@ -231,7 +298,21 @@ export const SETTINGS_STYLE_RULE =
 // thumbs, .dab-btn, segmented thumb) are painted from those same tokens, so
 // tinting them would bleach the panel's own UI.
 export const INPUT_BLUR_RULE =
-  '[data-composer-card],[data-cordis-panel]{' +
+  // The composer capsule must NOT carry backdrop-filter itself: it is an
+  // ancestor of the in-place popovers (permission / command / model lists),
+  // and a backdrop-filter on it would make it a backdrop root, trapping those
+  // lists' own backdrop-filter to the capsule — which chained their visible
+  // frost to the input slider. The frost instead rides an isolated ::before
+  // underlay (position:absolute, z-index:-1), so it sits behind the capsule
+  // content AND the popovers, leaving the popovers free to sample the
+  // wallpaper and follow the card slider only. (Same rule the part-blurs
+  // follow: backdrop-filter never goes directly on a host part.)
+  '[data-composer-card]{position:relative;isolation:isolate}' +
+  '[data-composer-card]::before{' +
+  'content:"";position:absolute;inset:0;z-index:-1;pointer-events:none;border-radius:inherit;' +
+  '-webkit-backdrop-filter:var(--dsh-any-input-blur,none);' +
+  'backdrop-filter:var(--dsh-any-input-blur,none)}' +
+  '[data-cordis-panel]{' +
   '-webkit-backdrop-filter:var(--dsh-any-input-blur,none);' +
   'backdrop-filter:var(--dsh-any-input-blur,none)}' +
   '[data-cordis-panel]{--dsw-specific-menu:var(--dsh-any-op-menu-cordis)!important}'
@@ -259,6 +340,185 @@ export const MOBILE_HEADER_RULE =
 function applyBgBlurGlobal(px: number): void {
   if (px > 0) document.documentElement.style.setProperty('--dsh-any-part-blur-global', `blur(${px}px)`)
   else document.documentElement.style.removeProperty('--dsh-any-part-blur-global')
+}
+
+// ── Workbench panel (dsh-better-sidebar) ──────────────────────────────────────
+// The bottom workbench panel of dsh-better-sidebar paints every surface from
+// the layer/bg-base tokens ([data-dsh-bottom-panel] is its stable marker), and
+// it hangs off document.body — OUTSIDE the AppFrame columns, so neither the
+// column opacities nor the part-blur underlays ever reach it. Three rules
+// close the gap: a static blur rule, a token re-scope, and a stacking-context
+// promotion. The promotion is necessary because the bottom panel is a child
+// of [data-dsh-panel-host] (z-index 25, position: fixed — a stacking
+// context), and `backdrop-filter` only blurs content in the SAME stacking
+// context; with the panel nested in the host, the wallpaper (z-index -1 in
+// body) is invisible to the panel's backdrop-filter. Re-scoping to
+// `position: fixed` (z-index 26) re-parents the panel to body's stacking
+// context — still above the panel host (25), still below the cordis
+// floating panel (30), preserving the original layering — and the inline
+// `left/right/height` (already in viewport coordinates) keep the panel at
+// the same visual position.
+// The token re-scope lives in the ALWAYS-EMITTED static stylesheet (see
+// `index.tsx`) so the panel can follow the slider even when the plugin has
+// no palette (no picked color, no wallpaper verdict, no forced scheme).
+// Pointing at unwritten vars would make the panel's `background: var(--dsw-
+// alias-bg-layer-1)` declaration invalid and the panel would lose its
+// surface; `applyPanelOverrides` writes the vars every call so the rule
+// always has targets. Exporting here lets `index.tsx` splice it in once,
+// avoiding the per-palette re-emit in `applyCustomTokensNow`.
+export const PANEL_TOKEN_RULE =
+  // `!important` on position/z-index beats the host's class rules
+  // ([data-dsh-bottom-panel] and [data-sidebar-right-panel] both share 0,1,0
+  // specificity with `.bottomPanel` and `.P3OORG_panel`, so the plugin's
+  // stylesheet can lose a same-specificity tie on source order). The
+  // promotion is also non-negotiable for the backdrop-filter to work — the
+  // elements are otherwise trapped in a sub-tree stacking context.
+  '[data-dsh-bottom-panel],[data-sidebar-right-panel]{' +
+  '--dsw-alias-bg-base:var(--dsh-any-panel-bg-base);' +
+  '--dsw-alias-bg-layer-1:var(--dsh-any-panel-layer-1);' +
+  '--dsw-alias-bg-layer-2:var(--dsh-any-panel-layer-2);' +
+  '--dsw-alias-bg-layer-3:var(--dsh-any-panel-layer-3);' +
+  'position:fixed!important;z-index:26!important}' +
+  // The right sidebar's fullscreen state (`data-sidebar-right-panel=fullscreen`)
+  // raises it to z-index 40 in the host CSS so the modal-level surface wins.
+  // Override the elevation when fullscreen so the slider still applies the
+  // alpha/blur; the original z-index 40 was a host layering choice that the
+  // plugin never needs to fight here (the panel still floats above the cordis
+  // inventory at 30 thanks to source order plus same-specificity; the modal
+  // dialog stack lives at 100+ which is unaffected).
+  '[data-sidebar-right-panel][data-sidebar-right-panel="fullscreen"]{z-index:40!important}'
+
+// Both surfaces are now `position: fixed` (see PANEL_TOKEN_RULE), so the
+// host's transform animation no longer traps fixed-position descendants and
+// the underlay treatment from `setBlur` (used for the host columns) is
+// unnecessary. `backdrop-filter` directly on each element is safe and points
+// the blur at the wallpaper.
+export const PANEL_BLUR_RULE =
+  '[data-dsh-bottom-panel],[data-sidebar-right-panel]{' +
+  '-webkit-backdrop-filter:var(--dsh-any-blur-panel,none);' +
+  'backdrop-filter:var(--dsh-any-blur-panel,none)}'
+
+// ── Produced/artifact surfaces ─────────────────────────────────────────────
+// The surfaces owned by the "产出物/高亮内容" (produced/highlights) slider are
+// the code blocks inside conversation content (host CodeBlock → `.md-code-block`
+// wrapping `[data-code-block-content]` > `<pre class="shiki css-variables">`),
+// their banner, the inline `code` chips in markdown (the small background box
+// around identifiers like `@supports`, rendered by the host's
+// `:not(pre) > code` rule) and the composer's reference chips
+// (`[data-composer-chip]`).
+//
+// Those sliders are an ALPHA control for the color a surface ALREADY uses — they
+// must never paint a color of their own. The host paints the block background
+// from its own tokens: `--dsl-code-block-background` (= `--dsw-alias-markdown-
+// code-block`) on the wrapper and again on the inner `pre`,
+// `--dsl-code-block-banner-background-color` on the banner, and
+// `--dsw-alias-markdown-inline-code` on an inline chip. The shiki `pre` also
+// carries an inline `background-color: var(--shiki-background)`, which the theme
+// package aliases to that same `--dsw-alias-markdown-code-block`. So every layer
+// is re-emitted through `color-mix(in srgb, <its own host color> <pct>,
+// transparent)`: 100% reproduces the host color exactly, and lowering it fades
+// THAT surface instead of stacking a second background on top of the original
+// one.
+//
+// The opaque wrapper layers (the `.md-code-block` fill and the sticky banner
+// wrapper's `--dsw-alias-bg-base` backdrop) are cleared so the wallpaper shows
+// through once, and `backdrop-filter` gets something to frost; only the `pre`,
+// the banner and the inline chips carry the modulated color. The
+// `--shiki-background` alias is re-pointed on the content container as well, so
+// the same control reaches code blocks that live outside `.md-code-block` (the
+// document preview) and take their background from that inline variable alone.
+// Values ride root CSS variables, so blocks and chips that stream in after a
+// reply pick them up without an observer.
+export const PRODUCED_RULE =
+  // Frosting only — kept outside the color-mix guard so it never depends on it.
+  '[data-code-block-content] pre,[data-code-block-banner],[data-composer-chip],' +
+  ':not(pre)>code{' +
+  '-webkit-backdrop-filter:var(--dsh-any-blur-prod,none);' +
+  'backdrop-filter:var(--dsh-any-blur-prod,none)}' +
+  // Alpha. Guarded: without color-mix support the host look stays untouched
+  // instead of resolving the surface color to an invalid value.
+  '@supports (background:color-mix(in srgb,red 50%,transparent)){' +
+  '.md-code-block{background:transparent!important}' +
+  '.md-code-block>div{background-color:transparent!important}' +
+  // Every base falls back to the older token names (0.1.2-alpha.4 has no
+  // `--dsl-code-block-*` yet), so the color-mix can never resolve to an
+  // invalid value and blank a surface out.
+  '.md-code-block [data-code-block-content] pre{' +
+  'background-color:color-mix(in srgb,var(--dsl-code-block-background,var(--dsw-alias-markdown-code-block,transparent)) var(--dsh-any-prod-pct,100%),transparent)!important}' +
+  '.md-code-block [data-code-block-banner]{' +
+  'background-color:color-mix(in srgb,var(--dsl-code-block-banner-background-color,var(--dsw-alias-markdown-code-block-banner,transparent)) var(--dsh-any-prod-pct,100%),transparent)!important}' +
+  '[data-code-block-content]{' +
+  '--shiki-background:color-mix(in srgb,var(--dsw-alias-markdown-code-block,var(--dsl-code-block-background,transparent)) var(--dsh-any-prod-pct,100%),transparent)}' +
+  // Inline markdown `code` chips: the host's own selector shape, so the chip
+  // keeps its token color and only loses alpha (plus the shared frost).
+  ':not(pre)>code{' +
+  'background-color:color-mix(in srgb,var(--dsw-alias-markdown-inline-code,transparent) var(--dsh-any-prod-pct,100%),transparent)!important}' +
+  '[data-composer-chip]>*{' +
+  'background-color:color-mix(in srgb,var(--dsw-alias-interactive-bg-hover,transparent) var(--dsh-any-prod-pct,100%),transparent)!important}' +
+  '}'
+
+/** The host's own default colors for the panel layer tokens, used when the
+ *  plugin has no palette (no picked color, no wallpaper verdict, no forced
+ *  scheme). Without these the panel's re-scope would resolve to invalid vars
+ *  and the panel would have no background — reading the host's resolved value
+ *  keeps the panel opaque by default and lets the slider retint it like every
+ *  other homepage part. Reads from the live `:root` so a custom host skin or
+ *  theme override wins. */
+function readHostLayerTokens(): { base: string; layer1: string; layer2: string; layer3: string } | null {
+  if (typeof getComputedStyle === 'undefined') return null
+  const root = document.documentElement
+  const cs = getComputedStyle(root)
+  const base = cs.getPropertyValue('--dsw-alias-bg-base').trim()
+  const layer1 = cs.getPropertyValue('--dsw-alias-bg-layer-1').trim()
+  const layer2 = cs.getPropertyValue('--dsw-alias-bg-layer-2').trim()
+  const layer3 = cs.getPropertyValue('--dsw-alias-bg-layer-3').trim()
+  if (!base && !layer1 && !layer2 && !layer3) return null
+  return { base, layer1, layer2, layer3 }
+}
+
+export function applyPanelOverrides(op: number): void {
+  // Palette-keyed fast path: a picked color / forced scheme builds a
+  // token set in `genTokens` and remaps the panel via the re-scope rule.
+  const tokens = paletteTokens()
+  const root = document.documentElement
+  if (tokens !== null) {
+    const base = tokens['--dsw-alias-bg-base']
+    const layer1 = tokens['--dsw-alias-bg-layer-1']
+    const layer2 = tokens['--dsw-alias-bg-layer-2']
+    const layer3 = tokens['--dsw-alias-bg-layer-3']
+    if (base !== undefined) root.style.setProperty('--dsh-any-panel-bg-base', toRgba(base, op))
+    if (layer1 !== undefined) root.style.setProperty('--dsh-any-panel-layer-1', toRgba(layer1, op))
+    if (layer2 !== undefined) root.style.setProperty('--dsh-any-panel-layer-2', toRgba(layer2, op))
+    if (layer3 !== undefined) root.style.setProperty('--dsh-any-panel-layer-3', toRgba(layer3, op))
+    return
+  }
+  // No-palette fallback: read the host's own resolved values and re-emit them
+  // with the slider's alpha. Without this the panel's re-scope (always in the
+  // stylesheet) would point at unwritten vars and the panel would either keep
+  // the host's default (no opacity control) or — with the `position: fixed`
+  // promotion — fall through to a transparent surface. Reading the live host
+  // tokens makes the slider work in every state.
+  const host = readHostLayerTokens()
+  if (host === null) {
+    // Pre-mount or the host hasn't shipped the tokens yet: nothing to retint,
+    // but the re-scope rule still needs SOMETHING — point at the existing
+    // tokens via a transparent fallback so the panel surfaces stay on the
+    // host palette until the next apply.
+    root.style.setProperty('--dsh-any-panel-bg-base', 'transparent')
+    root.style.setProperty('--dsh-any-panel-layer-1', 'transparent')
+    root.style.setProperty('--dsh-any-panel-layer-2', 'transparent')
+    root.style.setProperty('--dsh-any-panel-layer-3', 'transparent')
+    return
+  }
+  if (host.base) root.style.setProperty('--dsh-any-panel-bg-base', toRgba(host.base, op))
+  if (host.layer1) root.style.setProperty('--dsh-any-panel-layer-1', toRgba(host.layer1, op))
+  if (host.layer2) root.style.setProperty('--dsh-any-panel-layer-2', toRgba(host.layer2, op))
+  if (host.layer3) root.style.setProperty('--dsh-any-panel-layer-3', toRgba(host.layer3, op))
+}
+
+function applyPanelBlur(px: number): void {
+  if (px > 0) document.documentElement.style.setProperty('--dsh-any-blur-panel', `blur(${px}px)`)
+  else document.documentElement.style.removeProperty('--dsh-any-blur-panel')
 }
 
 // Placeholder/hint text inside the composer and the plugin's own input
@@ -450,7 +710,18 @@ function applyGeneratedBg(params: GeneratedBgParams): void {
 // ── Per-part interface blur ───────────────────────────────────────────────────
 // The AppFrame columns use hashed CSS-module classes, so parts are located
 // structurally: the shell overlay carries a stable data attribute and the
-// sidebar/center/details columns are its three preceding siblings.
+// sidebar/center/rightbar columns are its preceding siblings.
+//
+// DSH 0.1.5-rc.1+ has only THREE columns in the frame: [sidebar, center,
+// rightbar]. The pre-rc.1 "details" column no longer exists — the frame
+// tree in 0.1.5-rc.1+ is:
+//
+//   [data-app-frame]? → [sidebarCol] [CenterColumn (wraps main)] [RightbarColumn] [data-shell-overlay]
+//
+// The rightbar carries the stable `[data-rightbar-col]` marker, so we resolve
+// it directly and never let `discoverParts` collapse the right panel into a
+// "details" column — that mis-target painted the rightbar's surface with the
+// main-bg tint and backdrop-filter, making it disappear into the page.
 //
 // backdrop-filter must NEVER go directly on a host part: it turns the element
 // into a containing block for fixed-positioned descendants, which would trap
@@ -459,7 +730,7 @@ function applyGeneratedBg(params: GeneratedBgParams): void {
 let frameEl: HTMLElement | null = null
 let sidebarEl: HTMLElement | null = null
 let centerEl: HTMLElement | null = null
-let detailsEl: HTMLElement | null = null
+let rightEl: HTMLElement | null = null
 
 const PART_BLUR_CLASS = 'dab-part-blur'
 const PART_UNDERLAY_CLASS = 'dab-part-underlay'
@@ -478,16 +749,44 @@ function ensurePartBlurStyle(): void {
   document.head.appendChild(partBlurStyleEl)
 }
 
+/** Find one direct child of `frame` whose `[data-rightbar-col]` marker matches.
+ *  The rightbar is its own grid track, NOT a "details" twin of the center
+ *  column, so it must never receive the main-bg tint or blur underlay. */
+function findRightbarInFrame(frame: HTMLElement): HTMLElement | null {
+  for (let i = 0; i < frame.children.length; i++) {
+    const child = frame.children[i]
+    if (child instanceof HTMLElement && child.dataset.rightbarCol !== undefined) return child
+  }
+  return null
+}
+
 function discoverParts(): void {
   const overlay = document.querySelector<HTMLElement>('[data-shell-overlay]')
   if (overlay === null) return
   const frame = overlay.parentElement
   if (frame === null) return
   frameEl = frame
+  // The rightbar is the only column with its own stable host marker. Find it
+  // BEFORE indexing by the overlay so it never falls into the "details"
+  // slot — 0.1.5-rc.1+ only has three columns, not four.
+  rightEl = findRightbarInFrame(frame)
   const idx = Array.from(frame.children).indexOf(overlay)
-  sidebarEl = (frame.children[idx - 3] as HTMLElement | undefined) ?? null
-  centerEl = (frame.children[idx - 2] as HTMLElement | undefined) ?? null
-  detailsEl = (frame.children[idx - 1] as HTMLElement | undefined) ?? null
+  // The rightbar (when found) sits between center and overlay; otherwise the
+  // legacy 3-column shape is intact (sidebar, center, details) — but on
+  // 0.1.5-rc.1+ this path is unreachable because every frame carries the
+  // rightbar marker. The two branch are kept so the function still tolerates
+  // an absent rightbar on a future build that drops the column entirely.
+  if (rightEl !== null) {
+    // Index of the rightbar in frame.children: with the host's grid it's
+    // always `idx - 1`; resolve from the children array directly instead of
+    // trusting the layout to keep that invariant.
+    const rightIdx = Array.from(frame.children).indexOf(rightEl)
+    sidebarEl = (frame.children[rightIdx - 2] as HTMLElement | undefined) ?? null
+    centerEl = (frame.children[rightIdx - 1] as HTMLElement | undefined) ?? null
+  } else {
+    sidebarEl = (frame.children[idx - 3] as HTMLElement | undefined) ?? null
+    centerEl = (frame.children[idx - 2] as HTMLElement | undefined) ?? null
+  }
 }
 
 function setBlur(el: HTMLElement | null, px: number): void {
@@ -525,10 +824,14 @@ function applySettingsBlur(px: number): void {
   else document.documentElement.style.removeProperty('--dsh-any-blur-settings')
 }
 
-/** Apply the main-background opacity to the center/details columns instead of
+/** Apply the main-background opacity to the center column instead of
  *  the frame. The frame's translucent bg-base sits UNDER the sidebar, so
  *  reducing the main-bg opacity stacked a second alpha onto the sidebar; moving
- *  the alpha onto the columns keeps the sidebar owned by its own slider. */
+ *  the alpha onto the column keeps the sidebar owned by its own slider. The
+ *  rightbar (DSH 0.1.5-rc.1+) is intentionally NOT tinted here — it sits on
+ *  its own grid track, paints its own surfaces from its own tokens, and
+ *  inheriting the main-bg tint would blend it into the page and make the
+ *  right panel disappear. */
 function applyPartOpacities(ops: PartOpacities): void {
   const tokens = paletteTokens()
   if (tokens === null) return
@@ -537,13 +840,15 @@ function applyPartOpacities(ops: PartOpacities): void {
   const base = tokens['--dsw-alias-bg-base']
   frameEl.style.background = 'transparent'
   if (centerEl !== null) centerEl.style.background = base !== undefined ? toRgba(base, ops.bg) : 'transparent'
-  if (detailsEl !== null) detailsEl.style.background = base !== undefined ? toRgba(base, ops.bg) : 'transparent'
+  // Defensive: a previous build (pre-fix) may have left an inline `background`
+  // on the rightbar — clear it so it stops carrying the main-bg tint.
+  if (rightEl !== null) rightEl.style.background = ''
 }
 
 /** Blur of the option panels inside the settings dialog (.dab-card), owned by
  *  the "dialog option panel" (card) blur slider. Written as a plugin-owned
  *  variable consumed by SETTINGS_STYLE_RULE — deliberately NOT applied to the
- *  homepage center/details columns, which this slider must never touch. */
+ *  homepage center column, which this slider must never touch. */
 function applyCardPanelsBlur(px: number): void {
   if (px > 0) document.documentElement.style.setProperty('--dsh-any-blur-card-panels', `blur(${px}px)`)
   else document.documentElement.style.removeProperty('--dsh-any-blur-card-panels')
@@ -552,18 +857,40 @@ function applyCardPanelsBlur(px: number): void {
 /** Apply per-part interface blur to the AppFrame columns + settings panel. */
 export function applyPartBlurs(blurs: PartBlurs): void {
   discoverParts()
-  // The bg blur frosts the wallpaper behind the main content columns (center +
-  // details); the frame itself stays unblurred so the sidebar is never
-  // double-frosted by both the bg and sidebar sliders.
+  // The bg blur frosts the wallpaper behind the main content column; the
+  // frame itself stays unblurred so the sidebar is never double-frosted by
+  // both the bg and sidebar sliders. The rightbar (DSH 0.1.5-rc.1+) is
+  // intentionally untouched: the host's own panel sits inside the rightbar
+  // and paints from its own tokens, so a backdrop-filter there would bleed
+  // the wallpaper into the panel surface and break the focused-tab chrome.
   setBlur(frameEl, 0)
   setBlur(sidebarEl, blurs.sidebar)
   setBlur(centerEl, blurs.bg)
-  setBlur(detailsEl, blurs.bg)
+  setBlur(rightEl, 0)
   applyBgBlurGlobal(blurs.bg)
   applyCardPanelsBlur(blurs.card)
   applySettingsBlur(blurs.settings)
   applyInputBlur(blurs.input)
+  applyPanelBlur(blurs.panel)
+  applyProduced()
   applyViewCards()
+}
+
+/** Produced/artifact surfaces (conversation code blocks + their banner +
+ *  composer chips): re-write the root blur and the alpha percentage consumed by
+ *  PRODUCED_RULE. The percentage is an alpha for the surface's OWN host color —
+ *  1 (100%) reproduces the untouched host look and lowering it fades exactly
+ *  that color out — so no palette sampling is involved and the surfaces keep
+ *  following the active theme/wallpaper color on their own. */
+export function applyProduced(): void {
+  const px = rBlurs().produced
+  const root = document.documentElement
+  if (px > 0) root.style.setProperty('--dsh-any-blur-prod', `blur(${px}px)`)
+  else root.style.removeProperty('--dsh-any-blur-prod')
+  let opacity = rProducedOpacity()
+  if (opacity < 0) opacity = 0
+  if (opacity > 1) opacity = 1
+  root.style.setProperty('--dsh-any-prod-pct', `${Math.round(opacity * 100)}%`)
 }
 
 /** Live per-part blur update during slider drag (no full re-apply). */
@@ -571,9 +898,11 @@ export function setPartBlur(part: keyof PartBlurs, v: number): void {
   if (part === 'settings') { applySettingsBlur(v); return }
   if (part === 'card') { applyCardPanelsBlur(v); return }
   if (part === 'input') { applyInputBlur(v); return }
+  if (part === 'panel') { applyPanelBlur(v); return }
+  if (part === 'produced') { applyProduced(); return }
   if (part === 'chat' || part === 'trajectory') { applyViewCards(); return }
   discoverParts()
-  if (part === 'bg') { setBlur(centerEl, v); setBlur(detailsEl, v); applyBgBlurGlobal(v) }
+  if (part === 'bg') { setBlur(centerEl, v); applyBgBlurGlobal(v) }
   else setBlur(sidebarEl, v)
 }
 
@@ -817,7 +1146,7 @@ let partsObserver: MutationObserver | null = null
 export function watchParts(): void {
   if (partsObserver !== null || typeof MutationObserver === 'undefined') return
   partsObserver = new MutationObserver(() => {
-    if (frameEl !== null && sidebarEl !== null && centerEl !== null && detailsEl !== null && document.body.contains(frameEl)
+    if (frameEl !== null && sidebarEl !== null && centerEl !== null && rightEl !== null && document.body.contains(frameEl)
       // Keep re-applying while any card host is absent or was swapped by the host.
       && viewTargets.every(el => el !== null && document.body.contains(el))) return
     applyPartBlurs(rBlurs())
@@ -1168,6 +1497,12 @@ export function applyWp(): void {
     applySettingsOverrides(rSop())
     applyTrajectoryOverrides(rTrajectoryOpacity())
   }
+  // Panel slider: always applied, no longer gated on a palette being active.
+  // The token re-scope rule lives in the always-on static stylesheet, and
+  // `applyPanelOverrides` falls back to the host's own resolved tokens when
+  // no plugin palette is present so the panel follows the slider in every
+  // state (picked color, wallpaper verdict, forced scheme, or none).
+  applyPanelOverrides(rPanelOpacity())
   applyPartBlurs(rBlurs())
 }
 
@@ -1195,16 +1530,23 @@ export function teardownWp(): void {
   document.documentElement.style.removeProperty('--dsh-any-blur-card-panels')
   document.documentElement.style.removeProperty('--dsh-any-input-blur')
   document.documentElement.style.removeProperty('--dsh-any-part-blur-global')
+  document.documentElement.style.removeProperty('--dsh-any-panel-bg-base')
+  document.documentElement.style.removeProperty('--dsh-any-panel-layer-1')
+  document.documentElement.style.removeProperty('--dsh-any-panel-layer-2')
+  document.documentElement.style.removeProperty('--dsh-any-panel-layer-3')
+  document.documentElement.style.removeProperty('--dsh-any-blur-panel')
+  document.documentElement.style.removeProperty('--dsh-any-blur-prod')
+  document.documentElement.style.removeProperty('--dsh-any-prod-pct')
   for (const v of Object.values(OPACITY_VARS)) document.documentElement.style.removeProperty(v)
   baseTokenKey = ''
   lastBgKey = ''
   if (tokensRaf !== null) { cancelAnimationFrame(tokensRaf); tokensRaf = null }
   pendingOps = null
   tableFixStyleEl?.remove(); tableFixStyleEl = null
-  setBlur(frameEl, 0); setBlur(sidebarEl, 0); setBlur(centerEl, 0); setBlur(detailsEl, 0)
+  setBlur(frameEl, 0); setBlur(sidebarEl, 0); setBlur(centerEl, 0); setBlur(rightEl, 0)
   if (frameEl !== null) frameEl.style.removeProperty('background')
   if (centerEl !== null) centerEl.style.removeProperty('background')
-  if (detailsEl !== null) detailsEl.style.removeProperty('background')
+  if (rightEl !== null) rightEl.style.removeProperty('background')
   stopWatchingParts()
 }
 
