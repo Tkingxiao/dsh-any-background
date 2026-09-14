@@ -150,6 +150,7 @@ pnpm dsh web
 ## Compatibility
 
 - **[`dsh web`](https://github.com/deepseek-ai/deepseek-harness)** — Full support on both the npm release and the new source build. The plugin auto-detects which client-module table the host ships (the new `@deepseek-ai/dsh-client-store` or the legacy `@deepseek-ai/dsh-client-runtime`) and resolves `defineStore` accordingly at runtime.
+- **Declared release matrix** — `dsh.compatibility.dshReleases` in `package.json` declares all 8 public npm releases from `0.1.2-alpha.4` through `0.1.5-rc.2` (`0.1.2-alpha.4`, `0.1.2-alpha.5`, `0.1.2-rc.1`, `0.1.3-alpha.2`, `0.1.5-alpha.1`, `0.1.5-alpha.2`, `0.1.5-rc.1`, `0.1.5-rc.2`) individually as `compatible`.
 - **[deepseek-harness-desktop](https://github.com/anywhere-labs/deepseek-harness-desktop)** — Supported
 
 ## Star History

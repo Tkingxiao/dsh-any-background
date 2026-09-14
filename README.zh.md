@@ -150,6 +150,7 @@ pnpm dsh web
 ## 兼容性
 
 - **[`dsh web`](https://github.com/deepseek-ai/deepseek-harness)** — 同时兼容 npm 发布版与新版源码构建。插件会自动检测宿主携带的客户端模块表（新版 `@deepseek-ai/dsh-client-store` 或旧版 `@deepseek-ai/dsh-client-runtime`），并在运行时据此解析 `defineStore`。
+- **兼容版本声明** — `package.json` 的 `dsh.compatibility.dshReleases` 对 npm 上 `0.1.2-alpha.4` 至 `0.1.5-rc.2` 间的全部 8 个公开发布版本（`0.1.2-alpha.4`、`0.1.2-alpha.5`、`0.1.2-rc.1`、`0.1.3-alpha.2`、`0.1.5-alpha.1`、`0.1.5-alpha.2`、`0.1.5-rc.1`、`0.1.5-rc.2`）逐项声明为 `compatible`。
 - **[deepseek-harness-desktop](https://github.com/anywhere-labs/deepseek-harness-desktop)** — 支持
 
 ## Star History
