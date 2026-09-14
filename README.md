@@ -87,6 +87,13 @@ A **DeepSeek Harness** appearance plugin: custom theme color, background wallpap
 
 ## Changelog
 
+### v0.2.8
+
+- **Fixed: produced / highlight opacity and blur were lost on reload** — The config shape is declared twice, once per half, and the node half (which sanitizes before writing to disk) never learned `producedOpacity` / `blurs.produced`. The sliders stayed live in memory, `writeConfig` silently dropped both fields, and the next load fell back to the defaults. The host now declares them in `PartBlurs`, `ThemeConfig` and `ProfileAppearance` — structure, defaults, and both sanitizers (the config itself plus the profile snapshot).
+- **Saved profiles lost those two values as well** — A profile snapshot never carried the produced parameters, so applying one quietly reset that slider to its default. Profiles, the six presets and the day/night switch all carry them now.
+- **New two-half drift guard** — When sanitizing, the host now logs a one-time warning for any field declared on only one side (`ignoring unknown config field "blurs.xxx"`), so this class of drift surfaces in the host log instead of silently discarding a setting.
+- **Imported configs now refresh the whole UI** — Importing a theme JSON used to refresh only the background and colors, leaving the profile list, wallpaper rotation pool, day/night schedule and scheme control showing their pre-import values; the import now pushes that meta state too.
+
 ### v0.2.7
 
 - **New "Produced / Highlights" sliders** — Code blocks in conversation content (language banner included), inline `code` highlight chips and produced chips now share one opacity + blur slider. The opacity is the alpha of each surface's **own background color**: 100% reproduces the host look byte-for-byte, and lowering it fades exactly that color out instead of stacking a second one on top of the original (previously the code block's outer wrapper stayed opaque, so the slider merely blended the plugin palette into it and the blur had nothing to reveal). The blur frosts that same layer with `backdrop-filter`. Code blocks in the document preview — which live outside `.md-code-block` and take their color from `--shiki-background` alone — are covered too.
@@ -94,20 +101,6 @@ A **DeepSeek Harness** appearance plugin: custom theme color, background wallpap
 - **Popover blur fixed** — A new `POPOVER_BLUR_RULE` makes the "card" blur slider land on dropdown / popover surfaces as well, not just the panels inside the dialog.
 - **Host support narrowed to DSH 0.1.5-rc.2** — `engines.dsh` and `dsh.compatibility.dshReleases` now declare that single release (verified on it) and the old 8-version matrix is gone from the README. `panelOpacity` joined the full profile / export / day-night-schedule pipeline.
 - **Six presets carry the new parameters** — workbench opacity follows each preset (Frosted glass 0.85, Midnight 0.8, Warm daylight 0.75, …); the produced slider defaults to 100% (the untouched host look).
-
-### v0.2.6
-
-- **Fixed the narrow-viewport (mobile layout) title bar splitting from the content area** — On narrow viewports the host renders a 52px fixed session-title bar (`.dsh-mobile-app-header`) outside the AppFrame columns. The main-background opacity only lived on the columns, so the bar showed the raw wallpaper and visibly split from the translucent content below it ([#11](https://github.com/Tkingxiao/dsh-any-background/issues/11)). The bar now rides the plugin-owned `--dsh-any-op-bg` variable, following the main-background opacity slider and theme switches automatically; it falls back to the host's default look when unset.
-- **Main-background blur mirrored to `:root`** — A new global variable `--dsh-any-part-blur-global` (following the main-background blur slider) lets the title bar frost in sync; third-party styles can reference it too, matching the existing globals `--dsh-any-input-blur` / `--dsh-any-blur-settings` / `--dsh-any-blur-card-panels` (the element-scoped `--dsh-any-part-blur` never leaves the columns' subtree).
-- **Fast boot, no white-screen wait** — Wallpapers no longer cross the RPC channel as base64. Uploads stream raw bytes straight to disk, and the persisted picture is served over HTTP and decoded by the browser natively, exactly like any `<img>`. A shared decode cache turns the four URL-keyed decodes of one wallpaper (palette extract, brightness verdict, low-res drag copy, intrinsic size) into one. Boot restore on a large wallpaper dropped from ~5.5 s to ~1.2 s (RPC read 3010 ms → ~170 ms, first decode 1464 ms → ~780 ms).
-- **In-place wallpaper swaps always paint the new picture** — Upload, URL download and rotation all replace the file behind the same serve URL, which left every URL-keyed cache — the layer re-set guard, decode cache, brightness verdict and low-res copy — holding the old pixels. The image slot now carries a query-string revision like the video slot, so every swap gets a fresh URL and a fresh decode.
-- **Race-free auto color extraction** — A wallpaper swap during the palette decode can no longer let the old picture's color overwrite the new one (guarded the same way as the brightness verdict).
-- **Sturdier uploads** — Video uploads are capped at 2 GB, use their own temp file (a concurrent wallpaper upload can't corrupt them) and record the MIME server-side immediately; both upload routes now carry the same Host/Origin fence as the RPC channel.
-- **Four new generated backgrounds** — Shader gains **Starfield** (three layers of twinkling stars over a slow nebula veil); patterns gain **Rain** (falling light streaks), **Contours** (drifting topographic flow lines) and **Fluid orbs** (slow drifting glow blobs). All are seeded and parameterized exactly like the existing presets.
-- **Pause for generated backgrounds** — A pause/play button next to Regenerate stops the canvas animation loop without tearing the background down (session-only; regenerate or reload starts the loop again).
-- **Reduced-motion respect** — With the OS `prefers-reduced-motion` preference set, generated backgrounds render their first frame and skip the animation loop entirely.
-- **Network video URL wallpaper** — The "From URL" flow now recognizes video links: the server streams the download into the video slot (2 GB cap, 60 s inactivity timeout, MIME taken from Content-Type or the file extension) and records the MIME in the config; playback, snapshot capture and color extraction continue through the existing serve route.
-- **Cleanup** — Removed the boot performance probe and dead static-snapshot helpers; URL-downloaded wallpapers are written to disk directly with no transient base64 string.
 
 ## Installation
 

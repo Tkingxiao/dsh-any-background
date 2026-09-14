@@ -64,7 +64,7 @@ interface PartOpacities {
   bg: number; sidebar: number; card: number; input: number
 }
 interface PartBlurs {
-  bg: number; sidebar: number; card: number; settings: number; chat: number; trajectory: number; input: number; panel: number
+  bg: number; sidebar: number; card: number; settings: number; chat: number; trajectory: number; input: number; panel: number; produced: number
 }
 type BackgroundType = 'image' | 'video' | 'mesh' | 'shader' | 'pattern'
 type BgMode = 'fit' | 'fill' | 'stretch' | 'tile' | 'center'
@@ -86,6 +86,7 @@ interface ProfileAppearance {
   chatTextOpacity: number
   trajectoryOpacity: number
   panelOpacity: number
+  producedOpacity: number
 }
 interface ProfileEntry { id: string; name: string; createdAt: string; config: ProfileAppearance }
 interface RotationItem { file: string; thumb: string }
@@ -125,6 +126,8 @@ interface ThemeConfig {
   trajectoryOpacity: number
   /** Opacity of the dsh-better-sidebar workbench panel. */
   panelOpacity: number
+  /** Opacity of produced/artifact surfaces (code blocks + highlight chips). */
+  producedOpacity: number
   /** Saved appearance profiles (name + appearance snapshot). */
   profiles: ProfileEntry[]
   /** Wallpaper rotation pool + cadence. */
@@ -140,7 +143,7 @@ interface ThemeConfig {
 const DEFAULT_CONFIG: ThemeConfig = {
   color: null,
   opacities: { bg: 0.85, sidebar: 0.93, card: 1, input: 1 },
-  blurs: { bg: 0, sidebar: 0, card: 0, settings: 0, chat: 0, trajectory: 0, input: 0, panel: 0 },
+  blurs: { bg: 0, sidebar: 0, card: 0, settings: 0, chat: 0, trajectory: 0, input: 0, panel: 0, produced: 0 },
   settingsOpacity: 1,
   wallpaperOpacity: 1,
   blur: 0,
@@ -154,6 +157,7 @@ const DEFAULT_CONFIG: ThemeConfig = {
   chatTextOpacity: 0,
   trajectoryOpacity: 1,
   panelOpacity: 1,
+  producedOpacity: 1,
   profiles: [],
   rotation: { enabled: false, mode: 'shuffle', interval: 'daily', current: 0, items: [], lastRotate: null },
   schedule: { enabled: false, mode: 'time', dayProfile: null, nightProfile: null, dayStart: '07:00', nightStart: '19:00' },
@@ -226,7 +230,7 @@ function normalizeConfig(raw: unknown): ThemeConfig {
   const ops = (r.opacities ?? {}) as Partial<PartOpacities>
   const bl = (r.blurs ?? {}) as Partial<PartBlurs>
   const blurs = {} as PartBlurs
-  for (const k of ['bg', 'sidebar', 'card', 'settings', 'chat', 'trajectory', 'input', 'panel'] as const) {
+  for (const k of ['bg', 'sidebar', 'card', 'settings', 'chat', 'trajectory', 'input', 'panel', 'produced'] as const) {
     blurs[k] = clamp(bl[k], 0, 60, DEFAULT_CONFIG.blurs[k])
   }
   return {
@@ -251,6 +255,7 @@ function normalizeConfig(raw: unknown): ThemeConfig {
     chatTextOpacity: clamp(r.chatTextOpacity, 0, 1, DEFAULT_CONFIG.chatTextOpacity),
     trajectoryOpacity: clamp(r.trajectoryOpacity, 0, 1, DEFAULT_CONFIG.trajectoryOpacity),
     panelOpacity: clamp(r.panelOpacity, 0, 1, DEFAULT_CONFIG.panelOpacity),
+    producedOpacity: clamp(r.producedOpacity, 0, 1, DEFAULT_CONFIG.producedOpacity),
     profiles: normalizeProfiles(r.profiles),
     rotation: normalizeRotation(r.rotation),
     schedule: normalizeSchedule(r.schedule),
@@ -302,7 +307,7 @@ function normalizeProfileAppearance(raw: unknown): ProfileAppearance {
   const ops = (a.opacities ?? {}) as Partial<PartOpacities>
   const bl = (a.blurs ?? {}) as Partial<PartBlurs>
   const blurs = {} as PartBlurs
-  for (const k of ['bg', 'sidebar', 'card', 'settings', 'chat', 'trajectory', 'input', 'panel'] as const) {
+  for (const k of ['bg', 'sidebar', 'card', 'settings', 'chat', 'trajectory', 'input', 'panel', 'produced'] as const) {
     blurs[k] = clamp(bl[k], 0, 60, DEFAULT_CONFIG.blurs[k])
   }
   return {
@@ -322,6 +327,7 @@ function normalizeProfileAppearance(raw: unknown): ProfileAppearance {
     chatTextOpacity: clamp(a.chatTextOpacity, 0, 1, DEFAULT_CONFIG.chatTextOpacity),
     trajectoryOpacity: clamp(a.trajectoryOpacity, 0, 1, DEFAULT_CONFIG.trajectoryOpacity),
     panelOpacity: clamp(a.panelOpacity, 0, 1, DEFAULT_CONFIG.panelOpacity),
+    producedOpacity: clamp(a.producedOpacity, 0, 1, DEFAULT_CONFIG.producedOpacity),
   }
 }
 
@@ -405,10 +411,45 @@ async function readConfig(): Promise<ThemeConfig> {
   }
 }
 
+// The config shape is declared twice — once here (persistence sanitizer) and
+// once in the browser half (the UI's own view of it). A field added to only one
+// side is silently dropped by the sanitizer, which makes the matching slider
+// look like it "saved" (it stays live in memory) and then revert on the next
+// load. Warn once per unknown key so that drift shows up in the host log
+// instead of quietly discarding a setting.
+const LEGACY_CONFIG_KEYS = new Set(['opacity'])
+const warnedConfigKeys = new Set<string>()
+
+function warnUnknownConfigKeys(raw: unknown, normalized: ThemeConfig): void {
+  if (raw === null || typeof raw !== 'object') return
+  const r = raw as Record<string, unknown>
+  const warn = (id: string): void => {
+    if (warnedConfigKeys.has(id)) return
+    warnedConfigKeys.add(id)
+    console.warn(`dsh-any-background: ignoring unknown config field "${id}" (declared in one half only?)`)
+  }
+  const known = new Set(Object.keys(normalized))
+  for (const key of Object.keys(r)) {
+    if (known.has(key) || LEGACY_CONFIG_KEYS.has(key)) continue
+    warn(key)
+  }
+  // Nested appearance maps drift the same way (e.g. blurs.produced).
+  for (const group of ['blurs', 'opacities'] as const) {
+    const got = r[group]
+    if (got === null || typeof got !== 'object') continue
+    const have = new Set(Object.keys(normalized[group] as unknown as Record<string, unknown>))
+    for (const key of Object.keys(got as Record<string, unknown>)) {
+      if (!have.has(key)) warn(`${group}.${key}`)
+    }
+  }
+}
+
 async function writeConfig(config: ThemeConfig): Promise<boolean> {
   await ensureDir()
   try {
-    await writeFile(configPath(), JSON.stringify(normalizeConfig(config), null, 2), 'utf8')
+    const normalized = normalizeConfig(config)
+    warnUnknownConfigKeys(config, normalized)
+    await writeFile(configPath(), JSON.stringify(normalized, null, 2), 'utf8')
     return true
   } catch (e) {
     console.error(`dsh-any-background: failed to write "${CONFIG_FILE}"`, e)

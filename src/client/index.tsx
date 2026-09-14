@@ -704,6 +704,10 @@ export function apply(ctx: Ctx): void {
             else if (cfg.generatedBg) updateGeneratedBg(cfg.generatedBg)
           }
           persistConfig()
+          // The imported file carries profiles / rotation / schedule / scheme
+          // too: push them into the meta store or the panels keep rendering the
+          // previous lists until the next reload.
+          syncMetaNow()
           if (rHasColor()) {
             const [h, s, l] = rColor()
             registerCustom(h, s, l)
