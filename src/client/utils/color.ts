@@ -1,4 +1,5 @@
 import type { BgState, ColorPalette } from '../types'
+import { loadImage } from './image'
 
 // The wheel works in HSV end to end; storage and genTokens expect HSL, so
 // setColor converts HSV → HSL at the boundary and sectionInject converts the
@@ -233,23 +234,28 @@ function bucketsToHsl(b: Bucket): [number, number, number] {
 }
 
 function extractWallpaperPalette(dataUrl: string, bgState: BgState): Promise<ColorPalette | null> {
-  return new Promise(resolve => {
-    const img = new Image()
-    img.onerror = () => resolve(null)
-    img.onload = () => {
-      try {
-        const iw = img.naturalWidth || img.width
-        const ih = img.naturalHeight || img.height
+  return loadImage(dataUrl).then(img => {
+    if (!img) return null
+    try {
+      const iw = img.naturalWidth || img.width
+      const ih = img.naturalHeight || img.height
         const bg = bgState
         let sx = 0, sy = 0, sw = iw, sh = ih
         if (bg.iw === iw && bg.ih === ih && bg.iw > 0) {
           const fit = Math.min(window.innerWidth / iw, window.innerHeight / ih)
           const w = iw * fit * bg.zoom
           const h = ih * fit * bg.zoom
-          sx = Math.max(0, bg.x * window.innerWidth - w / 2)
-          sy = Math.max(0, bg.y * window.innerHeight - h / 2)
-          sw = Math.min(iw - sx, w)
-          sh = Math.min(ih - sy, h)
+          // bg.x/bg.y are the image center's fractional viewport point, so the
+          // image's top-left sits at (px, py) in viewport coordinates — the
+          // same offset wallpaper.ts writes into background-position. The
+          // visible source band is viewport [0, vw] mapped to source
+          // [-px, vw - px], clipped to the image.
+          const px = bg.x * window.innerWidth - w / 2
+          const py = bg.y * window.innerHeight - h / 2
+          sx = Math.max(0, -px)
+          sy = Math.max(0, -py)
+          sw = Math.min(iw - sx, window.innerWidth - px - sx)
+          sh = Math.min(ih - sy, window.innerHeight - py - sy)
           if (sw <= 0 || sh <= 0) { sx = 0; sy = 0; sw = iw; sh = ih }
         }
         const c = document.createElement('canvas')
@@ -289,7 +295,7 @@ function extractWallpaperPalette(dataUrl: string, bgState: BgState): Promise<Col
             s: (Math.max(sums[k * 3], sums[k * 3 + 1], sums[k * 3 + 2]) - Math.min(sums[k * 3], sums[k * 3 + 1], sums[k * 3 + 2])) / Math.max(sums[k * 3], sums[k * 3 + 1], sums[k * 3 + 2]) || 0,
           })
         }
-        if (buckets.length === 0) { resolve(null); return }
+        if (buckets.length === 0) { return null }
         // Sort by vivid-weighted count.
         buckets.sort((a, b) => b.count * (0.5 + b.s) - a.count * (0.5 + a.s))
         const primary = bucketsToHsl(buckets[0]!)
@@ -317,18 +323,16 @@ function extractWallpaperPalette(dataUrl: string, bgState: BgState): Promise<Col
         const autoDark = luminance < 0.5
         const lc = autoDark ? Math.min(0.44, Math.max(0.2, primary[2])) : Math.max(0.6, Math.min(0.82, primary[2]))
         primary[2] = lc
-        resolve({
+        return {
           primary: [primary[0], Math.min(0.9, Math.max(0.15, primary[1])), primary[2]],
           secondary: [secondary[0], Math.min(0.85, Math.max(0.2, secondary[1])), Math.min(0.75, Math.max(0.35, secondary[2]))],
           tertiary: [tertiary[0], Math.min(0.8, Math.max(0.2, tertiary[1])), Math.min(0.7, Math.max(0.35, tertiary[2]))],
           surface,
           luminance,
-        })
+        }
       } catch {
-        resolve(null)
+        return null
       }
-    }
-    img.src = dataUrl
   })
 }
 
@@ -349,27 +353,23 @@ const ANALYZE_SIDE = 32
  *  reads dark (use white fonts), false when light (use black fonts), or null
  *  when the frame cannot be decoded. */
 export function analyzeFrameDark(dataUrl: string): Promise<boolean | null> {
-  return new Promise(resolve => {
-    const img = new Image()
-    img.onerror = () => resolve(null)
-    img.onload = () => {
-      try {
-        const c = document.createElement('canvas')
-        c.width = ANALYZE_SIDE; c.height = ANALYZE_SIDE
-        const g = c.getContext('2d', { willReadFrequently: true })!
-        g.drawImage(img, 0, 0, ANALYZE_SIDE, ANALYZE_SIDE)
-        const px = g.getImageData(0, 0, ANALYZE_SIDE, ANALYZE_SIDE).data
-        let lum = 0
-        const count = px.length / 4
-        for (let i = 0; i < px.length; i += 4) {
-          lum += 0.2126 * px[i]! + 0.7152 * px[i + 1]! + 0.0722 * px[i + 2]!
-        }
-        resolve(lum / count / 255 < 0.5)
-      } catch {
-        resolve(null)
+  return loadImage(dataUrl).then(img => {
+    if (!img) return null
+    try {
+      const c = document.createElement('canvas')
+      c.width = ANALYZE_SIDE; c.height = ANALYZE_SIDE
+      const g = c.getContext('2d', { willReadFrequently: true })!
+      g.drawImage(img, 0, 0, ANALYZE_SIDE, ANALYZE_SIDE)
+      const px = g.getImageData(0, 0, ANALYZE_SIDE, ANALYZE_SIDE).data
+      let lum = 0
+      const count = px.length / 4
+      for (let i = 0; i < px.length; i += 4) {
+        lum += 0.2126 * px[i]! + 0.7152 * px[i + 1]! + 0.0722 * px[i + 2]!
       }
+      return lum / count / 255 < 0.5
+    } catch {
+      return null
     }
-    img.src = dataUrl
   })
 }
 

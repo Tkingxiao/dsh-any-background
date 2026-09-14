@@ -7,20 +7,43 @@ const RENDER_SCALE = 0.55
 const FPS = 30
 const FRAME_MS = 1000 / FPS
 
-function newRaf(canvas: HTMLCanvasElement, draw: () => void): { stop: () => void } {
+export interface LiveBgController {
+  canvas: HTMLCanvasElement
+  stop: () => void
+  pause: () => void
+  resume: () => void
+  snapshot: () => string
+}
+
+function newRaf(canvas: HTMLCanvasElement, draw: () => void): { stop: () => void; pause: () => void; resume: () => void } {
   canvas.dataset.dshAnyCanvas = '1'
   let running = true
+  let paused = false
+  let rafId = 0
   let last = 0
   // Draw the very first frame synchronously so snapshot() right after creation
   // already yields a real frame (used by the preview, palette and export).
   draw()
-  const loop = (ts: number) => {
-    if (!running) return
-    if (ts - last >= FRAME_MS) { last = ts; draw() }
-    requestAnimationFrame(loop)
+  // Reduced-motion preference: keep the static first frame, never start the loop.
+  if (typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    return { stop: () => { running = false }, pause: () => undefined, resume: () => undefined }
   }
-  requestAnimationFrame(loop)
-  return { stop: () => { running = false } }
+  const loop = (ts: number) => {
+    if (!running || paused) return
+    if (ts - last >= FRAME_MS) { last = ts; draw() }
+    rafId = requestAnimationFrame(loop)
+  }
+  rafId = requestAnimationFrame(loop)
+  return {
+    stop: () => { running = false; cancelAnimationFrame(rafId) },
+    pause: () => { paused = true; cancelAnimationFrame(rafId) },
+    resume: () => {
+      if (!running || !paused) return
+      paused = false
+      last = 0
+      rafId = requestAnimationFrame(loop)
+    },
+  }
 }
 
 function createCanvas(): HTMLCanvasElement {
@@ -37,7 +60,6 @@ function liveSize(): { w: number; h: number } {
 }
 
 function fitLiveCanvas(c: HTMLCanvasElement): void {
-  if (c.dataset.dshAnyStatic === '1') return
   const { w, h } = liveSize()
   if (c.width !== w || c.height !== h) { c.width = w; c.height = h }
 }
@@ -88,7 +110,7 @@ function createNoise(seed: number) {
 }
 
 // ── Mesh gradient (animated) ──────────────────────────────────────────────────
-export function createMeshGradient(params: MeshGradientParams, canvas?: HTMLCanvasElement): { canvas: HTMLCanvasElement; stop: () => void; snapshot: () => string } {
+export function createMeshGradient(params: MeshGradientParams, canvas?: HTMLCanvasElement): LiveBgController {
   const c = canvas ?? createCanvas()
   fitLiveCanvas(c)
   const g = c.getContext('2d', { alpha: false })!
@@ -135,7 +157,7 @@ export function createMeshGradient(params: MeshGradientParams, canvas?: HTMLCanv
 }
 
 // ── Shader backgrounds (animated WebGL) ───────────────────────────────────────
-export function createShaderBg(params: ShaderParams, canvas?: HTMLCanvasElement): { canvas: HTMLCanvasElement; stop: () => void; snapshot: () => string } {
+export function createShaderBg(params: ShaderParams, canvas?: HTMLCanvasElement): LiveBgController {
   const c = canvas ?? createCanvas()
   fitLiveCanvas(c)
   const gl = c.getContext('webgl', { alpha: false }) || c.getContext('experimental-webgl', { alpha: false }) as WebGLRenderingContext | null
@@ -308,6 +330,45 @@ function shaderFragment(preset: ShaderParams['preset']): string {
       }
     `
   }
+  if (preset === 'starfield') {
+    return common + `
+      float hash21(vec2 p) {
+        p = fract(p * vec2(234.34, 435.345));
+        p += dot(p, p + 34.23);
+        return fract(p.x * p.y);
+      }
+      vec3 starLayer(vec2 uv, float t, float density) {
+        vec3 col = vec3(0.0);
+        vec2 grid = uv * density;
+        vec2 cell = floor(grid);
+        vec2 f = fract(grid) - 0.5;
+        float h = hash21(cell);
+        if (h > 0.8) {
+          vec2 offs = (vec2(hash21(cell + 1.3), hash21(cell + 2.7)) - 0.5) * 0.7;
+          float d = length(f - offs);
+          float tw = 0.35 + 0.65 * sin(t * (1.0 + h * 2.5) + h * 40.0);
+          col += vec3(0.85, 0.92, 1.0) * smoothstep(0.07, 0.0, d) * max(0.0, tw);
+        }
+        return col;
+      }
+      void main() {
+        vec2 uv = gl_FragCoord.xy / u_resolution;
+        vec2 p = (gl_FragCoord.xy - 0.5 * u_resolution) / u_resolution.y;
+        float t = u_time * 0.5;
+        vec3 col = mix(vec3(0.012, 0.014, 0.035), vec3(0.035, 0.035, 0.08), uv.y);
+        // Faint drifting nebula veil behind the stars.
+        float n = fbm(vec3(p * 2.2 * u_scale, t * 0.05));
+        col += vec3(0.05, 0.045, 0.11) * smoothstep(0.05, 0.85, n);
+        vec3 stars = vec3(0.0);
+        stars += starLayer(p + vec2(t * 0.006, 0.0), t, 13.0 * u_scale);
+        stars += starLayer(p * 1.8 + vec2(t * 0.013, 3.0), t * 1.25, 27.0 * u_scale);
+        stars += starLayer(p * 3.1 + vec2(t * 0.021, 7.0), t * 0.85, 46.0 * u_scale);
+        col += stars;
+        col = hueRotate(col, u_seed * 6.28318530718);
+        gl_FragColor = vec4(col, 1.0);
+      }
+    `
+  }
   // noise
   return common + `
     void main() {
@@ -330,13 +391,153 @@ function shaderFragment(preset: ShaderParams['preset']): string {
 }
 
 // ── Geometric patterns (animated) ─────────────────────────────────────────────
-export function createPatternBg(params: PatternParams, canvas?: HTMLCanvasElement): { canvas: HTMLCanvasElement; stop: () => void; snapshot: () => string } {
+export function createPatternBg(params: PatternParams, canvas?: HTMLCanvasElement): LiveBgController {
   if (params.preset === 'waves') return createWaves(params, canvas)
   if (params.preset === 'poly') return createLowPoly(params, canvas)
+  if (params.preset === 'rain') return createRain(params, canvas)
+  if (params.preset === 'contour') return createContour(params, canvas)
+  if (params.preset === 'meta') return createMeta(params, canvas)
   return createDots(params, canvas)
 }
 
-function createDots(params: PatternParams, canvas?: HTMLCanvasElement): { canvas: HTMLCanvasElement; stop: () => void; snapshot: () => string } {
+function createRain(params: PatternParams, canvas?: HTMLCanvasElement): LiveBgController {
+  const c = canvas ?? createCanvas()
+  fitLiveCanvas(c)
+  const g = c.getContext('2d', { alpha: false })!
+  const rng = createRng(params.seed)
+  const dark = rng() < 0.5
+  const hue = Math.round(rng() * 360)
+  const count = Math.round(30 + params.density * 150)
+  const drops: { x: number; y: number; len: number; speed: number; sat: number; lit: number; alpha: number; width: number }[] = []
+  for (let i = 0; i < count; i++) {
+    drops.push({
+      x: rng(),
+      y: rng(),
+      len: (0.035 + rng() * 0.075) * (0.7 + params.scale * 0.5),
+      speed: (0.25 + rng() * 0.55) * (0.6 + params.scale * 0.5),
+      sat: Math.round(30 + rng() * 40),
+      lit: dark ? Math.round(55 + rng() * 25) : Math.round(40 + rng() * 25),
+      alpha: 0.12 + rng() * 0.28,
+      width: 0.8 + rng() * 1.4,
+    })
+  }
+  let t = 0
+  const draw = () => {
+    fitLiveCanvas(c)
+    const w = c.width, h = c.height
+    g.fillStyle = dark ? '#07080c' : '#f4f6f9'
+    g.fillRect(0, 0, w, h)
+    for (const d of drops) {
+      const yy = (((d.y + t * d.speed) % 1) + 1) % 1
+      const x = d.x * w
+      const y0 = yy * h
+      const y1 = y0 - d.len * h
+      const grad = g.createLinearGradient(x, y0, x, y1)
+      grad.addColorStop(0, `hsla(${hue},${d.sat}%,${d.lit}%,${d.alpha.toFixed(2)})`)
+      grad.addColorStop(1, 'hsla(0,0%,0%,0)')
+      g.strokeStyle = grad
+      g.lineWidth = d.width
+      g.beginPath()
+      g.moveTo(x, y0)
+      g.lineTo(x, y1)
+      g.stroke()
+    }
+    t += 0.016
+  }
+  return { canvas: c, ...newRaf(c, draw), snapshot: () => c.toDataURL('image/jpeg', 0.94) }
+}
+
+function createContour(params: PatternParams, canvas?: HTMLCanvasElement): LiveBgController {
+  const c = canvas ?? createCanvas()
+  fitLiveCanvas(c)
+  const g = c.getContext('2d', { alpha: false })!
+  const noise = createNoise(params.seed)
+  const rng = createRng(params.seed + 1013)
+  const dark = rng() < 0.5
+  const hue = Math.round(rng() * 360)
+  const layers = Math.round(16 + params.density * 46)
+  const freq = 0.0016 / params.scale
+  const amp = 0.055 * params.scale
+  let t = 0
+  const draw = () => {
+    fitLiveCanvas(c)
+    const w = c.width, h = c.height
+    g.fillStyle = dark ? '#0a0b0e' : '#f6f7fa'
+    g.fillRect(0, 0, w, h)
+    const samples = Math.max(60, Math.floor(w / 8))
+    for (let i = 0; i <= layers; i++) {
+      const base = i / layers
+      const shift = t * 0.05
+      g.beginPath()
+      for (let s = 0; s <= samples; s++) {
+        const fx = s / samples
+        const n = noise(fx * 60 * freq * 400, i * 0.22 + shift)
+        const y = (base + (n - 0.5) * amp) * h
+        if (s === 0) g.moveTo(0, y)
+        else g.lineTo(fx * w, y)
+      }
+      const lit = dark ? 20 + (i / layers) * 22 : 62 - (i / layers) * 18
+      g.strokeStyle = `hsla(${(hue + i * 2) % 360},30%,${lit}%,${(0.25 + 0.2 * (i / layers)).toFixed(2)})`
+      g.lineWidth = 1
+      g.stroke()
+    }
+    t += 0.032
+  }
+  return { canvas: c, ...newRaf(c, draw), snapshot: () => c.toDataURL('image/jpeg', 0.94) }
+}
+
+function createMeta(params: PatternParams, canvas?: HTMLCanvasElement): LiveBgController {
+  const c = canvas ?? createCanvas()
+  fitLiveCanvas(c)
+  const g = c.getContext('2d', { alpha: false })!
+  const rng = createRng(params.seed)
+  const dark = rng() < 0.5
+  const baseHue = Math.round(rng() * 360)
+  const count = Math.round(5 + params.density * 11)
+  const blobs: { x: number; y: number; r: number; ax: number; ay: number; speed: number; phase: number; hue: number }[] = []
+  for (let i = 0; i < count; i++) {
+    blobs.push({
+      x: 0.15 + rng() * 0.7, y: 0.15 + rng() * 0.7,
+      r: (0.09 + rng() * 0.14) * params.scale,
+      ax: 0.08 + rng() * 0.22, ay: 0.08 + rng() * 0.22,
+      speed: 0.15 + rng() * 0.3,
+      phase: rng() * Math.PI * 2,
+      hue: (baseHue + rng() * 70) % 360,
+    })
+  }
+  let t = 0
+  const draw = () => {
+    fitLiveCanvas(c)
+    const w = c.width, h = c.height
+    g.fillStyle = dark ? '#08090d' : '#f5f6f9'
+    g.fillRect(0, 0, w, h)
+    g.globalCompositeOperation = dark ? 'lighter' : 'multiply'
+    for (const b of blobs) {
+      const cx = (b.x + Math.sin(t * b.speed + b.phase) * b.ax) * w
+      const cy = (b.y + Math.cos(t * b.speed * 0.83 + b.phase * 1.7) * b.ay) * h
+      const r = b.r * Math.min(w, h) * (0.9 + 0.2 * Math.sin(t * b.speed + b.phase))
+      const rad = g.createRadialGradient(cx, cy, 0, cx, cy, r)
+      if (dark) {
+        rad.addColorStop(0, `hsla(${b.hue},65%,58%,0.55)`)
+        rad.addColorStop(0.7, `hsla(${b.hue},60%,45%,0.18)`)
+        rad.addColorStop(1, 'hsla(0,0%,0%,0)')
+      } else {
+        rad.addColorStop(0, `hsla(${b.hue},55%,70%,0.5)`)
+        rad.addColorStop(0.7, `hsla(${b.hue},50%,80%,0.2)`)
+        rad.addColorStop(1, 'hsla(0,0%,100%,0)')
+      }
+      g.fillStyle = rad
+      g.beginPath()
+      g.arc(cx, cy, r, 0, Math.PI * 2)
+      g.fill()
+    }
+    g.globalCompositeOperation = 'source-over'
+    t += 0.03
+  }
+  return { canvas: c, ...newRaf(c, draw), snapshot: () => c.toDataURL('image/jpeg', 0.94) }
+}
+
+function createDots(params: PatternParams, canvas?: HTMLCanvasElement): LiveBgController {
   const c = canvas ?? createCanvas()
   fitLiveCanvas(c)
   const g = c.getContext('2d', { alpha: false })!
@@ -379,7 +580,7 @@ function createDots(params: PatternParams, canvas?: HTMLCanvasElement): { canvas
   return { canvas: c, ...newRaf(c, draw), snapshot: () => c.toDataURL('image/jpeg', 0.94) }
 }
 
-function createWaves(params: PatternParams, canvas?: HTMLCanvasElement): { canvas: HTMLCanvasElement; stop: () => void; snapshot: () => string } {
+function createWaves(params: PatternParams, canvas?: HTMLCanvasElement): LiveBgController {
   const c = canvas ?? createCanvas()
   fitLiveCanvas(c)
   const g = c.getContext('2d', { alpha: false })!
@@ -426,7 +627,7 @@ function createWaves(params: PatternParams, canvas?: HTMLCanvasElement): { canva
   return { canvas: c, ...newRaf(c, draw), snapshot: () => c.toDataURL('image/jpeg', 0.94) }
 }
 
-function createLowPoly(params: PatternParams, canvas?: HTMLCanvasElement): { canvas: HTMLCanvasElement; stop: () => void; snapshot: () => string } {
+function createLowPoly(params: PatternParams, canvas?: HTMLCanvasElement): LiveBgController {
   const c = canvas ?? createCanvas()
   fitLiveCanvas(c)
   const g = c.getContext('2d', { alpha: false })!
@@ -486,7 +687,7 @@ function createLowPoly(params: PatternParams, canvas?: HTMLCanvasElement): { can
 }
 
 // ── Dispatcher ────────────────────────────────────────────────────────────────
-export function createDynamicBackground(params: GeneratedBgParams, canvas?: HTMLCanvasElement): { canvas: HTMLCanvasElement; stop: () => void; snapshot: () => string } {
+export function createDynamicBackground(params: GeneratedBgParams, canvas?: HTMLCanvasElement): LiveBgController {
   if (params.type === 'mesh') return createMeshGradient(params, canvas)
   if (params.type === 'shader') return createShaderBg(params, canvas)
   return createPatternBg(params, canvas)
@@ -501,39 +702,4 @@ export function defaultParamsFor(type: Exclude<GeneratedBgParams['type'], 'image
   if (type === 'mesh') return { type: 'mesh', seed: randomSeed(), scale: 1.1, intensity: 0.65 }
   if (type === 'shader') return { type: 'shader', preset: 'aurora', speed: 0.35, scale: 1, seed: randomSeed() }
   return { type: 'pattern', preset: 'dots', density: 0.5, scale: 1, seed: randomSeed() }
-}
-
-// ── Static snapshot helpers ───────────────────────────────────────────────────
-const STATIC_W = 1280
-const STATIC_H = Math.round(STATIC_W * 9 / 16)
-
-function createStaticCanvas(): HTMLCanvasElement {
-  const c = document.createElement('canvas')
-  c.width = STATIC_W; c.height = STATIC_H
-  c.dataset.dshAnyStatic = '1'
-  return c
-}
-
-export function renderMeshGradient(params: MeshGradientParams): string {
-  const { stop, snapshot } = createMeshGradient(params, createStaticCanvas())
-  stop()
-  return snapshot()
-}
-
-export function renderShader(params: ShaderParams): string {
-  const { stop, snapshot } = createShaderBg(params, createStaticCanvas())
-  stop()
-  return snapshot()
-}
-
-export function renderPattern(params: PatternParams): string {
-  const { stop, snapshot } = createPatternBg(params, createStaticCanvas())
-  stop()
-  return snapshot()
-}
-
-export function renderGeneratedBg(params: GeneratedBgParams): string {
-  if (params.type === 'mesh') return renderMeshGradient(params)
-  if (params.type === 'shader') return renderShader(params)
-  return renderPattern(params)
 }

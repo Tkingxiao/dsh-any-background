@@ -125,3 +125,11 @@ export const XIcon = ({ size, className }: { size?: number; className?: string }
   <Glyph size={size} className={className}><path d="M4 4l8 8M12 4l-8 8" /></Glyph>
 )
 
+export const PlayIcon = ({ size, className }: { size?: number; className?: string }) => (
+  <Glyph size={size} className={className}><path d="M5.2 3.4l7.4 4.6-7.4 4.6V3.4z" /></Glyph>
+)
+
+export const PauseIcon = ({ size, className }: { size?: number; className?: string }) => (
+  <Glyph size={size} className={className}><path d="M5.4 3.4v9.2M10.6 3.4v9.2" /></Glyph>
+)
+

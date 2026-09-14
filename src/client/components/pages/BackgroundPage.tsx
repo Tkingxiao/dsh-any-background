@@ -1,14 +1,13 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import type { ThemeSectionProps, ThemeStoreState, BackgroundType, GeneratedBgParams, BgMode } from '../../types'
 import { cfg, rWop, rBl, rBgMode } from '../../state'
-import { saveConfig, setWallpaperFromUrl } from '../../rpc'
-import { applyWp, setWpOpacity, setWpBlur } from '../../wallpaper'
-import { readImg } from '../../utils/image'
+import { saveConfig, setWallpaperFromUrl, uploadWallpaper, WALLPAPER_SERVE_URL } from '../../rpc'
+import { applyWp, setWpOpacity, setWpBlur, pauseGeneratedBg, resumeGeneratedBg } from '../../wallpaper'
 import { defaultParamsFor } from '../../utils/bg-generators'
 import { BgEditor } from '../BgEditor'
 import { LiveSlider } from '../LiveSlider'
-import { LockIcon, CheckIcon, PhotoIcon, RefreshIcon, SparkleIcon, TrashIcon, UploadIcon, EditIcon, VideoIcon, LinkIcon, PlusIcon, XIcon } from '../icons'
+import { LockIcon, CheckIcon, PhotoIcon, RefreshIcon, SparkleIcon, TrashIcon, UploadIcon, EditIcon, VideoIcon, LinkIcon, PlusIcon, XIcon, PlayIcon, PauseIcon } from '../icons'
 
 const SEG_W = 108
 const BG_MODES: Array<{ mode: BgMode; labelKey: string }> = [
@@ -20,13 +19,16 @@ const BG_MODES: Array<{ mode: BgMode; labelKey: string }> = [
 ]
 
 export function BackgroundPage({ p }: { p: ThemeSectionProps }) {
-  const { t, setWp, setVideo, setWop, setBl, setBgType, setGeneratedBg, regenerateBg, setRegenerateOnReload, setRotation, addRotationItems, removeRotationItem, rotateNow, useStore } = p
-  const store = useStore((s: ThemeStoreState) => s)
-  const storeUrl = store.url
-  const backgroundType = store.backgroundType
-  const generatedBg = store.generatedBg
-  const regenerateOnReload = store.regenerateOnReload
-  const rotation = store.rotation
+  const { t, setWpFromServer, setVideo, setWop, setBl, setBgType, setGeneratedBg, regenerateBg, setRegenerateOnReload, setRotation, addRotationItems, removeRotationItem, rotateNow, setVideoFromUrl, useStore } = p
+  // Field-level store subscriptions: dragging sliders / picking colors changes
+  // only the color fields, and the background page has no reason to re-render
+  // for those — full-state subscription re-renders this whole page (hero img,
+  // thumbnails, sliders) on every unrelated store write.
+  const storeUrl = useStore((s: ThemeStoreState) => s.url)
+  const backgroundType = useStore((s: ThemeStoreState) => s.backgroundType)
+  const generatedBg = useStore((s: ThemeStoreState) => s.generatedBg)
+  const regenerateOnReload = useStore((s: ThemeStoreState) => s.regenerateOnReload)
+  const rotation = useStore((s: ThemeStoreState) => s.rotation)
 
   const fileRef = useRef<HTMLInputElement>(null)
   const rotFileRef = useRef<HTMLInputElement>(null)
@@ -47,6 +49,12 @@ export function BackgroundPage({ p }: { p: ThemeSectionProps }) {
   const isGenerated = !isStatic
   const activeGenType: Exclude<BackgroundType, 'image' | 'video'> = isGenerated && generatedBg ? generatedBg.type : 'mesh'
 
+  // Session-only pause state; any controller swap (type switch, regenerate)
+  // recreates the loop running, so reset the button to match.
+  const [paused, setPaused] = useState(false)
+  const genPreset = generatedBg !== null && generatedBg.type !== 'mesh' ? generatedBg.preset : undefined
+  useEffect(() => { setPaused(false) }, [activeGenType, genPreset, generatedBg?.seed])
+
   const onFileSelect = (f: File) => {
     if (f.type.startsWith('video/')) {
       // Hand the raw file over directly: it streams to disk over the
@@ -55,8 +63,11 @@ export function BackgroundPage({ p }: { p: ThemeSectionProps }) {
       setVideo(f, f.type)
       return
     }
-    readImg(f, d => {
-      if (d) setWp(d)
+    // Stream the original bytes straight to disk (no base64 round-trip, no
+    // re-encoding), then point the wallpaper at the serve URL. The browser
+    // decodes it natively like any <img>.
+    void uploadWallpaper(f).then(ok => {
+      if (ok) setWpFromServer(WALLPAPER_SERVE_URL)
     })
   }
 
@@ -73,18 +84,28 @@ export function BackgroundPage({ p }: { p: ThemeSectionProps }) {
     setUrlBusy(true)
     setUrlErr(null)
     const r = await setWallpaperFromUrl(u)
-    setUrlBusy(false)
     if (r.ok) {
-      // The host already replaced the local wallpaper file; setWp just
-      // switches the theme to image mode and applies the stored data-URL.
-      setWp(r.dataUrl ?? null)
+      // The host already replaced the local wallpaper file; just switch the
+      // theme to image mode and point the display at the serve URL.
+      setWpFromServer(r.wallpaperUrl ?? null)
       setUrlOpen(false)
       setUrlVal('')
+    } else if (r.error === 'not an image') {
+      // A video URL: stream it into the video slot through the server and
+      // play from the serve route.
+      const ok = await setVideoFromUrl(u)
+      if (ok) {
+        setUrlOpen(false)
+        setUrlVal('')
+      } else {
+        setUrlErr(t('bgUrlVideoFail'))
+      }
     } else {
       setUrlErr(r.error === 'invalid url' || r.error === 'unsupported scheme'
         ? t('bgUrlBadHttp')
         : (r.error ?? t('bgUrlFail')))
     }
+    setUrlBusy(false)
   }
 
   const switchToStatic = () => {
@@ -102,12 +123,16 @@ export function BackgroundPage({ p }: { p: ThemeSectionProps }) {
 
   const setGenType = (type: Exclude<BackgroundType, 'image' | 'video'>) => {
     if (type === activeGenType) return
+    setPaused(false)
     setBgType(type)
   }
 
   const ensureGenParams = (): GeneratedBgParams => generatedBg ?? defaultParamsFor(activeGenType)
 
   const updateGenerated = (patch: Partial<GeneratedBgParams>) => {
+    // Any parameter change rebuilds the live controller, which restarts the
+    // animation loop — reset the paused state so the button stays truthful.
+    setPaused(false)
     setGeneratedBg({ ...ensureGenParams(), ...patch } as GeneratedBgParams)
   }
 
@@ -122,9 +147,13 @@ export function BackgroundPage({ p }: { p: ThemeSectionProps }) {
       case 'aurora': return t('presetAurora')
       case 'nebula': return t('presetNebula')
       case 'noise': return t('presetNoise')
+      case 'starfield': return t('presetStarfield')
       case 'dots': return t('presetDots')
       case 'waves': return t('presetWaves')
       case 'poly': return t('presetPoly')
+      case 'rain': return t('presetRain')
+      case 'contour': return t('presetContour')
+      case 'meta': return t('presetMeta')
       default: return key
     }
   }
@@ -156,11 +185,11 @@ export function BackgroundPage({ p }: { p: ThemeSectionProps }) {
                     <EditIcon size={13} />{t('bgEdit')}
                   </button>
                 ) : isGenerated ? (
-                  <button type="button" className="dab-btn" onClick={() => { regenerateBg(); setSpinTick(x => x + 1) }}>
+                  <button type="button" className="dab-btn" onClick={() => { setPaused(false); regenerateBg(); setSpinTick(x => x + 1) }}>
                     <RefreshIcon size={13} />{t('bgRegenerate')}
                   </button>
                 ) : null}
-                <button type="button" className="dab-btn dab-btn-danger" onClick={() => setWp(null)}>
+                <button type="button" className="dab-btn dab-btn-danger" onClick={() => setWpFromServer(null)}>
                   <TrashIcon size={13} />{t('bgRemove')}
                 </button>
               </div>
@@ -202,7 +231,7 @@ export function BackgroundPage({ p }: { p: ThemeSectionProps }) {
             <button type="button" className="dab-btn dab-btn-primary" onClick={() => fileRef.current?.click()}>
               <UploadIcon size={14} />{t('bgChoose')}
             </button>
-            <button type="button" className="dab-btn dab-btn-ghost" onClick={() => setUrlOpen(o => !o)}>
+            <button type="button" className="dab-btn dab-btn-soft" onClick={() => setUrlOpen(o => !o)}>
               <LinkIcon size={14} />{t('bgFromUrl')}
             </button>
             {storeUrl || isVideo ? (
@@ -214,14 +243,14 @@ export function BackgroundPage({ p }: { p: ThemeSectionProps }) {
                     <EditIcon size={14} />{t('bgEdit')}
                   </button>
                 ) : null}
-                <button type="button" className="dab-btn dab-btn-ghost dab-btn-danger" onClick={() => setWp(null)}>
+                <button type="button" className="dab-btn dab-btn-danger-inverted" onClick={() => setWpFromServer(null)}>
                   <TrashIcon size={14} />{t('bgRemove')}
                 </button>
               </>
             ) : null}
           </div>
           {urlOpen ? (
-            <div className="dab-urlrow" style={{ marginTop: 12, display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+            <div className="dab-urlrow">
               <input type="text" className="dab-urlinput" value={urlVal} placeholder={t('bgUrlPlaceholder')}
                 onChange={e => setUrlVal(e.target.value)}
                 onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); void applyUrl() } }}
@@ -309,8 +338,9 @@ export function BackgroundPage({ p }: { p: ThemeSectionProps }) {
         <section className="dab-card dab-rise" style={{ '--d': 3 } as CSSProperties}>
           {/* Type cards with animated thumbnails */}
           <div className="dab-types">
-            {typeMeta.map(m => (
-              <button key={m.type} type="button" className={`dab-type${activeGenType === m.type ? ' is-active' : ''}`} onClick={() => setGenType(m.type)}>
+            {typeMeta.map((m, i) => (
+              <button key={m.type} type="button" className={`dab-type${activeGenType === m.type ? ' is-active' : ''}`}
+                style={{ '--i': i } as CSSProperties} onClick={() => setGenType(m.type)}>
                 <div className={`dab-type-thumb ${m.thumb}`} />
                 <div className="dab-type-name">{t(m.labelKey)}</div>
                 <div className="dab-type-desc">{t(m.descKey)}</div>
@@ -324,7 +354,7 @@ export function BackgroundPage({ p }: { p: ThemeSectionProps }) {
             <div style={{ marginTop: 14 }}>
               <div className="dab-swatch-title">{t('bgShaderPreset')}</div>
               <div className="dab-chip-row">
-                {(['aurora', 'nebula', 'noise'] as const).map(pr => (
+                {(['aurora', 'nebula', 'noise', 'starfield'] as const).map(pr => (
                   <button key={pr} type="button" className={`dab-chip${generatedBg.preset === pr ? ' is-active' : ''}`}
                     onClick={() => updateGenerated({ preset: pr })}>
                     {presetLabel(pr)}
@@ -338,7 +368,7 @@ export function BackgroundPage({ p }: { p: ThemeSectionProps }) {
             <div style={{ marginTop: 14 }}>
               <div className="dab-swatch-title">{t('bgPatternPreset')}</div>
               <div className="dab-chip-row">
-                {(['dots', 'waves', 'poly'] as const).map(pr => (
+                {(['dots', 'waves', 'poly', 'rain', 'contour', 'meta'] as const).map(pr => (
                   <button key={pr} type="button" className={`dab-chip${generatedBg.preset === pr ? ' is-active' : ''}`}
                     onClick={() => updateGenerated({ preset: pr })}>
                     {presetLabel(pr)}
@@ -376,7 +406,7 @@ export function BackgroundPage({ p }: { p: ThemeSectionProps }) {
             ) : null}
           </div>
 
-          {/* Seed lock + regenerate */}
+          {/* Seed lock + regenerate + pause */}
           <div className="dab-seed">
             <span className="dab-seed-ico"><LockIcon size={15} /></span>
             <div className="dab-seed-txt">
@@ -388,7 +418,13 @@ export function BackgroundPage({ p }: { p: ThemeSectionProps }) {
               onClick={() => setRegenerateOnReload(!regenerateOnReload)}>
               <span className="dab-toggle-knob" />
             </button>
-            <button type="button" className="dab-btn dab-btn-primary" onClick={() => { regenerateBg(); setSpinTick(x => x + 1) }}>
+            <button type="button" className="dab-btn" onClick={() => {
+              if (paused) { resumeGeneratedBg(); setPaused(false) }
+              else { pauseGeneratedBg(); setPaused(true) }
+            }}>
+              {paused ? <PlayIcon size={13} /> : <PauseIcon size={13} />}{paused ? t('bgResume') : t('bgPause')}
+            </button>
+            <button type="button" className="dab-btn dab-btn-primary" onClick={() => { regenerateBg(); setPaused(false); setSpinTick(x => x + 1) }}>
               <span key={spinTick} className="dab-spin" style={{ display: 'grid' }}><RefreshIcon size={13} /></span>
               {t('bgRegenerate')}
             </button>

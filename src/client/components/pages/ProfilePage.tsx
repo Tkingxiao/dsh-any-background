@@ -3,7 +3,7 @@ import type { CSSProperties } from 'react'
 import type { ThemeSectionProps, ThemeStoreState, ProfileEntry, ScheduleConfig } from '../../types'
 import { BUILTIN_PRESETS } from '../../utils/presets'
 import { hslToRgb } from '../../utils/color'
-import { DownloadIcon, UploadIcon, CheckIcon, TrashIcon, PlusIcon, SunIcon, MoonIcon, ClockIcon } from '../icons'
+import { DownloadIcon, UploadIcon, CheckIcon, PlusIcon, SunIcon, MoonIcon, ClockIcon } from '../icons'
 
 const hexOf = (color: [number, number, number] | null): string =>
   color === null
@@ -21,10 +21,12 @@ function ProfileDot({ entry }: { entry: ProfileEntry }) {
 
 export function ProfilePage({ p, notify }: { p: ThemeSectionProps; notify: (msg: string, ok?: boolean) => void }) {
   const { t, exportTheme, importTheme, saveProfile, applyProfile, deleteProfile, applyPreset, setSchedule, useStore } = p
-  const store = useStore((s: ThemeStoreState) => s)
-  const profiles = store.profiles
-  const schedule = store.schedule
-  const activeProfile = store.activeProfile
+  // Field-level subscriptions: profile list, active id and schedule are the only
+  // store fields this page renders — full-state subscription would re-render
+  // the whole profile list on every unrelated store write (color, wallpaper…).
+  const profiles = useStore((s: ThemeStoreState) => s.profiles)
+  const schedule = useStore((s: ThemeStoreState) => s.schedule)
+  const activeProfile = useStore((s: ThemeStoreState) => s.activeProfile)
   const importRef = useRef<HTMLInputElement>(null)
   const [nameOpen, setNameOpen] = useState(false)
   const [nameVal, setNameVal] = useState('')
@@ -82,10 +84,10 @@ export function ProfilePage({ p, notify }: { p: ThemeSectionProps; notify: (msg:
       <section className="dab-card dab-rise" style={{ '--d': 1 } as CSSProperties}>
         <div className="dab-swatch-title">{t('presetGalleryTitle')}</div>
         <div className="dab-preset-grid">
-          {BUILTIN_PRESETS.map(ps => {
+          {BUILTIN_PRESETS.map((ps, i) => {
             const hex = hexOf(ps.appearance.color)
             return (
-              <button key={ps.key} type="button" className="dab-preset" onClick={() => { applyPreset(ps.appearance); notify(t('presetApplied')) }}>
+              <button key={ps.key} type="button" className="dab-preset" style={{ '--i': i } as CSSProperties} onClick={() => { applyPreset(ps.appearance); notify(t('presetApplied')) }}>
                 <span className="dab-preset-dot" style={hex ? { background: hex } : undefined}>
                   {hex ? null : <CheckIcon size={12} />}
                 </span>
@@ -106,7 +108,7 @@ export function ProfilePage({ p, notify }: { p: ThemeSectionProps; notify: (msg:
           </button>
         </div>
         {nameOpen ? (
-          <div className="dab-urlrow" style={{ marginTop: 12, display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+          <div className="dab-urlrow">
             <input type="text" className="dab-urlinput" value={nameVal} placeholder={t('profileNamePlaceholder')} maxLength={60}
               onChange={e => setNameVal(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); onSave() } }}
@@ -119,20 +121,20 @@ export function ProfilePage({ p, notify }: { p: ThemeSectionProps; notify: (msg:
           <p className="dab-hint" style={{ marginTop: 10 }}>{t('profilesEmpty')}</p>
         ) : (
           <div className="dab-profile-list">
-            {profiles.map(entry => (
-              <div key={entry.id} className={`dab-profile-row${activeProfile === entry.id ? ' is-active' : ''}`}>
+            {profiles.map((entry, i) => (
+              <div key={entry.id} className={`dab-profile-row${activeProfile === entry.id ? ' is-active' : ''}`} style={{ '--i': i } as CSSProperties}>
                 <ProfileDot entry={entry} />
                 <div className="dab-profile-meta">
                   <span className="dab-profile-name">{entry.name}</span>
                   <span className="dab-profile-sub">{new Date(entry.createdAt).toLocaleDateString()}</span>
                 </div>
                 <button type="button" className="dab-btn" onClick={() => onApply(entry)}>{t('profileApply')}</button>
-                <button type="button" className={`dab-btn dab-btn-ghost dab-btn-danger${confirmId === entry.id ? ' dab-btn-confirm' : ''}`}
+                <button type="button" className={`dab-btn dab-btn-danger-solid${confirmId === entry.id ? ' dab-btn-confirm' : ''}`}
                   title={t('profileDelete')} onClick={() => onDelete(entry)}>
                   {confirmId === entry.id ? (
                     <><CheckIcon size={13} />{t('profileDeleteConfirm')}</>
                   ) : (
-                    <TrashIcon size={13} />
+                    t('profileDelete')
                   )}
                 </button>
               </div>
@@ -151,45 +153,47 @@ export function ProfilePage({ p, notify }: { p: ThemeSectionProps; notify: (msg:
           </button>
         </div>
         <p className="dab-hint" style={{ marginTop: 8 }}>{t('scheduleHint')}</p>
-        {schedule.enabled ? (
-          <div className="dab-schedule-grid">
-            <div className="dab-schedule-cell">
-              <div className="dab-swatch-title">{t('scheduleMode')}</div>
-              <div className="dab-chip-row">
-                <button type="button" className={`dab-chip${schedule.mode === 'time' ? ' is-active' : ''}`}
-                  onClick={() => patchSchedule({ mode: 'time' })}><ClockIcon size={13} />{t('scheduleModeTime')}</button>
-                <button type="button" className={`dab-chip${schedule.mode === 'system' ? ' is-active' : ''}`}
-                  onClick={() => patchSchedule({ mode: 'system' })}>{t('scheduleModeSystem')}</button>
+        <div className={`dab-schedule-wrap${schedule.enabled ? ' is-open' : ''}`} aria-hidden={!schedule.enabled}>
+          <div className="dab-schedule-clip">
+            <div className="dab-schedule-grid">
+              <div className="dab-schedule-cell" style={{ '--i': 0 } as CSSProperties}>
+                <div className="dab-swatch-title">{t('scheduleMode')}</div>
+                <div className="dab-chip-row">
+                  <button type="button" className={`dab-chip${schedule.mode === 'time' ? ' is-active' : ''}`}
+                    onClick={() => patchSchedule({ mode: 'time' })}><ClockIcon size={13} />{t('scheduleModeTime')}</button>
+                  <button type="button" className={`dab-chip${schedule.mode === 'system' ? ' is-active' : ''}`}
+                    onClick={() => patchSchedule({ mode: 'system' })}>{t('scheduleModeSystem')}</button>
+                </div>
               </div>
-            </div>
-            {schedule.mode === 'time' ? (
-              <div className="dab-schedule-cell">
-                <div className="dab-swatch-title">{t('scheduleTimes')}</div>
+              {schedule.mode === 'time' ? (
+                <div className="dab-schedule-cell" style={{ '--i': 1 } as CSSProperties}>
+                  <div className="dab-swatch-title">{t('scheduleTimes')}</div>
+                  <div className="dab-time-row">
+                    <label className="dab-time-label"><SunIcon size={13} />{t('scheduleDayStart')}
+                      <input type="time" className="dab-timeinput" value={schedule.dayStart}
+                        onChange={e => { if (/^([01]\d|2[0-3]):[0-5]\d$/.test(e.target.value)) patchSchedule({ dayStart: e.target.value }) }} />
+                    </label>
+                    <label className="dab-time-label"><MoonIcon size={13} />{t('scheduleNightStart')}
+                      <input type="time" className="dab-timeinput" value={schedule.nightStart}
+                        onChange={e => { if (/^([01]\d|2[0-3]):[0-5]\d$/.test(e.target.value)) patchSchedule({ nightStart: e.target.value }) }} />
+                    </label>
+                  </div>
+                </div>
+              ) : null}
+              <div className="dab-schedule-cell" style={{ '--i': 2 } as CSSProperties}>
+                <div className="dab-swatch-title">{t('scheduleProfiles')}</div>
                 <div className="dab-time-row">
-                  <label className="dab-time-label"><SunIcon size={13} />{t('scheduleDayStart')}
-                    <input type="time" className="dab-timeinput" value={schedule.dayStart}
-                      onChange={e => { if (/^([01]\d|2[0-3]):[0-5]\d$/.test(e.target.value)) patchSchedule({ dayStart: e.target.value }) }} />
+                  <label className="dab-time-label"><SunIcon size={13} />{t('scheduleDayProfile')}
+                    {profileOptions(schedule.dayProfile, id => patchSchedule({ dayProfile: id }))}
                   </label>
-                  <label className="dab-time-label"><MoonIcon size={13} />{t('scheduleNightStart')}
-                    <input type="time" className="dab-timeinput" value={schedule.nightStart}
-                      onChange={e => { if (/^([01]\d|2[0-3]):[0-5]\d$/.test(e.target.value)) patchSchedule({ nightStart: e.target.value }) }} />
+                  <label className="dab-time-label"><MoonIcon size={13} />{t('scheduleNightProfile')}
+                    {profileOptions(schedule.nightProfile, id => patchSchedule({ nightProfile: id }))}
                   </label>
                 </div>
               </div>
-            ) : null}
-            <div className="dab-schedule-cell">
-              <div className="dab-swatch-title">{t('scheduleProfiles')}</div>
-              <div className="dab-time-row">
-                <label className="dab-time-label"><SunIcon size={13} />{t('scheduleDayProfile')}
-                  {profileOptions(schedule.dayProfile, id => patchSchedule({ dayProfile: id }))}
-                </label>
-                <label className="dab-time-label"><MoonIcon size={13} />{t('scheduleNightProfile')}
-                  {profileOptions(schedule.nightProfile, id => patchSchedule({ nightProfile: id }))}
-                </label>
-              </div>
             </div>
           </div>
-        ) : null}
+        </div>
       </section>
 
       {/* Export / import */}

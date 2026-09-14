@@ -9,11 +9,11 @@ import { defineStore } from './runtime'
 import type { Ctx, RpcResultLike, BoundActions, ThemeSectionProps, PartOpacities, PartBlurs, BackgroundType, GeneratedBgParams, ProfileAppearance, ProfileEntry, RotationItem, ScheduleConfig, SchemeOverride } from './types'
 import { NS, zh, en } from './i18n'
 import { cfg, rHasColor, rColor, rWp, rWpImage, rWpVideo, rBgState, rVideoBgState, setWpUrl, setWpImageUrl, setWpVideoUrl, setWpVideoSnapshot, setBgState, adoptConfig, DEFAULT_CONFIG, setBgDark, rBgDark, rProfiles, rRotation, rSchedule, rScheme, rColorScheme, rSchemeOverride, currentAppearance, applyAppearance } from './state'
-import { RPC_CHANNEL, VIDEO_SERVE_URL, initRpc, saveConfig, flushSave, loadPersisted, persistWallpaper, persistVideo, persistConfig, uploadVideo, rotationAdd, rotationRemove, rotationActivate } from './rpc'
-import { applyWp, teardownWp, applySettingsOverrides, SETTINGS_STYLE_RULE, TRAJECTORY_STYLE_RULE, INPUT_BLUR_RULE, PLACEHOLDER_RULE, watchParts, watchThemeResets, regenerateGeneratedBg, setBackgroundType, updateGeneratedBg, applyThemeColor, onGeneratedSnapshot, watchWallpaperDragQuality, clearThemeTokens, onVerdictApplied, onColorAdopted, LABEL_TOKENS } from './wallpaper'
+import { RPC_CHANNEL, VIDEO_SERVE_URL, initRpc, saveConfig, flushSave, loadPersisted, persistWallpaper, persistVideo, persistConfig, uploadVideo, rotationAdd, rotationRemove, rotationActivate, setVideoFromUrl as rpcSetVideoFromUrl } from './rpc'
+import { applyWp, teardownWp, applySettingsOverrides, SETTINGS_STYLE_RULE, TRAJECTORY_STYLE_RULE, INPUT_BLUR_RULE, PLACEHOLDER_RULE, MOBILE_HEADER_RULE, watchParts, watchThemeResets, regenerateGeneratedBg, setBackgroundType, updateGeneratedBg, applyThemeColor, onGeneratedSnapshot, watchWallpaperDragQuality, clearThemeTokens, onVerdictApplied, onColorAdopted, LABEL_TOKENS } from './wallpaper'
 import { genTokens, hslToHsv, hsvToHsl, extractWallpaperColor } from './utils/color'
 import { captureVideoSnapshot } from './utils/video'
-import { readImgAsync, makeThumb } from './utils/image'
+import { readImgAsync, makeThumb, blobToDataUrl } from './utils/image'
 import { ThemeSection } from './components/ThemeSection'
 import { SUN_PATHS } from './components/icons'
 
@@ -78,7 +78,7 @@ export function apply(ctx: Ctx): void {
   // Restore saved color on boot.
   if (rHasColor()) registerCustom(initH, initS, initL)
   // A fresh background brightness verdict (wallpaper swapped in, generated bg
-  // regenerated) re-registers the skin: without a picked color the adopted
+  // regenerated) re-registration trigger: without a picked color the adopted
   // skin must be rebuilt so its fonts follow the new wallpaper.
   onVerdictApplied(() => {
     if (!rHasColor()) registerCustom()
@@ -103,7 +103,7 @@ export function apply(ctx: Ctx): void {
   styleEl.dataset.plugin = 'dsh-any-background'
   // Only applies while applyCustomTokens marks the body with the plugin's
   // own dark-mode value, avoiding matches against the host's theme attribute.
-  styleEl.textContent = `body[data-ds-dark-theme="dsh-any-background"]::before{content:'';position:fixed;inset:0;z-index:-1;pointer-events:none;background:radial-gradient(ellipse 80% 60% at 50% 0%,rgba(255,255,255,0.03) 0%,transparent 60%)}${SETTINGS_STYLE_RULE}${TRAJECTORY_STYLE_RULE}${INPUT_BLUR_RULE}` + PLACEHOLDER_RULE
+  styleEl.textContent = `body[data-ds-dark-theme="dsh-any-background"]::before{content:'';position:fixed;inset:0;z-index:-1;pointer-events:none;background:radial-gradient(ellipse 80% 60% at 50% 0%,rgba(255,255,255,0.03) 0%,transparent 60%)}${SETTINGS_STYLE_RULE}${TRAJECTORY_STYLE_RULE}${INPUT_BLUR_RULE}${MOBILE_HEADER_RULE}` + PLACEHOLDER_RULE
   document.head.appendChild(styleEl)
   ctx.effect(() => () => { styleEl?.parentNode?.removeChild(styleEl) }, 'dsh-any-background: gradient')
 
@@ -200,7 +200,9 @@ export function apply(ctx: Ctx): void {
    *  the full adaptation (host skin + editor wheel sync); the caller persists. */
   const adoptWallpaperColor = async (dataUrl: string): Promise<void> => {
     const hsl = await extractWallpaperColor(dataUrl, rBgState())
-    if (!hsl) return
+    // The wallpaper may have been swapped while the image was decoding; a stale
+    // pick must not overwrite the new picture's color.
+    if (!hsl || rWp() !== dataUrl) return
     cfg.color = hsl
     registerCustom(hsl[0], hsl[1], hsl[2])
     colorRev++
@@ -208,25 +210,30 @@ export function apply(ctx: Ctx): void {
   }
 
   /** Activate a rotation item: the server copies its bytes into the wallpaper
-   *  slot; the client applies the returned data URL through the normal image
+   *  slot; the client applies the returned serve URL through the normal image
    *  path, then re-extracts the theme color from the new picture so the
    *  palette follows the rotation. */
   const applyRotationIndex = async (idx: number, auto: boolean): Promise<boolean> => {
     const rot = rRotation()
     if (idx < 0 || idx >= rot.items.length) return false
     const r = await rotationActivate(idx)
-    if (!r.ok || !r.dataUrl) {
+    if (!r.ok || !r.wallpaperUrl) {
       console.warn('dsh-any-background: rotation activate failed', r.error)
       return false
     }
-    setWpImageUrl(r.dataUrl)
-    if (cfg.backgroundType === 'image') setWpUrl(r.dataUrl)
+    // The server already persisted the bytes into the wallpaper slot; mirror
+    // setWpFromServer's state switch (bound is not initialized yet here).
+    cfg.backgroundType = 'image'
+    setBgDark(null)
+    setWpImageUrl(r.wallpaperUrl)
+    setWpUrl(rWpImage())
+    setBgState({ ...DEFAULT_CONFIG.bgState })
     cfg.rotation = { ...rot, current: idx, lastRotate: auto || rot.lastRotate === null ? new Date().toISOString() : rot.lastRotate }
     // The picture just switched, so any saved pick describes the old wallpaper:
     // extract once from the new one to re-adapt (placement state matches the
     // previous image, so a size mismatch makes the extractor fall back to the
     // whole picture — the desired behavior for a fresh wallpaper).
-    if (cfg.backgroundType === 'image') await adoptWallpaperColor(r.dataUrl)
+    if (cfg.backgroundType === 'image') await adoptWallpaperColor(rWp()!)
     applyThemeColor()
     syncBg()
     saveConfig()
@@ -467,19 +474,24 @@ export function apply(ctx: Ctx): void {
         colorRev++
         bound?.syncColor([nh, ns, nl], colorRev)
       },
-      setWp: (u: string | null) => {
+      // Server-side set: the wallpaper bytes are ALREADY persisted by the caller
+      // (raw upload / URL download / rotation), so this only switches the theme
+      // to image mode and points the display at the serve URL. null removes the
+      // stored image and video.
+      setWpFromServer: (u: string | null) => {
         cfg.backgroundType = 'image'
         // Retain the upload in its own slot so type switches never lose it.
         // The generated-background brightness verdict stops applying here.
         setBgDark(null)
         setWpImageUrl(u)
-        setWpUrl(u)
+        // Mirror the same rev'd URL so wpUrl and the display never diverge.
+        setWpUrl(rWpImage())
         setBgState({ ...DEFAULT_CONFIG.bgState })
-        persistWallpaper(u)
         if (u === null) {
           // Removing the background clears the stored video as well.
           setWpVideoUrl(null, null)
           void persistVideo(null)
+          persistWallpaper(null)
         }
         applyThemeColor()
         syncBg()
@@ -524,7 +536,7 @@ export function apply(ctx: Ctx): void {
       setBgType: (type: BackgroundType) => {
         setBackgroundType(type)
         // Keep the uploaded wallpaper on disk so it can be restored when the
-        // user returns to the image type; it is only removed via setWp(null).
+        // user returns to the image type; it is only removed via setWpFromServer(null).
         saveConfig()
         syncBg()
       },
@@ -583,12 +595,7 @@ export function apply(ctx: Ctx): void {
           if (vurl) {
             try {
               const blob = await fetch(vurl).then(r => r.blob())
-              videoPayload = await new Promise<string>((resolve, reject) => {
-                const fr = new FileReader()
-                fr.onload = () => resolve(fr.result as string)
-                fr.onerror = () => reject(fr.error)
-                fr.readAsDataURL(blob)
-              })
+              videoPayload = await blobToDataUrl(blob)
               // The serve route may report a generic Content-Type; pin the
               // recorded MIME so the import detector sees data:video/….
               if (videoPayload && !/^data:video\//.test(videoPayload)) {
@@ -599,11 +606,29 @@ export function apply(ctx: Ctx): void {
             }
           }
         }
+        // The wallpaper is displayed through the serve URL; exports embed the
+        // bytes (fetched from that URL) so the file is portable.
+        let wallpaperPayload: string | null = null
+        if (cfg.backgroundType === 'image') {
+          const wurl = rWp()
+          if (wurl) {
+            if (wurl.startsWith('data:')) {
+              wallpaperPayload = wurl
+            } else {
+              try {
+                const blob = await fetch(wurl).then(r => r.blob())
+                wallpaperPayload = await blobToDataUrl(blob)
+              } catch {
+                wallpaperPayload = null
+              }
+            }
+          }
+        }
         const payload = {
           version: 2,
           exportedAt: new Date().toISOString(),
           config: cfg,
-          wallpaper: cfg.backgroundType === 'image' ? rWp() : null,
+          wallpaper: wallpaperPayload,
           video: videoPayload,
         }
         const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
@@ -790,6 +815,32 @@ export function apply(ctx: Ctx): void {
       rotateNow: async (): Promise<boolean> => {
         if (rRotation().items.length === 0) return false
         return applyRotationIndex(pickNextRotationIndex(), true)
+      },
+      // Network video URL: the server streams it into the video slot; the
+      // client switches to video mode and plays from the serve URL, then
+      // captures the preview frame through the same path as local uploads.
+      setVideoFromUrl: async (url: string): Promise<boolean> => {
+        const r = await rpcSetVideoFromUrl(url)
+        if (!r.ok || !r.mime) {
+          console.warn('dsh-any-background: video url fetch failed', r.error)
+          return false
+        }
+        setBgDark(null)
+        cfg.backgroundType = 'video'
+        setWpUrl(null)
+        cfg.videoBgState = { ...DEFAULT_CONFIG.bgState }
+        setWpVideoUrl(VIDEO_SERVE_URL, r.mime)
+        applyWp()
+        saveConfig()
+        syncBg()
+        const applied = rWpVideo()
+        void captureVideoSnapshot(applied!).then(snap => {
+          if (rWpVideo() !== applied) return
+          setWpVideoSnapshot(snap)
+          applyThemeColor()
+          syncBg()
+        })
+        return true
       },
     }
   }

@@ -81,6 +81,7 @@ export const UI_CSS = `
 .dab-urlinput{flex:1;min-width:180px;height:34px;padding:0 12px;border-radius:10px;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary);font-size:12.5px;outline:none;transition:border-color .2s}
 .dab-urlinput::placeholder{color:var(--dsw-alias-label-quaternary)}
 .dab-urlinput:focus{border-color:var(--dsw-alias-brand-primary);box-shadow:0 0 0 3px color-mix(in srgb,var(--dsw-alias-brand-primary) 18%,transparent)}
+.dab-urlrow{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:12px;animation:dab-list-in .3s cubic-bezier(.22,1,.36,1) both}
 .dab-swatch-lg{height:38px;border-radius:10px;border:1px solid var(--dsw-alias-border-l2);box-shadow:inset 0 0 14px rgba(0,0,0,.1);transition:transform .3s ease}
 .dab-swatch-lg:hover{transform:scale(1.02)}
 
@@ -91,11 +92,19 @@ export const UI_CSS = `
 .dab-btn:disabled{opacity:.5;cursor:not-allowed}
 .dab-btn-primary{background:var(--dsw-alias-brand-primary);color:var(--dsw-alias-brand-text);border-color:transparent}
 .dab-btn-danger{color:var(--dsw-alias-state-error-primary)}
+.dab-btn-danger-solid{background:var(--dsw-alias-state-error-primary);color:#fff;border-color:transparent}
+.dab-btn-danger-solid:hover:not(:disabled){background:color-mix(in srgb,var(--dsw-alias-state-error-primary) 85%,#000)}
 .dab-btn-ghost{background:transparent;border-color:transparent;color:var(--dsw-alias-label-secondary,var(--dsw-alias-label-tertiary))}
 .dab-btn-ghost:hover:not(:disabled){background:var(--dsw-alias-bg-layer-2);box-shadow:none}
+/* Soft solid button: subtle layer background instead of transparent ghost. */
+.dab-btn-soft{background:var(--dsw-alias-bg-layer-2);border-color:var(--dsw-alias-border-l2);color:var(--dsw-alias-label-secondary,var(--dsw-alias-label-tertiary))}
+.dab-btn-soft:hover:not(:disabled){background:var(--dsw-alias-bg-layer-3,var(--dsw-alias-bg-layer-2));color:var(--dsw-alias-label-primary)}
+/* White background with error-red text (inverse of danger-solid). */
+.dab-btn-danger-inverted{background:#fff;color:var(--dsw-alias-state-error-primary);border-color:transparent}
+.dab-btn-danger-inverted:hover:not(:disabled){background:#f3f4f6}
 .dab-btn:focus-visible,.dab-nav-item:focus-visible,.dab-seg-item:focus-visible,.dab-swatch:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:2px}
 .dab-chip-row{display:flex;flex-wrap:wrap;gap:8px}
-.dab-chip{height:30px;padding:0 14px;border-radius:99px;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-secondary,var(--dsw-alias-label-tertiary));font-size:12px;cursor:pointer;display:inline-flex;align-items:center;gap:6px;transition:all .22s ease}
+.dab-chip{height:30px;padding:0 14px;border-radius:99px;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-secondary,var(--dsw-alias-label-tertiary));font-size:12px;cursor:pointer;display:inline-flex;align-items:center;gap:6px;transition:background-color .22s ease,border-color .22s ease,color .22s ease}
 .dab-chip:hover{border-color:var(--dsw-alias-brand-primary);color:var(--dsw-alias-label-primary)}
 .dab-chip.is-active{background:var(--dsw-alias-brand-primary);color:var(--dsw-alias-brand-text);border-color:transparent}
 
@@ -145,7 +154,7 @@ export const UI_CSS = `
 
 /* ── generated background type cards ─────────────────────────────────────── */
 .dab-types{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
-.dab-type{position:relative;border:1.5px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-1);border-radius:14px;padding:10px;cursor:pointer;text-align:left;font:inherit;transition:border-color .25s,transform .25s,box-shadow .25s}
+.dab-type{position:relative;border:1.5px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-1);border-radius:14px;padding:10px;cursor:pointer;text-align:left;font:inherit;transition:border-color .25s,transform .25s,box-shadow .25s;animation:dab-type-in .42s cubic-bezier(.22,1,.36,1) both;animation-delay:calc(var(--i,0) * 60ms)}
 .dab-type:hover{transform:translateY(-2px)}
 .dab-type.is-active{border-color:var(--dsw-alias-brand-primary);box-shadow:0 0 0 3px color-mix(in srgb,var(--dsw-alias-brand-primary) 18%,transparent)}
 .dab-type-thumb{height:62px;border-radius:9px;overflow:hidden;position:relative}
@@ -176,14 +185,15 @@ export const UI_CSS = `
 /* ── presets / profiles / schedule / rotation ────────────────────────────── */
 .dab-row-head{display:flex;align-items:center;justify-content:space-between;gap:12px}
 .dab-preset-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
-.dab-preset{display:flex;flex-direction:column;align-items:flex-start;gap:3px;padding:12px;border:1.5px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-1);border-radius:13px;cursor:pointer;font:inherit;text-align:left;transition:border-color .25s,transform .25s,box-shadow .25s}
+.dab-preset{display:flex;flex-direction:column;align-items:flex-start;gap:3px;padding:12px;border:1.5px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-1);border-radius:13px;cursor:pointer;font:inherit;text-align:left;transition:border-color .25s,transform .25s,box-shadow .25s;animation:dab-row-in .34s cubic-bezier(.22,1,.36,1) both;animation-delay:calc(var(--i,0) * 45ms)}
 .dab-preset:hover{transform:translateY(-2px);border-color:var(--dsw-alias-brand-primary);box-shadow:0 8px 22px -12px rgba(0,0,0,.3)}
 .dab-preset-dot{width:22px;height:22px;border-radius:50%;margin-bottom:4px;box-shadow:inset 0 0 0 1px rgba(0,0,0,.12),0 4px 10px -4px rgba(0,0,0,.35);background:var(--dsw-alias-bg-layer-2);display:grid;place-items:center;color:var(--dsw-alias-label-tertiary)}
 .dab-preset-name{font-size:12.5px;font-weight:600;color:var(--dsw-alias-label-primary)}
 .dab-preset-desc{font-size:10.5px;line-height:1.45;color:var(--dsw-alias-label-tertiary)}
-.dab-profile-list{display:flex;flex-direction:column;gap:8px;margin-top:12px}
-.dab-profile-row{display:flex;align-items:center;gap:11px;padding:9px 12px;border:1px solid var(--dsw-alias-border-l2);border-radius:12px;background:var(--dsw-alias-bg-layer-2);transition:border-color .22s ease}
-.dab-profile-row.is-active{border-color:color-mix(in srgb,var(--dsw-alias-brand-primary) 45%,transparent)}
+.dab-profile-list{display:flex;flex-direction:column;gap:8px;margin-top:12px;animation:dab-list-in .38s cubic-bezier(.22,1,.36,1) both}
+.dab-profile-row{display:flex;align-items:center;gap:11px;padding:9px 12px;border:1px solid var(--dsw-alias-border-l2);border-radius:12px;background:var(--dsw-alias-bg-layer-2);animation:dab-row-in .34s cubic-bezier(.22,1,.36,1) both;animation-delay:calc(var(--i,0) * 45ms);transition:border-color .22s ease,background .22s ease}
+.dab-profile-row:hover{border-color:color-mix(in srgb,var(--dsw-alias-brand-primary) 28%,transparent);background:color-mix(in srgb,var(--dsw-alias-label-primary) 4%,var(--dsw-alias-bg-layer-2))}
+.dab-profile-row.is-active{border-color:color-mix(in srgb,var(--dsw-alias-brand-primary) 45%,transparent);background:color-mix(in srgb,var(--dsw-alias-brand-primary) 7%,var(--dsw-alias-bg-layer-2))}
 .dab-profile-dot{width:22px;height:22px;flex:none;border-radius:50%;background:var(--dsw-alias-bg-layer-1);box-shadow:inset 0 0 0 1px rgba(0,0,0,.12);display:grid;place-items:center;color:var(--dsw-alias-label-tertiary)}
 .dab-profile-meta{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
 .dab-profile-name{font-size:12.5px;font-weight:600;color:var(--dsw-alias-label-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -193,14 +203,22 @@ export const UI_CSS = `
 .dab-select:focus{border-color:var(--dsw-alias-brand-primary)}
 .dab-timeinput{height:32px;padding:0 8px;border-radius:9px;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary);font-family:var(--dab-mono);font-size:12px;outline:none}
 .dab-timeinput:focus{border-color:var(--dsw-alias-brand-primary)}
-.dab-schedule-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;margin-top:12px}
-.dab-schedule-cell{min-width:0}
+/* Collapsible panel: animates grid-template-rows 0fr→1fr so the schedule
+   block unfolds to its content height instead of popping in. visibility
+   flips after the fold finishes (and instantly on open) so hidden inputs
+   are never focusable. */
+.dab-schedule-wrap{display:grid;grid-template-rows:0fr;visibility:hidden;transition:grid-template-rows .42s cubic-bezier(.22,1,.36,1),visibility 0s linear .42s}
+.dab-schedule-wrap.is-open{grid-template-rows:1fr;visibility:visible;transition:grid-template-rows .42s cubic-bezier(.22,1,.36,1)}
+.dab-schedule-clip{overflow:hidden;min-height:0;opacity:0;transition:opacity .28s ease}
+.dab-schedule-wrap.is-open .dab-schedule-clip{opacity:1;transition:opacity .32s ease .1s}
+.dab-schedule-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;padding-top:12px}
+.dab-schedule-cell{min-width:0;animation:dab-row-in .34s cubic-bezier(.22,1,.36,1) both;animation-delay:calc(var(--i,0) * 60ms)}
 .dab-time-row{display:flex;flex-direction:column;gap:9px}
 .dab-time-label{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--dsw-alias-label-secondary,var(--dsw-alias-label-tertiary))}
 .dab-time-label svg{color:var(--dsw-alias-brand-primary);flex:none}
 .dab-time-label .dab-select,.dab-time-label .dab-timeinput{flex:1;min-width:0}
 .dab-thumbstrip{display:flex;flex-wrap:wrap;gap:9px;margin-top:13px}
-.dab-thumb{position:relative;width:64px;height:44px;border-radius:9px;overflow:hidden;border:1.5px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-2);display:grid;place-items:center;color:var(--dsw-alias-label-tertiary)}
+.dab-thumb{position:relative;width:64px;height:44px;border-radius:9px;overflow:hidden;border:1.5px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-2);display:grid;place-items:center;color:var(--dsw-alias-label-tertiary);animation:dab-list-in .3s cubic-bezier(.22,1,.36,1) both}
 .dab-thumb.is-current{border-color:var(--dsw-alias-brand-primary);box-shadow:0 0 0 2px color-mix(in srgb,var(--dsw-alias-brand-primary) 25%,transparent)}
 .dab-thumb img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
 .dab-thumb-x{position:absolute;top:2px;right:2px;width:16px;height:16px;border:0;border-radius:50%;background:rgba(0,0,0,.55);color:#fff;cursor:pointer;display:grid;place-items:center;opacity:0;transition:opacity .18s ease,background .18s ease;padding:0}
@@ -234,6 +252,9 @@ export const UI_CSS = `
 @keyframes dab-fade-in{from{opacity:0}to{opacity:1}}
 @keyframes dab-page-in{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
 @keyframes dab-rise-in{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+@keyframes dab-list-in{from{opacity:0;transform:translateY(-7px)}to{opacity:1;transform:none}}
+@keyframes dab-row-in{from{opacity:0;transform:translateY(6px) scale(.985)}to{opacity:1;transform:none}}
+@keyframes dab-type-in{from{opacity:0;transform:translateY(8px) scale(.97)}to{opacity:1;transform:none}}
 @keyframes dab-orb-in{from{opacity:0;transform:scale(.82)}to{opacity:1;transform:none}}
 @keyframes dab-spin{to{transform:rotate(360deg)}}
 @keyframes dab-rotate{to{transform:rotate(360deg)}}

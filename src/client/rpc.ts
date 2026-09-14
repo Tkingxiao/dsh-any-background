@@ -1,9 +1,13 @@
 import type { RpcResultLike } from './types'
-import { cfg, adoptConfig, setWpUrl, setWpImageUrl, setWpVideoUrl } from './state'
+import { cfg, adoptConfig, setWpUrl, setWpImageUrl, setWpVideoUrl, rWpImage } from './state'
 
 export const RPC_CHANNEL = '/dsh-any-background'
 /** Same-origin serve URL of the persisted video (enough for <video src>/fetch). */
 export const VIDEO_SERVE_URL = '/dsh-any-background/video'
+/** Same-origin serve URL of the persisted wallpaper (native <img> loading). */
+export const WALLPAPER_SERVE_URL = '/dsh-any-background/wallpaper'
+/** Raw-bytes upload endpoint for the wallpaper slot (no base64 inflation). */
+const WALLPAPER_UPLOAD_URL = '/dsh-any-background/wallpaper/upload'
 /** HTTP route new videos are POSTed to as raw bytes (see uploadVideo). */
 export const VIDEO_UPLOAD_URL = '/dsh-any-background/video/upload'
 const RPC_NS = 'dshAnyBackground'
@@ -54,23 +58,25 @@ export function persistConfig(): void {
   void rpcCall('writeConfig', { config: cfg })
 }
 
-/** Load the persisted theme (config + wallpaper + video URL) from the node half.
- *  Resolves true when the server advanced a due wallpaper rotation during the
- *  read — the restored wallpaper is then already the new pick. */
+/** Load the persisted theme (config + wallpaper URL + video URL) from the node
+ *  half. Image and video both travel as serve URLs — never bytes — so this RPC
+ *  stays tiny. Resolves true when the server advanced a due wallpaper rotation
+ *  during the read — the restored wallpaper is then already the new pick. */
 export async function loadPersisted(): Promise<boolean> {
   const data = await rpcCall('read', {})
   if (data && typeof data === 'object') {
-    const d = data as { config?: unknown; wallpaper?: unknown; videoUrl?: unknown; rotated?: unknown }
+    const d = data as { config?: unknown; wallpaperUrl?: unknown; videoUrl?: unknown; rotated?: unknown }
     if (d.config) adoptConfig(d.config)
     // Uploaded image and video keep their own slots so type switches never
     // discard them; in image mode the caller points wpUrl at it.
-    if (typeof d.wallpaper === 'string') setWpImageUrl(d.wallpaper)
-    else if (d.wallpaper === null) setWpImageUrl(null)
+    if (typeof d.wallpaperUrl === 'string') setWpImageUrl(d.wallpaperUrl)
+    else if (d.wallpaperUrl === null) setWpImageUrl(null)
     // The video travels as a serve URL; the frame snapshot is re-captured by
     // the boot restore in index.tsx when needed.
     if (typeof d.videoUrl === 'string') setWpVideoUrl(d.videoUrl, cfg.videoMime)
     else if (d.videoUrl === null) setWpVideoUrl(null, null)
-    if (cfg.backgroundType === 'image') setWpUrl(d.wallpaper === null ? null : d.wallpaper as string | null)
+    // Mirror the same rev'd URL setWpImageUrl stored, so wpUrl never diverges.
+    if (cfg.backgroundType === 'image') setWpUrl(rWpImage())
     return d.rotated === true
   }
   return false
@@ -89,9 +95,9 @@ export async function persistVideo(dataUrl: string | null): Promise<boolean> {
 }
 
 /** Download a wallpaper from a network URL and persist it into the local slot
- *  (the host replaces wallpaper.jpg). Returns the freshly stored data-URL on
+ *  (the host replaces wallpaper.jpg). Returns the freshly stored serve URL on
  *  success, or the host's failure message. */
-export async function setWallpaperFromUrl(url: string): Promise<{ ok: boolean; dataUrl?: string | null; error?: string }> {
+export async function setWallpaperFromUrl(url: string): Promise<{ ok: boolean; wallpaperUrl?: string | null; error?: string }> {
   if (!rpcCallFn) return { ok: false, error: 'rpc not ready' }
   let res: RpcResultLike | undefined
   try {
@@ -104,9 +110,30 @@ export async function setWallpaperFromUrl(url: string): Promise<{ ok: boolean; d
     const err = (res as { error?: { message?: string } }).error
     return { ok: false, error: err?.message ?? 'request failed' }
   }
-  const v = res.value as { ok?: boolean; dataUrl?: string | null; error?: string }
+  const v = res.value as { ok?: boolean; wallpaperUrl?: string | null; error?: string }
   return v?.ok === true
-    ? { ok: true, dataUrl: v.dataUrl ?? null }
+    ? { ok: true, wallpaperUrl: v.wallpaperUrl ?? null }
+    : { ok: false, error: v?.error ?? 'failed' }
+}
+
+/** Download a background video from a network URL. The server streams it into
+ *  the video slot and returns the resolved MIME for playback via the serve URL. */
+export async function setVideoFromUrl(url: string): Promise<{ ok: boolean; mime?: string; error?: string }> {
+  if (!rpcCallFn) return { ok: false, error: 'rpc not ready' }
+  let res: RpcResultLike | undefined
+  try {
+    res = await rpcCallFn(rpcEndpoint('setVideoUrl'), { url })
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+  if (!res) return { ok: false, error: 'no response' }
+  if (res.ok !== true) {
+    const err = (res as { error?: { message?: string } }).error
+    return { ok: false, error: err?.message ?? 'request failed' }
+  }
+  const v = res.value as { ok?: boolean; mime?: string; error?: string }
+  return v?.ok === true
+    ? { ok: true, mime: v.mime ?? 'video/mp4' }
     : { ok: false, error: v?.error ?? 'failed' }
 }
 
@@ -122,6 +149,22 @@ export async function uploadVideo(blob: Blob, mime: string): Promise<boolean> {
     return res.ok
   } catch (e) {
     console.warn('dsh-any-background: video upload failed', e)
+    return false
+  }
+}
+
+/** Upload a wallpaper's raw bytes over HTTP — same streaming model as videos,
+ *  original pixels preserved, zero base64 round-trips. */
+export async function uploadWallpaper(blob: Blob): Promise<boolean> {
+  try {
+    const res = await fetch(WALLPAPER_UPLOAD_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': blob.type || 'image/jpeg' },
+      body: blob,
+    })
+    return res.ok
+  } catch (e) {
+    console.warn('dsh-any-background: wallpaper upload failed', e)
     return false
   }
 }
@@ -155,12 +198,12 @@ export async function rotationRemove(index: number): Promise<{ ok: boolean; item
 }
 
 /** Activate a rotation item: the server copies its bytes into the wallpaper
- *  slot and returns the freshly sniffed data URL for immediate display. */
-export async function rotationActivate(index: number): Promise<{ ok: boolean; dataUrl?: string; error?: string }> {
+ *  slot and returns the serve URL for immediate display. */
+export async function rotationActivate(index: number): Promise<{ ok: boolean; wallpaperUrl?: string; error?: string }> {
   if (!rpcCallFn) return { ok: false, error: 'rpc not ready' }
   try {
     const res = await rpcCallFn(rpcEndpoint('rotationSet'), { index })
-    if (res && res.ok === true) return (res.value ?? { ok: false, error: 'no value' }) as { ok: boolean; dataUrl?: string; error?: string }
+    if (res && res.ok === true) return (res.value ?? { ok: false, error: 'no value' }) as { ok: boolean; wallpaperUrl?: string; error?: string }
     return { ok: false, error: (res as { error?: { message?: string } })?.error?.message ?? 'request failed' }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }

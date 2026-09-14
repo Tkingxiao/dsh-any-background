@@ -40,8 +40,23 @@ export let wpVideoSnapshot: string | null = null
 /** Local blob URL backing an in-session video; revoked when replaced or cleared. */
 let wpVideoObjectUrl: string | null = null
 
-export function setWpImageUrl(url: string | null): void { wpImageUrl = url }
 export function setWpUrl(url: string | null): void { wpUrl = url }
+// The serve URL is stable across in-place replacements (upload / URL download /
+// rotation), so every swap needs a query-string cache-buster or the URL-keyed
+// caches — the layer re-set guard, loadImage decode cache, brightness verdict,
+// low-res drag copy, intrinsic-size lookup — all keep the old pixels.
+let imageRev = 0
+export function bumpImageRev(url: string | null): string | null {
+  if (url === null) return url
+  // The serve URL is a same-origin relative path (/dsh-any-background/…); the
+  // rev query must reach those too, or an in-place replacement keeps the same
+  // backgroundImage string and applyImageWp skips the swap. blob:/data: stay
+  // intact (a query can break blob resolution).
+  if (!/^https?:\/\//i.test(url) && !url.startsWith('/')) return url
+  imageRev++
+  return `${url}${url.includes('?') ? '&' : '?'}r=${imageRev}`
+}
+export function setWpImageUrl(url: string | null): void { wpImageUrl = bumpImageRev(url) }
 // The serve URL is stable, so replacing the stored video needs a query-string
 // cache-buster or the player keeps the cached copy.
 let videoRev = 0
@@ -325,7 +340,7 @@ function normalizeGeneratedBg(p: ThemeConfig['generatedBg']): ThemeConfig['gener
   if (p.type === 'shader') {
     return {
       type: 'shader',
-      preset: ['aurora', 'nebula', 'noise'].includes(p.preset) ? p.preset : 'aurora',
+      preset: ['aurora', 'nebula', 'noise', 'starfield'].includes(p.preset) ? p.preset : 'aurora',
       speed: cl(p.speed, 0, 2, 0.3),
       scale: cl(p.scale, 0.3, 3, 1),
       seed: typeof p.seed === 'number' ? Math.floor(p.seed) : 0,
@@ -333,7 +348,7 @@ function normalizeGeneratedBg(p: ThemeConfig['generatedBg']): ThemeConfig['gener
   }
   return {
     type: 'pattern',
-    preset: ['dots', 'waves', 'poly'].includes(p.preset) ? p.preset : 'dots',
+    preset: ['dots', 'waves', 'poly', 'rain', 'contour', 'meta'].includes(p.preset) ? p.preset : 'dots',
     density: cl(p.density, 0, 1, 0.5),
     scale: cl(p.scale, 0.3, 3, 1),
     seed: typeof p.seed === 'number' ? Math.floor(p.seed) : 0,

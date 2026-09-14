@@ -127,7 +127,7 @@ export interface MeshGradientParams {
 
 export interface ShaderParams {
   type: 'shader'
-  preset: 'aurora' | 'nebula' | 'noise'
+  preset: 'aurora' | 'nebula' | 'noise' | 'starfield'
   speed: number
   scale: number
   /** Visual random seed; changing it regenerates the same preset with new variation. */
@@ -136,7 +136,7 @@ export interface ShaderParams {
 
 export interface PatternParams {
   type: 'pattern'
-  preset: 'dots' | 'waves' | 'poly'
+  preset: 'dots' | 'waves' | 'poly' | 'rain' | 'contour' | 'meta'
   density: number
   scale: number
   /** Visual random seed; changing it regenerates the same preset with new variation. */
@@ -231,7 +231,9 @@ export interface ThemeSectionProps {
   lit: number
   /** Commit a new color (HSV); the section converts to HSL for storage. */
   setColor: (h: number, s: number, l: number) => void
-  setWp: (url: string | null) => void
+  /** Point the wallpaper at a serve URL whose bytes are already persisted
+   *  (raw upload / URL download / rotation). null removes the stored image. */
+  setWpFromServer: (url: string | null) => void
   /** Set/remove the background video. Prefers the raw Blob (streamed to
    *  disk over the binary upload route); a data URL string is the small-file
    *  legacy path through RPC. */
@@ -266,6 +268,8 @@ export interface ThemeSectionProps {
   removeRotationItem: (index: number) => Promise<boolean>
   /** Immediately advance the rotation to the next item. */
   rotateNow: () => Promise<boolean>
+  /** Download a background video from a network URL and activate it. */
+  setVideoFromUrl: (url: string) => Promise<boolean>
   /** Download the current theme (config + wallpaper data URL) as JSON. */
   exportTheme: () => void
   /** Import a theme JSON: applies config + wallpaper and persists to disk. */

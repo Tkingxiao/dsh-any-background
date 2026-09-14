@@ -14,6 +14,7 @@
  */
 import { access, mkdir, readFile, writeFile, rm, rename, stat } from 'node:fs/promises'
 import { createReadStream, createWriteStream } from 'node:fs'
+import { Readable } from 'node:stream'
 import { dshHomePath } from '@deepseek-ai/dsh-home-paths'
 
 export const name = 'dsh-any-background'
@@ -27,11 +28,22 @@ const WALLPAPER_FILE = 'wallpaper.jpg'
 const ROTATION_DIR = 'rotation'
 const VIDEO_ROUTE = '/dsh-any-background/video'
 const UPLOAD_ROUTE = '/dsh-any-background/video/upload'
+const WALLPAPER_ROUTE = '/dsh-any-background/wallpaper'
+const WALLPAPER_UPLOAD_ROUTE = '/dsh-any-background/wallpaper/upload'
 const UPLOAD_TMP = 'wallpaper.upload.tmp'
+const VIDEO_UPLOAD_TMP = 'video.upload.tmp'
+const WALLPAPER_UPLOAD_MAX = 100 * 1024 * 1024
+const VIDEO_UPLOAD_MAX = 2 * 1024 * 1024 * 1024
 // Network-URL wallpaper fetch: cap the download and time it out so a bad link
-// can't stall the UI or fill the drive.
+// can't stall the UI or fill the drive. The video variant streams (never
+// buffered whole) with its own, larger caps.
 const WALLPAPER_FETCH_MAX = 25 * 1024 * 1024
 const WALLPAPER_FETCH_TIMEOUT = 20_000
+const VIDEO_FETCH_MAX = 2 * 1024 * 1024 * 1024
+const VIDEO_FETCH_TIMEOUT = 60_000
+// Once streaming, a hard total-time budget would reject a 2 GB download on
+// slower links; watch for inactivity instead (no bytes for this long = dead).
+const VIDEO_FETCH_IDLE_TIMEOUT = 60_000
 
 function videoFileName(mime: string | null): string {
   switch (mime) {
@@ -254,7 +266,7 @@ function normalizeGeneratedBg(p: GeneratedBgParams): GeneratedBgParams | null {
   if (p.type === 'shader') {
     return {
       type: 'shader',
-      preset: ['aurora', 'nebula', 'noise'].includes(p.preset) ? p.preset : 'aurora',
+      preset: ['aurora', 'nebula', 'noise', 'starfield'].includes(p.preset) ? p.preset : 'aurora',
       speed: clamp(p.speed, 0, 2, 0.3),
       scale: clamp(p.scale, 0.3, 3, 1),
       seed: typeof p.seed === 'number' ? Math.floor(p.seed) : 0,
@@ -263,7 +275,7 @@ function normalizeGeneratedBg(p: GeneratedBgParams): GeneratedBgParams | null {
   if (p.type === 'pattern') {
     return {
       type: 'pattern',
-      preset: ['dots', 'waves', 'poly'].includes(p.preset) ? p.preset : 'dots',
+      preset: ['dots', 'waves', 'poly', 'rain', 'contour', 'meta'].includes(p.preset) ? p.preset : 'dots',
       density: clamp(p.density, 0, 1, 0.5),
       scale: clamp(p.scale, 0.3, 3, 1),
       seed: typeof p.seed === 'number' ? Math.floor(p.seed) : 0,
@@ -398,13 +410,12 @@ async function writeConfig(config: ThemeConfig): Promise<boolean> {
   }
 }
 
-async function readWallpaper(): Promise<string | null> {
+/** The wallpaper slot is served over HTTP (never shipped as base64 inside the
+ *  read RPC): the browser decodes it natively through the same pipeline as any
+ *  <img>, so boot only transfers a tiny URL instead of the whole image. */
+async function wallpaperServeUrl(): Promise<string | null> {
   try {
-    const buf = await readFile(wallpaperPath())
-    // Sniff the real format from the magic bytes: PNG/WebP/GIF bytes written
-    // under the .jpg name must not be re-declared as image/jpeg (an animated
-    // GIF would break, and decoders should not rely on content sniffing).
-    return `data:${sniffImageMime(buf)};base64,${buf.toString('base64')}`
+    return (await stat(wallpaperPath())).size > 0 ? WALLPAPER_ROUTE : null
   } catch {
     return null
   }
@@ -438,13 +449,14 @@ function sniffImageMime(buf: Buffer): string {
 }
 
 /** Download a wallpaper from a network URL and persist it into the local
- *  wallpaper.jpg slot (replacing whatever was stored), so type switches,
- *  export and import keep working through the existing data-URL path.
- *  null removes the wallpaper. Returns { ok, dataUrl?, error? }. */
-async function writeWallpaperFromUrl(url: string | null): Promise<{ ok: boolean; dataUrl?: string | null; error?: string }> {
+ *  wallpaper.jpg slot (replacing whatever was stored), so type switches and
+ *  rotation keep working through the single active slot. The response carries
+ *  the serve URL, never the bytes. null removes the wallpaper.
+ *  Returns { ok, wallpaperUrl?, error? }. */
+async function writeWallpaperFromUrl(url: string | null): Promise<{ ok: boolean; wallpaperUrl?: string | null; error?: string }> {
   if (url === null) {
     const ok = await writeWallpaper(null)
-    return { ok, dataUrl: null, error: ok ? undefined : 'remove failed' }
+    return { ok, wallpaperUrl: null, error: ok ? undefined : 'remove failed' }
   }
   let u: URL
   try { u = new URL(url) } catch { return { ok: false, error: 'invalid url' } }
@@ -470,9 +482,15 @@ async function writeWallpaperFromUrl(url: string | null): Promise<{ ok: boolean;
   } catch {
     return { ok: false, error: 'read failed' }
   }
-  const dataUrl = `data:${sniffImageMime(buf)};base64,${buf.toString('base64')}`
-  const ok = await writeWallpaper(dataUrl)
-  return ok ? { ok: true, dataUrl } : { ok: false, error: 'write failed' }
+  // Write the downloaded bytes straight to disk — no base64 string round-trip.
+  await ensureDir()
+  try {
+    await writeFile(wallpaperPath(), buf)
+  } catch (e) {
+    console.error('dsh-any-background: failed to write the downloaded wallpaper', e)
+    return { ok: false, error: 'write failed' }
+  }
+  return { ok: true, wallpaperUrl: WALLPAPER_ROUTE }
 }
 
 // ── Wallpaper rotation pool ───────────────────────────────────────────────────
@@ -546,8 +564,9 @@ async function handleRotationRemove(payload: unknown): Promise<{ ok: boolean; it
 }
 
 /** Activate a rotation item: copy its bytes over the active wallpaper slot and
- *  return the freshly sniffed data URL so the client can apply it live. */
-async function handleRotationSet(payload: unknown): Promise<{ ok: boolean; dataUrl?: string; error?: string }> {
+ *  return the serve URL so the client applies it live (bytes never round-trip
+ *  through the RPC response). */
+async function handleRotationSet(payload: unknown): Promise<{ ok: boolean; wallpaperUrl?: string; error?: string }> {
   const idx = (payload as { index?: unknown } | null)?.index
   if (typeof idx !== 'number' || !isFinite(idx)) return { ok: false, error: 'invalid index' }
   const cfg = await readConfig()
@@ -566,11 +585,112 @@ async function handleRotationSet(payload: unknown): Promise<{ ok: boolean; dataU
     console.error('dsh-any-background: failed to activate a rotation wallpaper', e)
     return { ok: false, error: 'write failed' }
   }
-  return { ok: true, dataUrl: `data:${sniffImageMime(buf)};base64,${buf.toString('base64')}` }
+  return { ok: true, wallpaperUrl: WALLPAPER_ROUTE }
 }
 
 async function videoUrl(): Promise<string | null> {
   return (await findVideoFile()) ? VIDEO_ROUTE : null
+}
+
+/** Guess a video MIME from the URL's path extension (fallback for servers that
+ *  send no precise Content-Type). */
+function videoMimeFromUrl(u: URL): string | null {
+  const p = u.pathname.toLowerCase()
+  if (/\.(mp4|m4v)$/.test(p)) return 'video/mp4'
+  if (/\.webm$/.test(p)) return 'video/webm'
+  if (/\.(ogg|ogv)$/.test(p)) return 'video/ogg'
+  if (/\.(mov|qt)$/.test(p)) return 'video/quicktime'
+  if (/\.(mkv|mk3d|mka)$/.test(p)) return 'video/x-matroska'
+  return null
+}
+
+/** Download a background video from a network URL and store it in the video
+ *  slot (streamed to a temp file — never buffered whole), then record the MIME
+ *  in the config so findVideoFile/serve resolve immediately. */
+async function writeVideoFromUrl(url: string | null): Promise<{ ok: boolean; mime?: string; error?: string }> {
+  if (url === null) return { ok: false, error: 'invalid url' }
+  let u: URL
+  try { u = new URL(url) } catch { return { ok: false, error: 'invalid url' } }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') return { ok: false, error: 'unsupported scheme' }
+  let res: Response
+  try {
+    const ctl = new AbortController()
+    const timer = setTimeout(() => ctl.abort(), VIDEO_FETCH_TIMEOUT)
+    try { res = await fetch(url, { redirect: 'follow', signal: ctl.signal }) }
+    finally { clearTimeout(timer) }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error && e.name === 'AbortError' ? 'timeout' : 'network error' }
+  }
+  if (!res.ok) return { ok: false, error: `http ${res.status}` }
+  let mime = (res.headers.get('content-type') ?? '').split(';')[0]!.trim().toLowerCase()
+  if (mime === '' || mime === 'application/octet-stream' || mime === 'binary/octet-stream') {
+    mime = videoMimeFromUrl(u) ?? 'video/mp4'
+  }
+  if (!mime.startsWith('video/')) return { ok: false, error: 'not a video' }
+  const declared = Number(res.headers.get('content-length') ?? '')
+  if (Number.isFinite(declared) && declared > VIDEO_FETCH_MAX) return { ok: false, error: 'too large' }
+  await ensureDir()
+  const tmp = dshHomePath(DATA_DIR, 'video.download.tmp')
+  const target = videoPathFor(mime)
+  try {
+    if (res.body === null) return { ok: false, error: 'empty response' }
+    const out = createWriteStream(tmp)
+    let received = 0
+    let failed = false
+    const fail = (): void => {
+      if (failed) return
+      failed = true
+      out.destroy()
+      void rm(tmp, { force: true })
+    }
+    const nodeStream = Readable.fromWeb(res.body as any)
+    // The 2 GB cap makes a hard total-time budget meaningless on slower links;
+    // arm an inactivity watchdog that refreshes on every chunk instead.
+    let idle: NodeJS.Timeout | null = null
+    const pokeIdle = (): void => {
+      if (idle) clearTimeout(idle)
+      idle = setTimeout(() => { nodeStream.destroy(); fail() }, VIDEO_FETCH_IDLE_TIMEOUT)
+    }
+    nodeStream.on('data', (chunk: Buffer) => {
+      pokeIdle()
+      received += chunk.byteLength
+      if (received > VIDEO_FETCH_MAX) {
+        nodeStream.destroy()
+        fail()
+      }
+    })
+    nodeStream.on('end', () => { if (idle) clearTimeout(idle); idle = null })
+    nodeStream.on('aborted', fail)
+    nodeStream.on('error', fail)
+    out.on('error', fail)
+    pokeIdle()
+    await new Promise<void>((resolve, reject) => {
+      nodeStream.pipe(out)
+      out.on('finish', () => resolve())
+      out.on('close', () => { if (failed) reject(new Error('download failed')) })
+      nodeStream.on('error', () => reject(new Error('download failed')))
+    })
+    if (failed) return { ok: false, error: 'read failed' }
+    // One video owns the slot: clear every other variant, then promote.
+    for (const name of VIDEO_CANDIDATES) {
+      const p = dshHomePath(DATA_DIR, name)
+      if (p !== target) await rm(p, { force: true })
+    }
+    await rm(target, { force: true }) // Windows rename refuses to overwrite
+    await rename(tmp, target)
+    // Record the MIME server-side so the serve route resolves the correct
+    // file even before the client's next config write lands.
+    const cfg = await readConfig()
+    if (cfg.videoMime !== mime) {
+      cfg.videoMime = mime
+      await writeConfig(cfg)
+    }
+    return { ok: true, mime }
+  } catch (e) {
+    console.error('dsh-any-background: failed to download the background video', e)
+    void rm(tmp, { force: true })
+    return { ok: false, error: e instanceof Error && e.message === 'download failed' ? 'read failed' : 'write failed' }
+  }
 }
 
 /** Persist a video from a data URL (null removes every variant); only used
@@ -667,9 +787,11 @@ async function handleVideoUpload(req: any, res: any): Promise<void> {
   }
   try {
     await ensureDir()
-    const tmp = dshHomePath(DATA_DIR, UPLOAD_TMP)
+    // Own temp file: a concurrent wallpaper upload must not corrupt this one.
+    const tmp = dshHomePath(DATA_DIR, VIDEO_UPLOAD_TMP)
     const target = videoPathFor(mime)
     const out = createWriteStream(tmp)
+    let received = 0
     let failed = false
     const fail = () => {
       if (failed) return
@@ -679,6 +801,13 @@ async function handleVideoUpload(req: any, res: any): Promise<void> {
     }
     req.on('aborted', fail)
     req.on('error', fail)
+    req.on('data', (chunk: Buffer) => {
+      received += chunk.byteLength
+      if (received > VIDEO_UPLOAD_MAX) {
+        req.destroy()
+        fail()
+      }
+    })
     out.on('error', () => {
       fail()
       try { res.writeHead(500); res.end() } catch { /* response already sent */ }
@@ -695,6 +824,14 @@ async function handleVideoUpload(req: any, res: any): Promise<void> {
         // Windows rename refuses to overwrite (EEXIST): drop the old one first.
         await rm(target, { force: true })
         await rename(tmp, target)
+        // Record the MIME server-side right away (mirrors writeVideoFromUrl), so
+        // a reload between this response and the client's next config write
+        // still resolves the correct file instead of renaming it by the old MIME.
+        const cfg = await readConfig()
+        if (cfg.videoMime !== mime) {
+          cfg.videoMime = mime
+          await writeConfig(cfg)
+        }
         res.writeHead(200, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({ ok: true }))
       } catch (e) {
@@ -705,6 +842,108 @@ async function handleVideoUpload(req: any, res: any): Promise<void> {
     })
   } catch (e) {
     console.error('dsh-any-background: failed to accept the video upload', e)
+    try { res.writeHead(500); res.end() } catch { /* response already sent */ }
+  }
+}
+
+/** Stream the stored wallpaper: sniffed MIME, no caching (uploads and rotation
+ *  replace the file in place). */
+async function serveWallpaper(req: any, res: any): Promise<void> {
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    res.writeHead(405, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ ok: false, error: 'wallpaper route only serves GET/HEAD' }))
+    return
+  }
+  try {
+    const st = await stat(wallpaperPath())
+    if (st.size === 0) {
+      res.writeHead(404)
+      res.end()
+      return
+    }
+    // readFile has no length option; stream just the first 16 bytes so MIME
+    // sniffing never pulls a multi-MB wallpaper into memory.
+    const head = await new Promise<Buffer>((resolve, reject) => {
+      const chunks: Buffer[] = []
+      const s = createReadStream(wallpaperPath(), { start: 0, end: 15 })
+      s.on('data', (c: Buffer) => chunks.push(c))
+      s.on('end', () => resolve(Buffer.concat(chunks)))
+      s.on('error', reject)
+    })
+    const mime = sniffImageMime(head)
+    res.writeHead(200, { 'Content-Type': mime, 'Content-Length': st.size, 'Cache-Control': 'no-store' })
+    if (req.method === 'HEAD') { res.end(); return }
+    createReadStream(wallpaperPath()).pipe(res)
+  } catch {
+    res.writeHead(404)
+    res.end('no wallpaper stored')
+  }
+}
+
+/** Accept a raw wallpaper upload (POST): pipe the body straight into the
+ *  wallpaper slot — no base64 inflation, original pixels preserved. */
+async function handleWallpaperUpload(req: any, res: any): Promise<void> {
+  if (req.method !== 'POST') {
+    res.writeHead(405)
+    res.end()
+    return
+  }
+  const contentType = typeof req.headers['content-type'] === 'string' ? req.headers['content-type'] : ''
+  const mime = contentType.split(';')[0]!.trim()
+  if (!mime.startsWith('image/')) {
+    req.resume()
+    res.writeHead(415, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ ok: false, error: 'unsupported media type, expected image/*' }))
+    return
+  }
+  try {
+    await ensureDir()
+    const tmp = dshHomePath(DATA_DIR, UPLOAD_TMP)
+    const out = createWriteStream(tmp)
+    let received = 0
+    let failed = false
+    const fail = () => {
+      if (failed) return
+      failed = true
+      out.destroy()
+      void rm(tmp, { force: true })
+    }
+    req.on('aborted', fail)
+    req.on('error', fail)
+    out.on('error', () => {
+      fail()
+      try { res.writeHead(500); res.end() } catch { /* response already sent */ }
+    })
+    req.on('data', (chunk: Buffer) => {
+      received += chunk.byteLength
+      if (received > WALLPAPER_UPLOAD_MAX) {
+        req.destroy()
+        fail()
+      }
+    })
+    req.pipe(out)
+    out.on('finish', async () => {
+      if (failed) return
+      try {
+        if (received === 0) {
+          fail()
+          res.writeHead(400, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ ok: false, error: 'empty upload' }))
+          return
+        }
+        // Windows rename refuses to overwrite (EEXIST): drop the old one first.
+        await rm(wallpaperPath(), { force: true })
+        await rename(tmp, wallpaperPath())
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ ok: true, wallpaperUrl: WALLPAPER_ROUTE }))
+      } catch (e) {
+        console.error('dsh-any-background: failed to finalize the wallpaper upload', e)
+        void rm(tmp, { force: true })
+        try { res.writeHead(500); res.end() } catch { /* response already sent */ }
+      }
+    })
+  } catch (e) {
+    console.error('dsh-any-background: failed to accept the wallpaper upload', e)
     try { res.writeHead(500); res.end() } catch { /* response already sent */ }
   }
 }
@@ -777,8 +1016,8 @@ async function handleRpcMethod(
         // Advance a due rotation BEFORE reading the wallpaper slot, so the
         // restore on (re)load paints the new picture from the first apply.
         const rotated = await advanceRotationIfDue()
-        // The video travels as a URL, never as bytes.
-        return { ok: true, value: { config: await readConfig(), wallpaper: await readWallpaper(), videoUrl: await videoUrl(), rotated } }
+        // Image and video both travel as serve URLs, never as bytes.
+        return { ok: true, value: { config: await readConfig(), wallpaperUrl: await wallpaperServeUrl(), videoUrl: await videoUrl(), rotated } }
       }
       case 'writeConfig':
         return { ok: true, value: await writeConfig((payload as { config?: unknown } | null)?.config as ThemeConfig ?? {}) }
@@ -788,6 +1027,8 @@ async function handleRpcMethod(
         return { ok: true, value: await writeVideo(((payload as { dataUrl?: unknown } | null)?.dataUrl ?? null) as string | null) }
       case 'setWallpaperUrl':
         return { ok: true, value: await writeWallpaperFromUrl(((payload as { url?: unknown } | null)?.url ?? null) as string | null) }
+      case 'setVideoUrl':
+        return { ok: true, value: await writeVideoFromUrl(((payload as { url?: unknown } | null)?.url ?? null) as string | null) }
       case 'rotationAdd':
         return { ok: true, value: await handleRotationAdd(payload) }
       case 'rotationRemove':
@@ -877,13 +1118,33 @@ export function apply(ctx: any): void {
     // Longest prefix wins over the RPC channel's shorter one; exact beats
     // prefix, so uploads land in the upload handler even though UPLOAD_ROUTE
     // sits inside VIDEO_ROUTE. Effects auto-dispose with the injected scope.
+    // The GET/HEAD serve routes stay open (the browser's <img>/<video> fetches
+    // carry no auth headers); the POST upload routes get the same Host/Origin
+    // fence as the RPC channel so a stray cross-origin page cannot write files.
+    const fenceUpload = (handler: (req: any, res: any) => Promise<void>) => (req: any, res: any): void => {
+      const rejection = webCtx.connection.requestRejection(req)
+      if (rejection !== undefined) {
+        res.writeHead(rejection)
+        res.end(rejection === 401 ? 'unauthorized' : 'forbidden')
+        return
+      }
+      void handler(req, res)
+    }
     webCtx.effect(
       () => webCtx.webServer.register({ kind: 'prefix', path: VIDEO_ROUTE, handler: serveVideo }),
       'dsh-any-background: video route',
     )
     webCtx.effect(
-      () => webCtx.webServer.register({ kind: 'exact', path: UPLOAD_ROUTE, handler: handleVideoUpload }),
+      () => webCtx.webServer.register({ kind: 'exact', path: UPLOAD_ROUTE, handler: fenceUpload(handleVideoUpload) }),
       'dsh-any-background: upload route',
+    )
+    webCtx.effect(
+      () => webCtx.webServer.register({ kind: 'prefix', path: WALLPAPER_ROUTE, handler: serveWallpaper }),
+      'dsh-any-background: wallpaper route',
+    )
+    webCtx.effect(
+      () => webCtx.webServer.register({ kind: 'exact', path: WALLPAPER_UPLOAD_ROUTE, handler: fenceUpload(handleWallpaperUpload) }),
+      'dsh-any-background: wallpaper upload route',
     )
   })
 }

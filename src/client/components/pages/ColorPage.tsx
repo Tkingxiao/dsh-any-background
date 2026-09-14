@@ -19,13 +19,15 @@ function toHex(rgb: [number, number, number]): string {
 
 export function ColorPage({ p, notify }: { p: ThemeSectionProps; notify: (msg: string, ok?: boolean) => void }) {
   const { t, hue, sat, lit, setColor, extractColor, setSchemeOverride, useStore } = p
-  const store = useStore((s: ThemeStoreState) => s)
-  const storeUrl = store.url
-  const schemeOverride = store.schemeOverride
+  // Field-level subscriptions: only url (extract/eyedropper gating), the forced
+  // scheme and the stored color change this page's output.
+  const storeUrl = useStore((s: ThemeStoreState) => s.url)
+  const schemeOverride = useStore((s: ThemeStoreState) => s.schemeOverride)
+  const color = useStore((s: ThemeStoreState) => s.color)
   const [pickerOpen, setPickerOpen] = useState(false)
   const [extracting, setExtracting] = useState(false)
 
-  const wheel = (store.color ?? [hue, sat, lit]) as [number, number, number]
+  const wheel = (color ?? [hue, sat, lit]) as [number, number, number]
   const [h, s, l] = hsvToHsl(wheel[0], wheel[1], wheel[2])
   const [r, g, b] = hslToRgb(h, s, l)
   const hex = toHex([r, g, b])

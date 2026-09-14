@@ -81,6 +81,20 @@ A **DeepSeek Harness** appearance plugin that lets you fully customize the Web U
 
 ## Recent Optimizations
 
+### v0.2.6
+
+- **Fixed the narrow-viewport (mobile layout) title bar splitting from the content area** — On narrow viewports the host renders a 52px fixed session-title bar (`.dsh-mobile-app-header`) outside the AppFrame columns. The main-background opacity only lived on the columns, so the bar showed the raw wallpaper and visibly split from the translucent content below it ([#11](https://github.com/Tkingxiao/dsh-any-background/issues/11)). The bar now rides the plugin-owned `--dsh-any-op-bg` variable, following the main-background opacity slider and theme switches automatically; it falls back to the host's default look when unset.
+- **Main-background blur mirrored to `:root`** — A new global variable `--dsh-any-part-blur-global` (following the main-background blur slider) lets the title bar frost in sync; third-party styles can reference it too, matching the existing globals `--dsh-any-input-blur` / `--dsh-any-blur-settings` / `--dsh-any-blur-card-panels` (the element-scoped `--dsh-any-part-blur` never leaves the columns' subtree).
+- **Fast boot, no white-screen wait** — Wallpapers no longer cross the RPC channel as base64. Uploads stream raw bytes straight to disk, and the persisted picture is served over HTTP and decoded by the browser natively, exactly like any `<img>`. A shared decode cache turns the four URL-keyed decodes of one wallpaper (palette extract, brightness verdict, low-res drag copy, intrinsic size) into one. Boot restore on a large wallpaper dropped from ~5.5 s to ~1.2 s (RPC read 3010 ms → ~170 ms, first decode 1464 ms → ~780 ms).
+- **In-place wallpaper swaps always paint the new picture** — Upload, URL download and rotation all replace the file behind the same serve URL, which left every URL-keyed cache — the layer re-set guard, decode cache, brightness verdict and low-res copy — holding the old pixels. The image slot now carries a query-string revision like the video slot, so every swap gets a fresh URL and a fresh decode.
+- **Race-free auto color extraction** — A wallpaper swap during the palette decode can no longer let the old picture's color overwrite the new one (guarded the same way as the brightness verdict).
+- **Sturdier uploads** — Video uploads are capped at 2 GB, use their own temp file (a concurrent wallpaper upload can't corrupt them) and record the MIME server-side immediately; both upload routes now carry the same Host/Origin fence as the RPC channel.
+- **Four new generated backgrounds** — Shader gains **Starfield** (three layers of twinkling stars over a slow nebula veil); patterns gain **Rain** (falling light streaks), **Contours** (drifting topographic flow lines) and **Fluid orbs** (slow drifting glow blobs). All are seeded and parameterized exactly like the existing presets.
+- **Pause for generated backgrounds** — A pause/play button next to Regenerate stops the canvas animation loop without tearing the background down (session-only; regenerate or reload starts the loop again).
+- **Reduced-motion respect** — With the OS `prefers-reduced-motion` preference set, generated backgrounds render their first frame and skip the animation loop entirely.
+- **Network video URL wallpaper** — The "From URL" flow now recognizes video links: the server streams the download into the video slot (2 GB cap, 60 s inactivity timeout, MIME taken from Content-Type or the file extension) and records the MIME in the config; playback, snapshot capture and color extraction continue through the existing serve route.
+- **Cleanup** — Removed the boot performance probe and dead static-snapshot helpers; URL-downloaded wallpapers are written to disk directly with no transient base64 string.
+
 ### v0.2.5
 
 - **Wallpaper MIME fixed — GIF/APNG wallpapers now work** — `readWallpaper` unconditionally re-declared every stored image as `image/jpeg`, even though URL-fetched PNG/WebP/GIF bytes are written under the same file. The real format is now sniffed from the magic bytes on every read, so animated GIF wallpapers (and PNG/WebP color profiles) survive refreshes correctly.
@@ -89,9 +103,6 @@ A **DeepSeek Harness** appearance plugin that lets you fully customize the Web U
 - **Wallpaper rotation** — A rotation pool on the Background page: add images (thumbnail strip), choose shuffle/in-order and every-refresh/daily/weekly cadence, or hit "Switch now". The chosen image is copied into the active wallpaper slot server-side, so all existing pipelines (boot restore, export, color extraction) work unchanged.
 - **Day/night auto switch** — Pick a day and a night profile and a trigger — fixed clock times or the OS `prefers-color-scheme` — and the plugin applies the matching profile automatically (checked every 30 s; appearance only, wallpaper untouched).
 - **Forced interface scheme** — A Light/Dark/Auto segmented control on the Color page regenerates the whole token palette in the forced direction instead of deriving it from the accent lightness.
-
-### v0.2.5 fixes & polish
-
 - **Forced light/dark now actually differ — truthiness bug in the scheme check** — `buildTokens` derived the direction with `scheme ?? lit < 0.55`; a `scheme='light'` string is truthy, so both forced directions rendered the dark branch. The comparison is now explicit and the two token sets (78 of 79 entries) differ correctly.
 - **Accent lightness remapping under a forced scheme** — When the forced direction contradicts the pick's band (a light accent under forced dark), the lightness is mirrored into the target band (dark 0.14–0.44 / light 0.6–0.88) before building tokens; hue and saturation carry over and the stored pick itself is untouched.
 - **Auto-mode light/dark rules rebuilt** — With a picked color, the font and surface directions both follow the accent lightness (very dark → white fonts, very light → black fonts; no more fighting the wallpaper verdict). Without a pick, the font direction follows the wallpaper's perceived (Rec.709) brightness, and the global scheme flag (native controls, `color-scheme`) stays aligned with the palette direction.

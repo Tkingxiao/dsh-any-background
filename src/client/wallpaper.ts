@@ -1,14 +1,21 @@
 import { rWp, rWpImage, rWpVideo, rBgState, rVideoBgState, rBl, rWop, rOps, rSop, rColor, rHasColor, rBlurs, rBgMode, rChatTextOpacity, rTrajectoryOpacity, rScheme, rColorScheme, rSchemeOverride, cfg, setWpUrl, rBgDark, setBgDark, disposeVideoObjectUrl } from './state'
 import type { BackgroundType, GeneratedBgParams, PartOpacities, PartBlurs } from './types'
 import { genTokens, toRgba, extractWallpaperColor, analyzeFrameDark } from './utils/color'
+import { loadImage } from './utils/image'
 import { createDynamicBackground, defaultParamsFor } from './utils/bg-generators'
 
 let wpEl: HTMLDivElement | null = null
 let videoEl: HTMLVideoElement | null = null
 let appliedTokenNames: string[] = []
-let wpController: { canvas: HTMLCanvasElement; stop: () => void; snapshot: () => string } | null = null
+let wpController: { canvas: HTMLCanvasElement; stop: () => void; pause?: () => void; resume?: () => void; snapshot: () => string } | null = null
 let snapshotListener: (() => void) | null = null
 let tokenStyleEl: HTMLStyleElement | null = null
+
+/** Pause the live generated background's animation loop (session-only). */
+export function pauseGeneratedBg(): void { wpController?.pause?.() }
+
+/** Resume the live generated background's animation loop. */
+export function resumeGeneratedBg(): void { wpController?.resume?.() }
 
 function clearDynamicBg(): void {
   wpController?.stop()
@@ -234,6 +241,26 @@ function applyInputBlur(px: number): void {
   else document.documentElement.style.removeProperty('--dsh-any-input-blur')
 }
 
+// Narrow-viewport hosts render a fixed session-title bar (.dsh-mobile-app-header)
+// above the AppFrame columns, outside every column's subtree. The main-bg alpha
+// lives on the columns (applyPartOpacities), so that bar paints the raw
+// wallpaper and splits visually from the translucent center column. Both rules
+// below ride plugin-owned variables so the bar follows the sliders and falls
+// back to the host default when the plugin never set them.
+export const MOBILE_HEADER_RULE =
+  '.dsh-mobile-app-header{' +
+  'background:var(--dsh-any-op-bg,transparent)!important;' +
+  'backdrop-filter:var(--dsh-any-part-blur-global,none);' +
+  '-webkit-backdrop-filter:var(--dsh-any-part-blur-global,none)}'
+
+/** Mirror of the bg-part blur on :root. --dsh-any-part-blur is element-scoped
+ *  to the columns, so surfaces outside their subtree (the mobile header, or
+ *  third-party styles) can never inherit it. */
+function applyBgBlurGlobal(px: number): void {
+  if (px > 0) document.documentElement.style.setProperty('--dsh-any-part-blur-global', `blur(${px}px)`)
+  else document.documentElement.style.removeProperty('--dsh-any-part-blur-global')
+}
+
 // Placeholder/hint text inside the composer and the plugin's own input
 // surfaces: rendered with the weak caption token (distinct from real input)
 // plus italic, so an empty box is never mistaken for typed content. Written
@@ -319,11 +346,18 @@ export function applyThemeColor(): void {
   }
   const url = rWp()
   if (url) {
+    // Paint the wallpaper immediately — the palette extract decodes the full
+    // image and would otherwise leave the host's blank background on screen
+    // for the whole decode. The verdict/skin settle a beat later on re-apply.
+    applyWp()
     // Video mode samples the frame snapshot through the video's own placement
     // state; the image slot's framing does not apply to the snapshot.
     const st = cfg.backgroundType === 'video' ? rVideoBgState() : rBgState()
     void extractWallpaperColor(url, st).then(hsl => {
-      if (hsl) {
+      // A swap during the decode (upload / rotation) points every URL-keyed
+      // cache at the new picture; only adopt the color when this wallpaper is
+      // still the active one.
+      if (hsl && rWp() === url) {
         cfg.color = hsl
         // The listener runs before applyWp so the freshly registered skin and
         // the token pass below describe the same color.
@@ -525,6 +559,7 @@ export function applyPartBlurs(blurs: PartBlurs): void {
   setBlur(sidebarEl, blurs.sidebar)
   setBlur(centerEl, blurs.bg)
   setBlur(detailsEl, blurs.bg)
+  applyBgBlurGlobal(blurs.bg)
   applyCardPanelsBlur(blurs.card)
   applySettingsBlur(blurs.settings)
   applyInputBlur(blurs.input)
@@ -538,7 +573,7 @@ export function setPartBlur(part: keyof PartBlurs, v: number): void {
   if (part === 'input') { applyInputBlur(v); return }
   if (part === 'chat' || part === 'trajectory') { applyViewCards(); return }
   discoverParts()
-  if (part === 'bg') { setBlur(centerEl, v); setBlur(detailsEl, v) }
+  if (part === 'bg') { setBlur(centerEl, v); setBlur(detailsEl, v); applyBgBlurGlobal(v) }
   else setBlur(sidebarEl, v)
 }
 
@@ -858,13 +893,11 @@ function clearVideoEl(): void {
 let imgNat: { url: string; w: number; h: number } | null = null
 function imageNatSize(url: string, cb: (w: number, h: number) => void): void {
   if (imgNat !== null && imgNat.url === url) { cb(imgNat.w, imgNat.h); return }
-  const img = new Image()
-  img.onload = () => {
+  void loadImage(url).then(img => {
+    if (!img) { cb(0, 0); return }
     imgNat = { url, w: img.naturalWidth, h: img.naturalHeight }
     cb(img.naturalWidth, img.naturalHeight)
-  }
-  img.onerror = () => cb(0, 0)
-  img.src = url
+  })
 }
 
 // ── Drag-time wallpaper downscaling ──────────────────────────────────────────
@@ -882,8 +915,8 @@ let dragLow = false
 
 function captureLowRes(url: string, cb: (low: string | null) => void): void {
   if (lowResFor === url) { cb(lowResUrl); return }
-  const img = new Image()
-  img.onload = () => {
+  void loadImage(url).then(img => {
+    if (!img) { cb(null); return }
     const k = Math.min(1, DRAG_MAX_SIDE / Math.max(img.naturalWidth, img.naturalHeight))
     if (k >= 1) { lowResFor = url; lowResUrl = null; cb(null); return }
     const c = document.createElement('canvas')
@@ -895,9 +928,7 @@ function captureLowRes(url: string, cb: (low: string | null) => void): void {
     const low = c.toDataURL('image/jpeg', 0.85)
     lowResFor = url; lowResUrl = low
     cb(low)
-  }
-  img.onerror = () => cb(null)
-  img.src = url
+  })
 }
 
 function setDragLow(on: boolean): void {
@@ -941,6 +972,11 @@ export function watchWallpaperDragQuality(): () => void {
 // dark fonts even when no theme color is picked and the host preference is dark.
 let wpVerdict: { url: string; dark: boolean } | null = null
 let verdictListener: (() => void) | null = null
+// Monotonic guard for the async frame analysis: a stale result (the wallpaper
+// changed while the frame was decoding) must never overwrite the current
+// verdict. applyGeneratedBg guards with its own controller comparison; the
+// image/video path needs the same protection.
+let verdictGen = 0
 
 /** Register a callback fired when the background brightness verdict CHANGES
  *  (a new wallpaper was analyzed, a generated bg regenerated), so the skin can
@@ -954,10 +990,11 @@ function applyVerdict(dark: boolean | null): void {
 }
 
 function updateWpVerdict(url: string | null): void {
+  const gen = ++verdictGen
   if (url === null) { applyVerdict(null); return }
   if (wpVerdict !== null && wpVerdict.url === url) { applyVerdict(wpVerdict.dark); return }
   void analyzeFrameDark(url).then(dark => {
-    if (dark === null) return
+    if (dark === null || gen !== verdictGen) return
     wpVerdict = { url, dark }
     applyVerdict(dark)
     applyCustomTokens(rOps())
@@ -1120,6 +1157,12 @@ export function applyWp(): void {
   // persisted state has not loaded yet, and rColor() would flash the default.
   if (rHasColor() || rBgDark() !== null || rSchemeOverride() !== 'auto') {
     applyCustomTokens(rOps())
+  } else if (!url) {
+    // Nothing left to derive from (e.g. the wallpaper was removed with no
+    // picked color): drop the tokens the last brightness verdict left behind,
+    // or the label direction / dark mark would stay pinned to the old
+    // wallpaper over the host's own theme.
+    clearThemeTokens()
   }
   if (rHasColor()) {
     applySettingsOverrides(rSop())
@@ -1151,6 +1194,7 @@ export function teardownWp(): void {
   document.documentElement.style.removeProperty('--dsh-any-blur-settings')
   document.documentElement.style.removeProperty('--dsh-any-blur-card-panels')
   document.documentElement.style.removeProperty('--dsh-any-input-blur')
+  document.documentElement.style.removeProperty('--dsh-any-part-blur-global')
   for (const v of Object.values(OPACITY_VARS)) document.documentElement.style.removeProperty(v)
   baseTokenKey = ''
   lastBgKey = ''
