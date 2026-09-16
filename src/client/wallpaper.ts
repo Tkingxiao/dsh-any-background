@@ -1,5 +1,5 @@
-import { rWp, rWpImage, rWpVideo, rBgState, rVideoBgState, rBl, rWop, rOps, rSop, rColor, rHasColor, rBlurs, rBgMode, rChatTextOpacity, rTrajectoryOpacity, rPanelOpacity, rProducedOpacity, rScheme, rColorScheme, rSchemeOverride, cfg, setWpUrl, rBgDark, setBgDark, disposeVideoObjectUrl } from './state'
-import type { BackgroundType, GeneratedBgParams, PartOpacities, PartBlurs } from './types'
+import { rWp, rWpImage, rWpVideo, rBgState, rVideoBgState, rBl, rWop, rOps, rSop, rStrokes, rColor, rHasColor, rBlurs, rBgMode, rChatTextOpacity, rTrajectoryOpacity, rPanelOpacity, rProducedOpacity, rScheme, rColorScheme, rSchemeOverride, cfg, setWpUrl, rBgDark, setBgDark, disposeVideoObjectUrl } from './state'
+import type { BackgroundType, GeneratedBgParams, PartOpacities, PartBlurs, StrokeConfig } from './types'
 import { genTokens, toRgba, extractWallpaperColor, analyzeFrameDark } from './utils/color'
 import { loadImage } from './utils/image'
 import { createDynamicBackground, defaultParamsFor } from './utils/bg-generators'
@@ -138,6 +138,29 @@ function paletteTokens(): Record<string, string> | null {
   return null
 }
 
+/** Surface colors the opacity sliders fade when the plugin has NO palette of
+ *  its own (no picked color, no forced scheme), read live from the host's
+ *  resolved tokens on `:root` — the same trick applyPanelOverrides uses for the
+ *  workbench panel. Without this source the per-part alpha is never emitted at
+ *  all and every opacity slider looks inert until the user drags it once.
+ *  The sliders only ever supply the alpha: the host still decides the colors,
+ *  so a custom host skin survives. Returns null when the host exposes none. */
+function readHostOpacityTokens(): Record<string, string> | null {
+  if (typeof getComputedStyle === 'undefined') return null
+  const cs = getComputedStyle(document.documentElement)
+  const out: Record<string, string> = {}
+  let found = false
+  for (const g of OPACITY_TOKEN_GROUPS) {
+    for (const name of g.names) {
+      const v = cs.getPropertyValue(name).trim()
+      if (v === '') continue
+      out[name] = v
+      found = true
+    }
+  }
+  return found ? out : null
+}
+
 function applyCustomTokensNow(ops: PartOpacities): void {
   const hasColor = rHasColor()
   const override = rSchemeOverride()
@@ -145,8 +168,13 @@ function applyCustomTokensNow(ops: PartOpacities): void {
   const scheme = rScheme()
   const verdict = rBgDark()
   const palette = paletteTokens()
+  // Surface source for the opacity re-emit: the plugin's own palette when it
+  // has one, otherwise the host's resolved tokens — see readHostOpacityTokens.
+  // This is what keeps all four interface-opacity sliders live in the default
+  // state (fresh install: no picked color, no verdict, auto scheme).
+  const surfaces = palette ?? readHostOpacityTokens()
   // Clone: the verdict below mutates, and genTokens' result is cached/shared.
-  const tokens: Record<string, string> = { ...palette }
+  const tokens: Record<string, string> = { ...surfaces }
   // Font direction while the scheme is automatic: a picked color owns it —
   // its palette direction (rColorScheme) keeps the labels contrasted with the
   // surfaces they sit on, so a very dark pick flips to white fonts even over
@@ -183,17 +211,27 @@ function applyCustomTokensNow(ops: PartOpacities): void {
       appliedTokenNames = Object.keys(tokens)
     }
     // Without a palette there are no surface alphas to re-emit — the host
-    // palette stays untouched and only the label direction was asserted.
-    if (palette === null) return
+    // palette stays untouched and only the label direction was asserted. Now
+    // that the host's own resolved tokens can back the alpha, this only bails
+    // when even those are unavailable.
+    if (surfaces === null) {
+      // Preserve the previous "nothing derived" cleanup: a color-less auto
+      // state with no verdict leaves no stale rule behind. A forced scheme or
+      // a wallpaper verdict still has something to assert above.
+      if (!hasColor && override === 'auto' && verdict === null) clearThemeTokens()
+      return
+    }
     // Cheap per-drag update: only the surface alpha vars move on <html>.
     const root = document.documentElement
     for (const g of OPACITY_TOKEN_GROUPS) {
       for (const name of g.names) {
-        root.style.setProperty(OPACITY_VARS[name], toRgba(tokens[name] ?? '#000', ops[g.part]))
+        if (surfaces[name] === undefined) continue
+        root.style.setProperty(OPACITY_VARS[name], toRgba(surfaces[name]!, ops[g.part]))
       }
     }
     // The Cordis panel keeps its own input-slider alpha (see INPUT_BLUR_RULE).
-    root.style.setProperty('--dsh-any-op-menu-cordis', toRgba(tokens['--dsw-specific-menu'] ?? '#000', ops.input))
+    const menu = surfaces['--dsw-specific-menu']
+    if (menu !== undefined) root.style.setProperty('--dsh-any-op-menu-cordis', toRgba(menu, ops.input))
     const bgKey = `${baseTokenKey}|${ops.bg}`
     if (bgKey !== lastBgKey) { lastBgKey = bgKey; applyPartOpacities(ops) }
   } catch {
@@ -456,6 +494,221 @@ export const PRODUCED_RULE =
   '[data-composer-chip]>*{' +
   'background-color:color-mix(in srgb,var(--dsw-alias-interactive-bg-hover,transparent) var(--dsh-any-prod-pct,100%),transparent)!important}' +
   '}'
+
+// ── Per-part text stroke (-webkit-text-stroke) ────────────────────────────────
+// Same surface groups as the blur sliders (issue #16). Values ride two root
+// CSS variables per group — width and resolved color — so a slider drag only
+// rewrites variables while the (static) rules below never change. paint-order
+// MUST accompany every stroke declaration: without it the stroke paints over
+// the glyph and thins the characters.
+//
+// The two homepage columns (bg / sidebar groups) are discovered structurally
+// (see discoverParts) and carry the stroke INLINE from applyStrokes instead of
+// a static selector. Every other group binds to the same stable selectors the
+// blur rules already proved:
+//   settings   → the settings dialog (SETTINGS_PANEL_SEL)
+//   card       → the popover/menu surface set (POPOVER_BLUR_RULE's selectors)
+//   input      → composer card + cordis panel (INPUT_BLUR_RULE's markers), and
+//                the native editors inside them (form controls do not inherit
+//                text properties from their container)
+//   chat       → the conversation message column ([data-chat-flow])
+//   trajectory → the trajectory view root
+//   produced   → code blocks / banners / inline code chips / composer chips.
+//                Being a DIRECT rule it also shields those surfaces from the
+//                inherited chat stroke — with produced width 0 the reset is
+//                exactly the exemption shiki multi-color text needs.
+//   panel      → the dsh-better-sidebar workbench surfaces
+//
+// Global exemptions: SVG glyphs (host icons are paths, but paint-order is
+// inherited and would subtly alter stroked-and-filled icon rendering) and
+// ::placeholder text (italic hint text must stay unstroked).
+
+export const STROKE_RULE = [
+  // settings
+  `${SETTINGS_PANEL_SEL}{-webkit-text-stroke:var(--dsh-any-stroke-settings-w,0px) var(--dsh-any-stroke-settings-c,transparent);paint-order:stroke fill}`,
+  // card / popovers — selector set mirrors POPOVER_BLUR_RULE
+  `[role="menu"]:not([data-dockkit-tab-menu]),[role="listbox"],body>[role="tree"],body>[role="dialog"]:not([aria-modal="true"])` +
+  `{-webkit-text-stroke:var(--dsh-any-stroke-card-w,0px) var(--dsh-any-stroke-card-c,transparent);paint-order:stroke fill}`,
+  // input / controls — native editors need their own declaration
+  `[data-composer-card],[data-cordis-panel],` +
+  `[data-composer-card] textarea,[data-composer-card] input,[data-composer-card] [contenteditable],` +
+  `[data-cordis-panel] input,[data-cordis-panel] textarea` +
+  `{-webkit-text-stroke:var(--dsh-any-stroke-input-w,0px) var(--dsh-any-stroke-input-c,transparent);paint-order:stroke fill}`,
+  // chat message column
+  `[data-chat-flow]{-webkit-text-stroke:var(--dsh-any-stroke-chat-w,0px) var(--dsh-any-stroke-chat-c,transparent);paint-order:stroke fill}`,
+  // trajectory view
+  `[data-conversation-composer-overlay]{-webkit-text-stroke:var(--dsh-any-stroke-trajectory-w,0px) var(--dsh-any-stroke-trajectory-c,transparent);paint-order:stroke fill}`,
+  // produced / artifact text — direct rule doubles as the chat-inheritance shield
+  `[data-code-block-content] pre,[data-code-block-content],[data-code-block-banner],[data-composer-chip],:not(pre)>code` +
+  `{-webkit-text-stroke:var(--dsh-any-stroke-produced-w,0px) var(--dsh-any-stroke-produced-c,transparent);paint-order:stroke fill}`,
+  // workbench panel
+  `[data-dsh-bottom-panel],[data-sidebar-right-panel]{-webkit-text-stroke:var(--dsh-any-stroke-panel-w,0px) var(--dsh-any-stroke-panel-c,transparent);paint-order:stroke fill}`,
+  // exemptions
+  `svg{-webkit-text-stroke-width:0!important;paint-order:normal!important}`,
+  `::placeholder{-webkit-text-stroke-width:0!important}`,
+].join('')
+
+/** Groups whose stroke lands on the structurally-discovered columns (inline),
+ *  versus every group served by the static STROKE_RULE selectors. */
+const STROKE_INLINE_GROUPS = ['bg', 'sidebar'] as const
+type StrokeGroup = keyof PartBlurs
+const STROKE_VAR_GROUPS: StrokeGroup[] = ['card', 'settings', 'chat', 'trajectory', 'input', 'panel', 'produced']
+
+/** Resolve one group's stroke color key into a concrete CSS color.
+ *  'auto' contrasts the FONT direction (white fonts → black stroke and vice
+ *  versa — mirrors the label flip in applyCustomTokensNow); 'theme' follows
+ *  the live palette's brand primary (picked color → generated palette, else
+ *  the host's own resolved token). */
+function strokeColor(s: StrokeConfig): string {
+  switch (s.color) {
+    case 'gray': return '#808080'
+    case 'black': return '#000'
+    case 'white': return '#fff'
+    case 'custom': return s.customColor
+    case 'theme': {
+      if (rHasColor() || rSchemeOverride() !== 'auto') {
+        const [h, sa, l] = rColor()
+        return genTokens(h, sa, l, rColorScheme()).tokens['--dsw-alias-brand-primary'] ?? '#808080'
+      }
+      if (typeof getComputedStyle !== 'undefined') {
+        const v = getComputedStyle(document.documentElement).getPropertyValue('--dsw-alias-brand-primary').trim()
+        if (v !== '') return v
+      }
+      return '#808080'
+    }
+    case 'auto':
+    default: {
+      // Font direction, same derivation order as applyCustomTokensNow: picked
+      // color's palette direction, then a forced scheme, then the wallpaper
+      // brightness verdict; light fonts (unknown) default to a white stroke.
+      let fontDark: boolean
+      if (rHasColor()) fontDark = rColorScheme() === 'dark'
+      else if (rSchemeOverride() !== 'auto') fontDark = rScheme() === 'dark'
+      else if (rBgDark() !== null) fontDark = rBgDark() === true
+      else fontDark = false
+      return fontDark ? '#000' : '#fff'
+    }
+  }
+}
+
+/** Write every group's stroke width/color variables + the two column strokes.
+ *  Called from applyWp so palette/verdict changes re-derive 'auto'/'theme'. */
+export function applyStrokes(): void {
+  const strokes = rStrokes()
+  const root = document.documentElement
+  for (const g of STROKE_VAR_GROUPS) {
+    const s = strokes[g]
+    root.style.setProperty(`--dsh-any-stroke-${g}-w`, `${s.width}px`)
+    root.style.setProperty(`--dsh-any-stroke-${g}-c`, strokeColor(s))
+  }
+  // Columns are dynamically discovered; their stroke rides inline styles and
+  // is fully removed at width 0 so nothing lingers after the slider resets.
+  discoverParts()
+  for (const g of STROKE_INLINE_GROUPS) {
+    const el = g === 'bg' ? centerEl : sidebarEl
+    if (el === null) continue
+    const s = strokes[g]
+    if (s.width > 0) {
+      el.style.setProperty('-webkit-text-stroke', `${s.width}px ${strokeColor(s)}`)
+      el.style.setProperty('paint-order', 'stroke fill')
+    } else {
+      el.style.removeProperty('-webkit-text-stroke')
+      el.style.removeProperty('paint-order')
+    }
+  }
+}
+
+/** Live per-group stroke update during slider drag (no full re-apply). */
+export function setPartStroke(part: StrokeGroup, s: StrokeConfig): void {
+  if (STROKE_VAR_GROUPS.includes(part)) {
+    document.documentElement.style.setProperty(`--dsh-any-stroke-${part}-w`, `${s.width}px`)
+    document.documentElement.style.setProperty(`--dsh-any-stroke-${part}-c`, strokeColor(s))
+    return
+  }
+  discoverParts()
+  const el = part === 'bg' ? centerEl : sidebarEl
+  if (el === null) return
+  if (s.width > 0) {
+    el.style.setProperty('-webkit-text-stroke', `${s.width}px ${strokeColor(s)}`)
+    el.style.setProperty('paint-order', 'stroke fill')
+  } else {
+    el.style.removeProperty('-webkit-text-stroke')
+    el.style.removeProperty('paint-order')
+  }
+}
+
+/** Teardown only: drop every stroke variable and column inline stroke. */
+function removeStrokes(): void {
+  const root = document.documentElement
+  for (const g of [...STROKE_VAR_GROUPS, ...STROKE_INLINE_GROUPS]) {
+    root.style.removeProperty(`--dsh-any-stroke-${g}-w`)
+    root.style.removeProperty(`--dsh-any-stroke-${g}-c`)
+  }
+  for (const el of [centerEl, sidebarEl]) {
+    if (el === null) continue
+    el.style.removeProperty('-webkit-text-stroke')
+    el.style.removeProperty('paint-order')
+  }
+}
+
+// ── Custom interface font ─────────────────────────────────────────────────────
+// One font file owns a server-side slot served from /dsh-any-background/font.
+// Applying it means: register an @font-face for the plugin-owned 'DAnyFont'
+// family and re-scope the host's interface font token (--dsw-font-family, the
+// base stack every text consumer reads) to `'DAnyFont', <original stack>` at
+// body level — the body-level custom property shadows :root's for all
+// descendants, so the swap survives host theme re-assertions (they rewrite
+// :root only). The host's code font (--ds-font-family-code) is deliberately
+// untouched: code blocks keep their mono stack.
+// The <style> element carries both the @font-face and the token override, so
+// disabling/removing the font is just removing the element.
+
+const FONT_FAMILY = 'DAnyFont'
+let fontStyleEl: HTMLStyleElement | null = null
+
+function fontFormatForMime(mime: string | null): string {
+  switch (mime) {
+    case 'font/woff2': return 'woff2'
+    case 'font/woff': return 'woff'
+    case 'font/otf': return 'opentype'
+    default: return 'truetype'
+  }
+}
+
+/** Apply or clear the custom interface font. `url` is the serve URL (null =
+ *  nothing stored); `enabled` gates the token override without deleting the
+ *  file. The original host stack is re-read on every apply so a host skin
+ *  change is picked up, and stays as the fallback after 'DAnyFont'. */
+export function applyFontFace(url: string | null, enabled: boolean, mime: string | null): void {
+  if (url === null || !enabled) {
+    fontStyleEl?.remove()
+    fontStyleEl = null
+    return
+  }
+  if (fontStyleEl === null || !fontStyleEl.isConnected) {
+    fontStyleEl = document.createElement('style')
+    fontStyleEl.dataset.plugin = 'dsh-any-background-font'
+    document.head.appendChild(fontStyleEl)
+  }
+  let stack = ''
+  if (typeof getComputedStyle !== 'undefined') {
+    stack = getComputedStyle(document.documentElement).getPropertyValue('--dsw-font-family').trim()
+  }
+  if (stack === '') stack = "-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif"
+  const fmt = fontFormatForMime(mime)
+  fontStyleEl.textContent =
+    `@font-face{font-family:'${FONT_FAMILY}';src:url('${url}') format('${fmt}');font-display:swap}` +
+    // Inheritable consumers only: form controls with UA default fonts keep
+    // their own look unless the host already opted them into the token.
+    `body{--dsw-font-family:'${FONT_FAMILY}',${stack}}` +
+    `input,textarea,select,button{font-family:var(--dsw-font-family)}`
+}
+
+/** Teardown only: drop the @font-face + token override. */
+function removeFontFace(): void {
+  fontStyleEl?.remove()
+  fontStyleEl = null
+}
 
 /** The host's own default colors for the panel layer tokens, used when the
  *  plugin has no palette (no picked color, no wallpaper verdict, no forced
@@ -1033,6 +1286,7 @@ function stashCardPrev(el: HTMLElement, prev: string, plain: boolean): void {
   const ds = el.dataset as Record<string, string | undefined>
   ds[prev + 'Bg'] = el.style.getPropertyValue('background')
   if (plain) return
+  ds[prev + 'BoxSizing'] = el.style.getPropertyValue('box-sizing')
   ds[prev + 'Border'] = el.style.getPropertyValue('border')
   ds[prev + 'Radius'] = el.style.getPropertyValue('border-radius')
   ds[prev + 'Padding'] = el.style.getPropertyValue('padding')
@@ -1048,10 +1302,11 @@ function restoreCardHost(el: HTMLElement, mark: string, prev: string, plain: boo
   }
   restore('background', ds[prev + 'Bg'])
   if (!plain) {
+    restore('box-sizing', ds[prev + 'BoxSizing'])
     restore('border', ds[prev + 'Border'])
     restore('border-radius', ds[prev + 'Radius'])
     restore('padding', ds[prev + 'Padding'])
-    delete ds[prev + 'Border']; delete ds[prev + 'Radius']; delete ds[prev + 'Padding']
+    delete ds[prev + 'BoxSizing']; delete ds[prev + 'Border']; delete ds[prev + 'Radius']; delete ds[prev + 'Padding']
   }
   delete ds[prev + 'Bg']
   el.removeAttribute(mark)
@@ -1130,6 +1385,10 @@ export function applyViewCards(): void {
       target.style.border = surface !== undefined ? `1px solid ${toRgba(surface, borderAlpha)}` : '1px solid transparent'
       target.style.borderRadius = '16px'
       target.style.padding = '18px'
+      // DSH has no global box-sizing reset; under content-box the padding +
+      // border above would push the card past its width:100% — overflowing
+      // narrow screens and breaking margin:0 auto centering.
+      target.style.boxSizing = 'border-box'
     }
     // Plain views write no inline styles — only the blur underlay is hosted here.
     target.setAttribute(spec.mark, '1')
@@ -1484,15 +1743,12 @@ export function applyWp(): void {
   // Write tokens only when there is something to derive them from (a saved
   // pick, a background brightness verdict, or a forced scheme) — on boot the
   // persisted state has not loaded yet, and rColor() would flash the default.
-  if (rHasColor() || rBgDark() !== null || rSchemeOverride() !== 'auto') {
-    applyCustomTokens(rOps())
-  } else if (!url) {
-    // Nothing left to derive from (e.g. the wallpaper was removed with no
-    // picked color): drop the tokens the last brightness verdict left behind,
-    // or the label direction / dark mark would stay pinned to the old
-    // wallpaper over the host's own theme.
-    clearThemeTokens()
-  }
+  // Interface opacity used to sit behind that same gate, which left all four
+  // sliders dead until the user dragged one: they are applied unconditionally
+  // now, falling back to the host's own resolved surface tokens when the
+  // plugin has no palette (see readHostOpacityTokens). Nothing here keys off
+  // rColor() unless a palette is actually in play, so there is no boot flash.
+  applyCustomTokens(rOps())
   if (rHasColor()) {
     applySettingsOverrides(rSop())
     applyTrajectoryOverrides(rTrajectoryOpacity())
@@ -1504,6 +1760,9 @@ export function applyWp(): void {
   // state (picked color, wallpaper verdict, forced scheme, or none).
   applyPanelOverrides(rPanelOpacity())
   applyPartBlurs(rBlurs())
+  // Strokes re-derive here so 'auto'/'theme' colors follow palette and
+  // wallpaper-verdict changes (applyWp runs on every theme/color re-apply).
+  applyStrokes()
 }
 
 export function teardownWp(): void {
@@ -1543,6 +1802,8 @@ export function teardownWp(): void {
   if (tokensRaf !== null) { cancelAnimationFrame(tokensRaf); tokensRaf = null }
   pendingOps = null
   tableFixStyleEl?.remove(); tableFixStyleEl = null
+  removeStrokes()
+  removeFontFace()
   setBlur(frameEl, 0); setBlur(sidebarEl, 0); setBlur(centerEl, 0); setBlur(rightEl, 0)
   if (frameEl !== null) frameEl.style.removeProperty('background')
   if (centerEl !== null) centerEl.style.removeProperty('background')

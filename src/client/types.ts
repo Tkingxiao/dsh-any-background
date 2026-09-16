@@ -62,6 +62,21 @@ export interface PartBlurs {
   produced: number
 }
 
+/** Text-stroke color of one surface group. A preset key plus the free color
+ *  used when the key is 'custom' — presets ('theme', 'auto') re-derive from
+ *  the live theme so they follow scheme/color changes without a rewrite. */
+export interface StrokeConfig {
+  /** Stroke width in px (0 = off, 0.5 steps). */
+  width: number
+  /** 'auto' (contrast the font color) | 'gray' | 'black' | 'white' | 'theme' | 'custom'. */
+  color: 'auto' | 'gray' | 'black' | 'white' | 'theme' | 'custom'
+  /** Free hex color consumed only when color === 'custom'. */
+  customColor: string
+}
+
+/** Per-part text stroke (-webkit-text-stroke), same group keys as PartBlurs. */
+export type PartStrokes = Record<keyof PartBlurs, StrokeConfig>
+
 export type BackgroundType = 'image' | 'video' | 'mesh' | 'shader' | 'pattern'
 
 /** Adaptive placement of a static (image/video) background. */
@@ -76,6 +91,7 @@ export interface ProfileAppearance {
   color: [number, number, number] | null
   opacities: PartOpacities
   blurs: PartBlurs
+  strokes: PartStrokes
   settingsOpacity: number
   wallpaperOpacity: number
   blur: number
@@ -173,6 +189,8 @@ export interface ThemeConfig {
   opacities: PartOpacities
   /** Per-part interface blur (px). */
   blurs: PartBlurs
+  /** Per-part text stroke (width + color). */
+  strokes: PartStrokes
   /** Settings-panel opacity (0..1). */
   settingsOpacity: number
   /** Wallpaper opacity (0..1). */
@@ -190,6 +208,10 @@ export interface ThemeConfig {
   bgMode: BgMode
   /** MIME type of the persisted video background (null when none stored). */
   videoMime: string | null
+  /** MIME type of the persisted custom font (null when none stored). */
+  fontMime: string | null
+  /** Whether the stored custom font is applied to the interface. */
+  fontEnabled: boolean
   /** Parameters for generated backgrounds (not used for images). */
   generatedBg: GeneratedBgParams | null
   /** Whether to regenerate generated backgrounds on page reload. */
@@ -251,6 +273,13 @@ export interface ThemeSectionProps {
   setVideo: (source: Blob | string | null, mime: string | null) => void
   setOps: (ops: PartOpacities) => void
   setBlurs: (blurs: PartBlurs) => void
+  setStrokes: (strokes: PartStrokes) => void
+  /** Upload a font file (raw bytes stream to disk); resolves once stored. */
+  setFont: (file: File) => Promise<boolean>
+  /** Remove the stored custom font. */
+  removeFont: () => void
+  /** Toggle the stored custom font on/off without deleting it. */
+  setFontEnabled: (v: boolean) => void
   setWop: (v: number) => void
   setBl: (v: number) => void
   setSop: (v: number) => void

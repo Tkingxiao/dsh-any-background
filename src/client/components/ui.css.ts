@@ -139,6 +139,29 @@ export const UI_CSS = `
 .dab-toggle.is-on{background:var(--dsw-alias-brand-primary);border-color:var(--dsw-alias-brand-primary)}
 .dab-toggle.is-on .dab-toggle-knob{transform:translateX(18px);background:#fff}
 
+/* ── custom font card ────────────────────────────────────────────────────── */
+.dab-font-title{display:flex;align-items:center;gap:11px}
+.dab-font-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:14px}
+.dab-font-name{font-family:var(--dab-mono);font-size:13.5px;color:var(--dsw-alias-label-secondary,var(--dsw-alias-label-tertiary));background:var(--dsw-alias-bg-layer-2);border-radius:99px;padding:5px 11px;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dab-font-name.is-empty{color:var(--dsw-alias-label-tertiary)}
+.dab-font-actions{display:flex;align-items:center;gap:8px;margin-left:auto}
+/* The font card's labels read one step larger than the rest of the panel —
+   they carry most of the explanation on this page. Scoped to the card so the
+   same .dab-hint / .dab-btn elsewhere keep their size. */
+.dab-font-actions .dab-btn{font-size:14.5px}
+.dab-font-card .dab-hint{font-size:13.5px}
+
+/* ── text-stroke color dots ──────────────────────────────────────────────── */
+.dab-stroke-dots{display:flex;align-items:center;gap:9px;margin-top:14px}
+.dab-stroke-dot-wrap{position:relative;width:18px;height:18px;flex:none}
+.dab-stroke-dot{width:18px;height:18px;padding:0;border-radius:50%;border:1.5px solid var(--dsw-alias-border-l2);background-clip:padding-box;cursor:pointer;transition:transform .18s cubic-bezier(.34,1.56,.64,1),box-shadow .18s ease}
+.dab-stroke-dot:hover{transform:scale(1.16)}
+/* 'auto' has no fixed value — half light / half dark reads as "derived". */
+.dab-stroke-dot-auto{background:conic-gradient(from -90deg,#fff 0 50%,#000 50% 100%)}
+.dab-stroke-dot.is-active{box-shadow:0 0 0 2px var(--dsw-alias-bg-layer-1),0 0 0 3.5px var(--dsw-alias-brand-primary);border-color:transparent}
+/* The native color picker sits invisible on top of the custom swatch. */
+.dab-stroke-dot-input{position:absolute;inset:0;width:100%;height:100%;margin:0;padding:0;border:0;border-radius:50%;background:none;opacity:0;cursor:pointer}
+
 /* ── background preview hero ─────────────────────────────────────────────── */
 .dab-hero{position:relative;border-radius:16px;overflow:hidden;aspect-ratio:16/9;background:var(--dsw-alias-bg-layer-2);border:1px solid var(--dsw-alias-border-l2)}
 .dab-hero-img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transition:transform .5s cubic-bezier(.22,1,.36,1)}

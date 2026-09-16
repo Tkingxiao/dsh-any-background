@@ -6,11 +6,11 @@
  * lifting lives in the sibling modules (state/rpc/wallpaper/utils/components).
  */
 import { defineStore } from './runtime'
-import type { Ctx, RpcResultLike, BoundActions, ThemeSectionProps, PartOpacities, PartBlurs, BackgroundType, GeneratedBgParams, ProfileAppearance, ProfileEntry, RotationItem, ScheduleConfig, SchemeOverride } from './types'
+import type { Ctx, RpcResultLike, BoundActions, ThemeSectionProps, PartOpacities, PartBlurs, PartStrokes, BackgroundType, GeneratedBgParams, ProfileAppearance, ProfileEntry, RotationItem, ScheduleConfig, SchemeOverride } from './types'
 import { NS, zh, en } from './i18n'
 import { cfg, rHasColor, rColor, rWp, rWpImage, rWpVideo, rBgState, rVideoBgState, setWpUrl, setWpImageUrl, setWpVideoUrl, setWpVideoSnapshot, setBgState, adoptConfig, DEFAULT_CONFIG, setBgDark, rBgDark, rProfiles, rRotation, rSchedule, rScheme, rColorScheme, rSchemeOverride, currentAppearance, applyAppearance } from './state'
-import { RPC_CHANNEL, VIDEO_SERVE_URL, initRpc, saveConfig, flushSave, loadPersisted, persistWallpaper, persistVideo, persistConfig, uploadVideo, rotationAdd, rotationRemove, rotationActivate, setVideoFromUrl as rpcSetVideoFromUrl } from './rpc'
-import { applyWp, teardownWp, applySettingsOverrides, applyPanelOverrides, SETTINGS_STYLE_RULE, POPOVER_BLUR_RULE, TRAJECTORY_STYLE_RULE, INPUT_BLUR_RULE, PLACEHOLDER_RULE, MOBILE_HEADER_RULE, PANEL_BLUR_RULE, PANEL_TOKEN_RULE, PRODUCED_RULE, watchParts, watchThemeResets, regenerateGeneratedBg, setBackgroundType, updateGeneratedBg, applyThemeColor, onGeneratedSnapshot, watchWallpaperDragQuality, clearThemeTokens, onVerdictApplied, onColorAdopted, LABEL_TOKENS } from './wallpaper'
+import { RPC_CHANNEL, VIDEO_SERVE_URL, FONT_SERVE_URL, fontServeUrl, initRpc, saveConfig, flushSave, loadPersisted, persistWallpaper, persistVideo, persistConfig, uploadVideo, uploadFont, removeFont as rpcRemoveFont, rotationAdd, rotationRemove, rotationActivate, setVideoFromUrl as rpcSetVideoFromUrl } from './rpc'
+import { applyWp, teardownWp, applySettingsOverrides, applyPanelOverrides, SETTINGS_STYLE_RULE, POPOVER_BLUR_RULE, TRAJECTORY_STYLE_RULE, INPUT_BLUR_RULE, PLACEHOLDER_RULE, MOBILE_HEADER_RULE, PANEL_BLUR_RULE, PANEL_TOKEN_RULE, PRODUCED_RULE, STROKE_RULE, applyStrokes, applyFontFace, watchParts, watchThemeResets, regenerateGeneratedBg, setBackgroundType, updateGeneratedBg, applyThemeColor, onGeneratedSnapshot, watchWallpaperDragQuality, clearThemeTokens, onVerdictApplied, onColorAdopted, LABEL_TOKENS } from './wallpaper'
 import { genTokens, hslToHsv, hsvToHsl, extractWallpaperColor } from './utils/color'
 import { captureVideoSnapshot } from './utils/video'
 import { readImgAsync, makeThumb, blobToDataUrl } from './utils/image'
@@ -104,7 +104,7 @@ export function apply(ctx: Ctx): void {
   styleEl.dataset.plugin = 'dsh-any-background'
   // Only applies while applyCustomTokens marks the body with the plugin's
   // own dark-mode value, avoiding matches against the host's theme attribute.
-  styleEl.textContent = `body[data-ds-dark-theme="dsh-any-background"]::before{content:'';position:fixed;inset:0;z-index:-1;pointer-events:none;background:radial-gradient(ellipse 80% 60% at 50% 0%,rgba(255,255,255,0.03) 0%,transparent 60%)}${SETTINGS_STYLE_RULE}${POPOVER_BLUR_RULE}${TRAJECTORY_STYLE_RULE}${INPUT_BLUR_RULE}${MOBILE_HEADER_RULE}${PANEL_TOKEN_RULE}${PANEL_BLUR_RULE}${PRODUCED_RULE}` + PLACEHOLDER_RULE
+  styleEl.textContent = `body[data-ds-dark-theme="dsh-any-background"]::before{content:'';position:fixed;inset:0;z-index:-1;pointer-events:none;background:radial-gradient(ellipse 80% 60% at 50% 0%,rgba(255,255,255,0.03) 0%,transparent 60%)}${SETTINGS_STYLE_RULE}${POPOVER_BLUR_RULE}${TRAJECTORY_STYLE_RULE}${INPUT_BLUR_RULE}${MOBILE_HEADER_RULE}${PANEL_TOKEN_RULE}${PANEL_BLUR_RULE}${PRODUCED_RULE}${STROKE_RULE}` + PLACEHOLDER_RULE
   document.head.appendChild(styleEl)
   ctx.effect(() => () => { styleEl?.parentNode?.removeChild(styleEl) }, 'dsh-any-background: gradient')
 
@@ -317,8 +317,20 @@ export function apply(ctx: Ctx): void {
   // applied above; the deferred restore below re-asserts too). The server
   // advances a due rotation inside the read itself, so the restored wallpaper
   // is already the new pick and paints from the first apply — no old→new flash.
-  void loadPersisted().then(async (serverRotated) => {
+  void loadPersisted().then(async ({ rotated: serverRotated, firstRun }) => {
+    if (firstRun) {
+      // Nothing was ever persisted on this machine (no theme-config.json).
+      // Write the browser half's full default set straight away and re-read it
+      // back once, so the restored appearance genuinely comes from disk rather
+      // than from in-memory defaults that exist on no reboot.
+      persistConfig()
+      await loadPersisted()
+      applyWp()
+    }
     syncMetaNow()
+    // The stored custom font (if any) applies immediately; fontEnabled gates
+    // the token override without touching the file.
+    applyFontFace(fontServeUrl, cfg.fontEnabled, cfg.fontMime)
     // Re-register the skin with the restored color so UI and theme never diverge.
     if (rHasColor()) {
       const [h, s, l] = rColor()
@@ -454,6 +466,30 @@ export function apply(ctx: Ctx): void {
         if (ok) persistConfig()
       })
     }
+    // ── Custom interface font ────────────────────────────────────────────────
+    // The file itself lives in the server-side font slot (see uploadFont); the
+    // UI only ever sees GTK's serve URL. A picked file is additionally rendered
+    // from a local blob URL so the glyph swap is visible while the bytes are
+    // still streaming to disk — that preview is released once the slot takes
+    // over (a short delay lets any in-flight glyph load finish against it).
+    const FONT_EXT_MIME: Record<string, string> = { woff2: 'font/woff2', woff: 'font/woff', otf: 'font/otf', ttf: 'font/ttf' }
+    const fontMimeFromName = (name: string): string => {
+      const ext = name.split('.').pop()?.toLowerCase() ?? ''
+      return FONT_EXT_MIME[ext] ?? 'font/ttf'
+    }
+    let fontPreviewUrl: string | null = null
+    const releaseFontPreview = (delay: number): void => {
+      if (fontPreviewUrl === null) return
+      const url = fontPreviewUrl
+      fontPreviewUrl = null
+      window.setTimeout(() => URL.revokeObjectURL(url), delay)
+    }
+    /** Point the @font-face at whatever is authoritative right now: the
+     *  persisted slot when one exists, otherwise nothing. */
+    const applyStoredFont = (): void => {
+      applyFontFace(cfg.fontMime !== null ? FONT_SERVE_URL : null, cfg.fontEnabled, cfg.fontMime)
+    }
+
     const [wh, ws, wl] = rColor()
     const [dh, ds, dv] = hslToHsv(wh, ws, wl)
     return {
@@ -563,6 +599,41 @@ export function apply(ctx: Ctx): void {
       },
       setOps: (ops: PartOpacities) => { cfg.opacities = ops; applyWp(); syncBg(); saveConfig() },
       setBlurs: (blurs: PartBlurs) => { cfg.blurs = blurs; applyWp(); syncBg(); saveConfig() },
+      setStrokes: (strokes: PartStrokes) => { cfg.strokes = strokes; applyStrokes(); saveConfig() },
+      // Optimistic upload: render the picked file from a local blob URL at
+      // once, stream the bytes to disk, then swap the @font-face to the
+      // persisted slot. A rejected upload rolls the preview back to whatever
+      // was stored before (nothing, on a first failure).
+      setFont: async (file: File): Promise<boolean> => {
+        releaseFontPreview(0)
+        const localUrl = URL.createObjectURL(file)
+        fontPreviewUrl = localUrl
+        applyFontFace(localUrl, true, fontMimeFromName(file.name))
+        const mime = await uploadFont(file)
+        if (mime === null) {
+          applyStoredFont()
+          releaseFontPreview(4000)
+          return false
+        }
+        cfg.fontMime = mime
+        cfg.fontEnabled = true
+        applyFontFace(FONT_SERVE_URL, true, mime)
+        releaseFontPreview(4000)
+        persistConfig()
+        return true
+      },
+      removeFont: () => {
+        releaseFontPreview(0)
+        cfg.fontMime = null
+        applyFontFace(null, false, null)
+        void rpcRemoveFont()
+        persistConfig()
+      },
+      setFontEnabled: (v: boolean) => {
+        cfg.fontEnabled = v
+        applyStoredFont()
+        persistConfig()
+      },
       setWop: (v: number) => { cfg.wallpaperOpacity = v; applyWp(); syncBg(); saveConfig() },
       setBl: (v: number) => { cfg.blur = v; applyWp(); syncBg(); saveConfig() },
       setSop: (v: number) => { cfg.settingsOpacity = v; applySettingsOverrides(v); saveConfig() },

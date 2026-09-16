@@ -30,10 +30,15 @@ const VIDEO_ROUTE = '/dsh-any-background/video'
 const UPLOAD_ROUTE = '/dsh-any-background/video/upload'
 const WALLPAPER_ROUTE = '/dsh-any-background/wallpaper'
 const WALLPAPER_UPLOAD_ROUTE = '/dsh-any-background/wallpaper/upload'
+const FONT_ROUTE = '/dsh-any-background/font'
+const FONT_UPLOAD_ROUTE = '/dsh-any-background/font/upload'
 const UPLOAD_TMP = 'wallpaper.upload.tmp'
 const VIDEO_UPLOAD_TMP = 'video.upload.tmp'
+const FONT_UPLOAD_TMP = 'font.upload.tmp'
 const WALLPAPER_UPLOAD_MAX = 100 * 1024 * 1024
 const VIDEO_UPLOAD_MAX = 2 * 1024 * 1024 * 1024
+// CJK font files routinely reach tens of MB; the cap only guards the drive.
+const FONT_UPLOAD_MAX = 100 * 1024 * 1024
 // Network-URL wallpaper fetch: cap the download and time it out so a bad link
 // can't stall the UI or fill the drive. The video variant streams (never
 // buffered whole) with its own, larger caps.
@@ -57,6 +62,28 @@ function videoFileName(mime: string | null): string {
 }
 const VIDEO_CANDIDATES = ['wallpaper.mp4', 'wallpaper.webm', 'wallpaper.ogv', 'wallpaper.mov', 'wallpaper.mkv', 'wallpaper.video']
 
+/** Font slot: one font owns the slot, named by format like the video slot. */
+function fontFileName(mime: string | null): string {
+  switch (mime) {
+    case 'font/woff2': return 'font.woff2'
+    case 'font/woff': return 'font.woff'
+    case 'font/otf': return 'font.otf'
+    case 'font/ttf': return 'font.ttf'
+    default: return 'font.ttf'
+  }
+}
+const FONT_CANDIDATES = ['font.woff2', 'font.woff', 'font.otf', 'font.ttf']
+
+/** Sniff a font's container format from its leading magic bytes (null when the
+ *  bytes are not a recognized font — uploads are rejected rather than stored). */
+function sniffFontMime(buf: Buffer): string | null {
+  if (buf.length >= 4 && buf[0] === 0x77 && buf[1] === 0x4f && buf[2] === 0x46 && buf[3] === 0x32) return 'font/woff2' // 'wOF2'
+  if (buf.length >= 4 && buf[0] === 0x77 && buf[1] === 0x4f && buf[2] === 0x46 && buf[3] === 0x46) return 'font/woff' // 'wOFF'
+  if (buf.length >= 4 && buf[0] === 0x4f && buf[1] === 0x54 && buf[2] === 0x54 && buf[3] === 0x4f) return 'font/otf' // 'OTTO'
+  if (buf.length >= 4 && buf[0] === 0x00 && buf[1] === 0x01 && buf[2] === 0x00 && buf[3] === 0x00) return 'font/ttf'
+  return null
+}
+
 interface BgState {
   zoom: number; x: number; y: number; iw: number; ih: number
 }
@@ -66,6 +93,14 @@ interface PartOpacities {
 interface PartBlurs {
   bg: number; sidebar: number; card: number; settings: number; chat: number; trajectory: number; input: number; panel: number; produced: number
 }
+/** Text-stroke color of one surface group; a preset key plus the free color
+ *  used only when the key is 'custom'. */
+interface StrokeConfig {
+  width: number
+  color: 'auto' | 'gray' | 'black' | 'white' | 'theme' | 'custom'
+  customColor: string
+}
+type PartStrokes = Record<keyof PartBlurs, StrokeConfig>
 type BackgroundType = 'image' | 'video' | 'mesh' | 'shader' | 'pattern'
 type BgMode = 'fit' | 'fill' | 'stretch' | 'tile' | 'center'
 type SchemeOverride = 'auto' | 'light' | 'dark'
@@ -80,6 +115,7 @@ interface ProfileAppearance {
   color: [number, number, number] | null
   opacities: PartOpacities
   blurs: PartBlurs
+  strokes: PartStrokes
   settingsOpacity: number
   wallpaperOpacity: number
   blur: number
@@ -112,6 +148,7 @@ interface ThemeConfig {
   color: [number, number, number] | null
   opacities: PartOpacities
   blurs: PartBlurs
+  strokes: PartStrokes
   settingsOpacity: number
   wallpaperOpacity: number
   blur: number
@@ -120,6 +157,10 @@ interface ThemeConfig {
   backgroundType: BackgroundType
   bgMode: BgMode
   videoMime: string | null
+  /** MIME of the persisted custom font (null when none stored). */
+  fontMime: string | null
+  /** Whether the stored custom font is applied to the interface. */
+  fontEnabled: boolean
   generatedBg: GeneratedBgParams | null
   regenerateOnReload: boolean
   chatTextOpacity: number
@@ -140,24 +181,45 @@ interface ThemeConfig {
   activeProfile: string | null
 }
 
-const DEFAULT_CONFIG: ThemeConfig = {
+// The persisted config shape is declared twice — once here and once in the
+// browser half. Exported so tests can assert the two halves declare exactly the
+// same keys: a field declared on only one side is dropped by this sanitizer,
+// which is precisely how v0.2.8 and v0.2.9 each lost a setting.
+export const DEFAULT_CONFIG: ThemeConfig = {
+  // Mirror of the browser half's DEFAULT_CONFIG. The v0.2.8 lesson: any
+  // default that exists on only one side silently reverts to THIS side's
+  // value on the next write, which is exactly how a slider ends up looking
+  // like it "saved" and then lost the value.
   color: null,
-  opacities: { bg: 0.85, sidebar: 0.93, card: 1, input: 1 },
-  blurs: { bg: 0, sidebar: 0, card: 0, settings: 0, chat: 0, trajectory: 0, input: 0, panel: 0, produced: 0 },
-  settingsOpacity: 1,
+  opacities: { bg: 0.5, sidebar: 0.5, card: 0.5, input: 0.5 },
+  blurs: { bg: 30, sidebar: 30, card: 30, settings: 30, chat: 30, trajectory: 30, input: 30, panel: 30, produced: 30 },
+  strokes: {
+    bg: { width: 0, color: 'auto', customColor: '#808080' },
+    sidebar: { width: 0, color: 'auto', customColor: '#808080' },
+    card: { width: 0, color: 'auto', customColor: '#808080' },
+    settings: { width: 0, color: 'auto', customColor: '#808080' },
+    chat: { width: 0, color: 'auto', customColor: '#808080' },
+    trajectory: { width: 0, color: 'auto', customColor: '#808080' },
+    input: { width: 0, color: 'auto', customColor: '#808080' },
+    panel: { width: 0, color: 'auto', customColor: '#808080' },
+    produced: { width: 0, color: 'auto', customColor: '#808080' },
+  },
+  settingsOpacity: 0.5,
   wallpaperOpacity: 1,
-  blur: 0,
+  blur: 30,
   bgState: { zoom: 1, x: 0, y: 0, iw: 0, ih: 0 },
   videoBgState: { zoom: 1, x: 0, y: 0, iw: 0, ih: 0 },
   backgroundType: 'image',
   bgMode: 'fit',
   videoMime: null,
+  fontMime: null,
+  fontEnabled: true,
   generatedBg: null,
   regenerateOnReload: false,
-  chatTextOpacity: 0,
-  trajectoryOpacity: 1,
-  panelOpacity: 1,
-  producedOpacity: 1,
+  chatTextOpacity: 0.5,
+  trajectoryOpacity: 0.5,
+  panelOpacity: 0.5,
+  producedOpacity: 0.5,
   profiles: [],
   rotation: { enabled: false, mode: 'shuffle', interval: 'daily', current: 0, items: [], lastRotate: null },
   schedule: { enabled: false, mode: 'time', dayProfile: null, nightProfile: null, dayStart: '07:00', nightStart: '19:00' },
@@ -169,6 +231,7 @@ const dataDir = (): string => dshHomePath(DATA_DIR)
 const configPath = (): string => dshHomePath(DATA_DIR, CONFIG_FILE)
 const wallpaperPath = (): string => dshHomePath(DATA_DIR, WALLPAPER_FILE)
 const videoPathFor = (mime: string | null): string => dshHomePath(DATA_DIR, videoFileName(mime))
+const fontPathFor = (mime: string | null): string => dshHomePath(DATA_DIR, fontFileName(mime))
 
 const exists = async (p: string): Promise<boolean> => { try { await access(p); return true } catch { return false } }
 
@@ -194,6 +257,36 @@ function clamp(n: unknown, lo: number, hi: number, def: number): number {
   return typeof n === 'number' && isFinite(n) ? Math.min(hi, Math.max(lo, n)) : def
 }
 
+/** Locate the stored font: the recorded MIME decides the expected name; stray
+ *  files from a lost config write are adopted via rename (mirrors the video
+ *  slot's recovery). */
+async function findFontFile(): Promise<{ path: string; mime: string } | null> {
+  const cfg = await readConfig()
+  const mime = cfg.fontMime ?? 'font/ttf'
+  const expected = fontPathFor(mime)
+  if (await exists(expected)) return { path: expected, mime }
+  for (const name of FONT_CANDIDATES) {
+    const p = dshHomePath(DATA_DIR, name)
+    if (!(await exists(p))) continue
+    const foundMime = mimeForFontFile(name)
+    try { await rename(p, expected); return { path: expected, mime: foundMime } } catch { return null }
+  }
+  return null
+}
+
+function mimeForFontFile(name: string): string {
+  switch (name) {
+    case 'font.woff2': return 'font/woff2'
+    case 'font.woff': return 'font/woff'
+    case 'font.otf': return 'font/otf'
+    default: return 'font/ttf'
+  }
+}
+
+async function fontUrl(): Promise<string | null> {
+  return (await findFontFile()) ? FONT_ROUTE : null
+}
+
 function normalizeBgState(s: Partial<BgState>): BgState {
   return {
     zoom: clamp(s.zoom, 0.1, 10, 1),
@@ -205,6 +298,26 @@ function normalizeBgState(s: Partial<BgState>): BgState {
 }
 
 /** Coerce an unknown persisted value into a valid ThemeConfig, falling back per-field. */
+const STROKE_GROUPS = ['bg', 'sidebar', 'card', 'settings', 'chat', 'trajectory', 'input', 'panel', 'produced'] as const
+const STROKE_COLOR_KEYS = ['auto', 'gray', 'black', 'white', 'theme', 'custom'] as const
+const HEX_RE = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/
+
+function normalizeStroke(raw: unknown): StrokeConfig {
+  const s = (raw ?? {}) as Partial<StrokeConfig>
+  return {
+    width: clamp(s.width, 0, 4, 0),
+    color: STROKE_COLOR_KEYS.includes(s.color as StrokeConfig['color']) ? s.color as StrokeConfig['color'] : 'auto',
+    customColor: typeof s.customColor === 'string' && HEX_RE.test(s.customColor) ? s.customColor : '#808080',
+  }
+}
+
+function normalizeStrokes(raw: unknown): PartStrokes {
+  const s = (raw ?? {}) as Partial<PartStrokes>
+  const out = {} as PartStrokes
+  for (const k of STROKE_GROUPS) out[k] = normalizeStroke(s[k])
+  return out
+}
+
 function normalizeConfig(raw: unknown): ThemeConfig {
   const r = (raw ?? {}) as Partial<ThemeConfig> & { opacity?: unknown }
   const c = r.color
@@ -242,6 +355,7 @@ function normalizeConfig(raw: unknown): ThemeConfig {
       input: clamp(ops.input, 0, 1, DEFAULT_CONFIG.opacities.input),
     },
     blurs,
+    strokes: normalizeStrokes(r.strokes),
     settingsOpacity: clamp(r.settingsOpacity, 0, 1, DEFAULT_CONFIG.settingsOpacity),
     wallpaperOpacity: clamp(r.wallpaperOpacity, 0, 1, DEFAULT_CONFIG.wallpaperOpacity),
     blur: clamp(r.blur, 0, 60, DEFAULT_CONFIG.blur),
@@ -250,6 +364,8 @@ function normalizeConfig(raw: unknown): ThemeConfig {
     backgroundType: bgType,
     bgMode,
     videoMime: typeof r.videoMime === 'string' ? r.videoMime : null,
+    fontMime: typeof r.fontMime === 'string' ? r.fontMime : null,
+    fontEnabled: typeof r.fontEnabled === 'boolean' ? r.fontEnabled : DEFAULT_CONFIG.fontEnabled,
     generatedBg,
     regenerateOnReload: typeof r.regenerateOnReload === 'boolean' ? r.regenerateOnReload : DEFAULT_CONFIG.regenerateOnReload,
     chatTextOpacity: clamp(r.chatTextOpacity, 0, 1, DEFAULT_CONFIG.chatTextOpacity),
@@ -321,6 +437,7 @@ function normalizeProfileAppearance(raw: unknown): ProfileAppearance {
       input: clamp(ops.input, 0, 1, DEFAULT_CONFIG.opacities.input),
     },
     blurs,
+    strokes: normalizeStrokes(a.strokes),
     settingsOpacity: clamp(a.settingsOpacity, 0, 1, DEFAULT_CONFIG.settingsOpacity),
     wallpaperOpacity: clamp(a.wallpaperOpacity, 0, 1, DEFAULT_CONFIG.wallpaperOpacity),
     blur: clamp(a.blur, 0, 60, DEFAULT_CONFIG.blur),
@@ -434,7 +551,7 @@ function warnUnknownConfigKeys(raw: unknown, normalized: ThemeConfig): void {
     warn(key)
   }
   // Nested appearance maps drift the same way (e.g. blurs.produced).
-  for (const group of ['blurs', 'opacities'] as const) {
+  for (const group of ['blurs', 'opacities', 'strokes'] as const) {
     const got = r[group]
     if (got === null || typeof got !== 'object') continue
     const have = new Set(Object.keys(normalized[group] as unknown as Record<string, unknown>))
@@ -995,6 +1112,140 @@ async function handleWallpaperUpload(req: any, res: any): Promise<void> {
   }
 }
 
+/** Stream the stored custom font: sniffed MIME, no caching (uploads replace
+ *  the file in place). Fonts need no Range support — the browser fetches once. */
+async function serveFont(req: any, res: any): Promise<void> {
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    res.writeHead(405, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ ok: false, error: 'font route only serves GET/HEAD' }))
+    return
+  }
+  try {
+    const found = await findFontFile()
+    if (found === null) {
+      res.writeHead(404)
+      res.end('no custom font stored')
+      return
+    }
+    const st = await stat(found.path)
+    res.writeHead(200, { 'Content-Type': found.mime, 'Content-Length': st.size, 'Cache-Control': 'no-store' })
+    if (req.method === 'HEAD') { res.end(); return }
+    createReadStream(found.path).pipe(res)
+  } catch (e) {
+    console.error('dsh-any-background: failed to serve the custom font', e)
+    try { res.writeHead(500); res.end() } catch { /* response already sent */ }
+  }
+}
+
+/** Accept a raw font upload (POST): pipe the body into a temp file, sniff the
+ *  container format from its magic bytes (rejecting anything that is not a
+ *  recognizable font), then rename it into the format-derived slot and record
+ *  the MIME in the config so serve/find resolve immediately. */
+async function handleFontUpload(req: any, res: any): Promise<void> {
+  if (req.method !== 'POST') {
+    res.writeHead(405)
+    res.end()
+    return
+  }
+  try {
+    await ensureDir()
+    const tmp = dshHomePath(DATA_DIR, FONT_UPLOAD_TMP)
+    const out = createWriteStream(tmp)
+    let received = 0
+    let failed = false
+    const fail = () => {
+      if (failed) return
+      failed = true
+      out.destroy()
+      void rm(tmp, { force: true })
+    }
+    req.on('aborted', fail)
+    req.on('error', fail)
+    out.on('error', () => {
+      fail()
+      try { res.writeHead(500); res.end() } catch { /* response already sent */ }
+    })
+    req.on('data', (chunk: Buffer) => {
+      received += chunk.byteLength
+      if (received > FONT_UPLOAD_MAX) {
+        req.destroy()
+        fail()
+      }
+    })
+    req.pipe(out)
+    out.on('finish', async () => {
+      if (failed) return
+      try {
+        if (received === 0) {
+          fail()
+          res.writeHead(400, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ ok: false, error: 'empty upload' }))
+          return
+        }
+        // Sniff the true container from the leading bytes: the browser's
+        // Content-Type only reflects the file picker's guess.
+        const head = await new Promise<Buffer>((resolve, reject) => {
+          const chunks: Buffer[] = []
+          const s = createReadStream(tmp, { start: 0, end: 15 })
+          s.on('data', (c: Buffer) => chunks.push(c))
+          s.on('end', () => resolve(Buffer.concat(chunks)))
+          s.on('error', reject)
+        })
+        const mime = sniffFontMime(head)
+        if (mime === null) {
+          fail()
+          res.writeHead(415, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ ok: false, error: 'not a font (expected ttf/otf/woff/woff2)' }))
+          return
+        }
+        const target = fontPathFor(mime)
+        // One font owns the slot: clear every other variant, then promote.
+        for (const name of FONT_CANDIDATES) {
+          const p = dshHomePath(DATA_DIR, name)
+          if (p !== target) await rm(p, { force: true })
+        }
+        // Windows rename refuses to overwrite (EEXIST): drop the old one first.
+        await rm(target, { force: true })
+        await rename(tmp, target)
+        // Record the MIME server-side right away (mirrors the video slot), so a
+        // reload between this response and the client's next config write still
+        // resolves the correct file.
+        const cfg = await readConfig()
+        if (cfg.fontMime !== mime) {
+          cfg.fontMime = mime
+          await writeConfig(cfg)
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ ok: true, fontUrl: FONT_ROUTE, mime }))
+      } catch (e) {
+        console.error('dsh-any-background: failed to finalize the font upload', e)
+        void rm(tmp, { force: true })
+        try { res.writeHead(500); res.end() } catch { /* response already sent */ }
+      }
+    })
+  } catch (e) {
+    console.error('dsh-any-background: failed to accept the font upload', e)
+    try { res.writeHead(500); res.end() } catch { /* response already sent */ }
+  }
+}
+
+/** Remove every stored font variant and clear the recorded MIME. */
+async function removeFontFile(): Promise<boolean> {
+  try {
+    for (const name of FONT_CANDIDATES) await rm(dshHomePath(DATA_DIR, name), { force: true })
+    await rm(dshHomePath(DATA_DIR, FONT_UPLOAD_TMP), { force: true })
+    const cfg = await readConfig()
+    if (cfg.fontMime !== null) {
+      cfg.fontMime = null
+      await writeConfig(cfg)
+    }
+    return true
+  } catch (e) {
+    console.error('dsh-any-background: failed to remove the custom font', e)
+    return false
+  }
+}
+
 const NS = 'dshAnyBackground'
 const RPC_CHANNEL = '/dsh-any-background'
 const RPC_BODY_MAX = 300 * 1024 * 1024
@@ -1063,8 +1314,15 @@ async function handleRpcMethod(
         // Advance a due rotation BEFORE reading the wallpaper slot, so the
         // restore on (re)load paints the new picture from the first apply.
         const rotated = await advanceRotationIfDue()
-        // Image and video both travel as serve URLs, never as bytes.
-        return { ok: true, value: { config: await readConfig(), wallpaperUrl: await wallpaperServeUrl(), videoUrl: await videoUrl(), rotated } }
+        // Image, video and font all travel as serve URLs, never as bytes.
+        const config = await readConfig()
+        // First run: no theme-config.json has ever been written. Materialize
+        // the defaults on disk right away instead of leaving the install in a
+        // "nothing persisted yet" limbo — the client also re-reads once on this
+        // flag so the restored appearance comes from a file that really exists.
+        const firstRun = !(await exists(configPath()))
+        if (firstRun) await writeConfig(config)
+        return { ok: true, value: { config, wallpaperUrl: await wallpaperServeUrl(), videoUrl: await videoUrl(), fontUrl: await fontUrl(), rotated, firstRun } }
       }
       case 'writeConfig':
         return { ok: true, value: await writeConfig((payload as { config?: unknown } | null)?.config as ThemeConfig ?? {}) }
@@ -1082,6 +1340,8 @@ async function handleRpcMethod(
         return { ok: true, value: await handleRotationRemove(payload) }
       case 'rotationSet':
         return { ok: true, value: await handleRotationSet(payload) }
+      case 'removeFont':
+        return { ok: true, value: await removeFontFile() }
       default:
         return { ok: false, error: { code: 'dsh-any-background/bad-request', message: `unknown endpoint ${endpoint}`, details: { issues: [] } } }
     }
@@ -1192,6 +1452,14 @@ export function apply(ctx: any): void {
     webCtx.effect(
       () => webCtx.webServer.register({ kind: 'exact', path: WALLPAPER_UPLOAD_ROUTE, handler: fenceUpload(handleWallpaperUpload) }),
       'dsh-any-background: wallpaper upload route',
+    )
+    webCtx.effect(
+      () => webCtx.webServer.register({ kind: 'prefix', path: FONT_ROUTE, handler: serveFont }),
+      'dsh-any-background: font route',
+    )
+    webCtx.effect(
+      () => webCtx.webServer.register({ kind: 'exact', path: FONT_UPLOAD_ROUTE, handler: fenceUpload(handleFontUpload) }),
+      'dsh-any-background: font upload route',
     )
   })
 }

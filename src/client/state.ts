@@ -1,27 +1,46 @@
-import type { BgState, ThemeConfig, PartOpacities, PartBlurs, BgMode, ProfileEntry, RotationConfig, RotationItem, ScheduleConfig, SchemeOverride, ProfileAppearance } from './types'
+import type { BgState, ThemeConfig, PartOpacities, PartBlurs, PartStrokes, StrokeConfig, BgMode, ProfileEntry, RotationConfig, RotationItem, ScheduleConfig, SchemeOverride, ProfileAppearance } from './types'
 
 export const DEFAULT_CONFIG: ThemeConfig = {
   color: null,
-  opacities: { bg: 0.85, sidebar: 0.93, card: 1, input: 1 },
-  blurs: { bg: 0, sidebar: 0, card: 0, settings: 0, chat: 0, trajectory: 0, input: 0, panel: 0, produced: 0 },
-  settingsOpacity: 1,
+  // Defaults sit at mid-scale rather than at "no visible change" (was 0.85 /
+  // 0.93 / 1 / 1 with every blur at 0): a fresh install then shows right away
+  // that the controls are live, instead of looking inert until each slider is
+  // dragged once. Only affects installs with no persisted config.
+  opacities: { bg: 0.5, sidebar: 0.5, card: 0.5, input: 0.5 },
+  // Blur sliders are px-based (0–60), so 50% of their range is 30px.
+  blurs: { bg: 30, sidebar: 30, card: 30, settings: 30, chat: 30, trajectory: 30, input: 30, panel: 30, produced: 30 },
+  strokes: {
+    bg: { width: 0, color: 'auto', customColor: '#808080' },
+    sidebar: { width: 0, color: 'auto', customColor: '#808080' },
+    card: { width: 0, color: 'auto', customColor: '#808080' },
+    settings: { width: 0, color: 'auto', customColor: '#808080' },
+    chat: { width: 0, color: 'auto', customColor: '#808080' },
+    trajectory: { width: 0, color: 'auto', customColor: '#808080' },
+    input: { width: 0, color: 'auto', customColor: '#808080' },
+    panel: { width: 0, color: 'auto', customColor: '#808080' },
+    produced: { width: 0, color: 'auto', customColor: '#808080' },
+  },
+  settingsOpacity: 0.5,
+  // 100% = the background picture untouched. Deliberately NOT part of the
+  // 50% default batch: halving the wallpaper's own alpha would wash out a
+  // freshly uploaded picture — every surface slider above is mid-scale, this
+  // one stays opaque.
   wallpaperOpacity: 1,
-  blur: 0,
+  blur: 30,
   bgState: { zoom: 1, x: 0, y: 0, iw: 0, ih: 0 },
   videoBgState: { zoom: 1, x: 0, y: 0, iw: 0, ih: 0 },
   backgroundType: 'image',
   bgMode: 'fit',
   videoMime: null,
+  fontMime: null,
+  fontEnabled: true,
   generatedBg: null,
   regenerateOnReload: false,
-  chatTextOpacity: 0,
-  // 100% = untouched host surface; zero would blank the page by default.
-  trajectoryOpacity: 1,
-  // Same contract for the workbench panel: fully opaque by default.
-  panelOpacity: 1,
-  // Produced/artifact surfaces (code highlights + produced chips): opacity is
-  // the surface's own backdrop alpha, so 1 (opaque) leaves the host untouched.
-  producedOpacity: 1,
+  chatTextOpacity: 0.5,
+  // 100% = untouched host surface; these all default to mid-scale too.
+  trajectoryOpacity: 0.5,
+  panelOpacity: 0.5,
+  producedOpacity: 0.5,
   profiles: [],
   rotation: { enabled: false, mode: 'shuffle', interval: 'daily', current: 0, items: [], lastRotate: null },
   schedule: { enabled: false, mode: 'time', dayProfile: null, nightProfile: null, dayStart: '07:00', nightStart: '19:00' },
@@ -34,7 +53,7 @@ const clamp01 = (n: unknown, def: number): number =>
 
 // In-memory mirror of the file-backed store; the UI reads and mutates this,
 // and it is synced to disk via the RPC layer.
-export let cfg: ThemeConfig = { ...DEFAULT_CONFIG, opacities: { ...DEFAULT_CONFIG.opacities }, blurs: { ...DEFAULT_CONFIG.blurs }, bgState: { ...DEFAULT_CONFIG.bgState }, videoBgState: { ...DEFAULT_CONFIG.videoBgState } }
+export let cfg: ThemeConfig = { ...DEFAULT_CONFIG, opacities: { ...DEFAULT_CONFIG.opacities }, blurs: { ...DEFAULT_CONFIG.blurs }, strokes: structuredClone(DEFAULT_CONFIG.strokes), bgState: { ...DEFAULT_CONFIG.bgState }, videoBgState: { ...DEFAULT_CONFIG.videoBgState } }
 export let wpImageUrl: string | null = null
 // Retained across background-type switches so coming back to image/video
 // restores the original upload.
@@ -130,6 +149,32 @@ export function rBlurs(): PartBlurs {
   }
   return out
 }
+
+const STROKE_GROUPS = ['bg', 'sidebar', 'card', 'settings', 'chat', 'trajectory', 'input', 'panel', 'produced'] as const
+const STROKE_COLOR_KEYS = ['auto', 'gray', 'black', 'white', 'theme', 'custom'] as const
+const HEX_RE = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/
+const DEFAULT_STROKE: StrokeConfig = { width: 0, color: 'auto', customColor: '#808080' }
+
+function adoptStroke(raw: unknown): StrokeConfig {
+  const s = (raw ?? {}) as Partial<StrokeConfig>
+  return {
+    width: typeof s.width === 'number' && isFinite(s.width) ? Math.min(4, Math.max(0, s.width)) : DEFAULT_STROKE.width,
+    color: STROKE_COLOR_KEYS.includes(s.color as StrokeConfig['color']) ? s.color as StrokeConfig['color'] : DEFAULT_STROKE.color,
+    customColor: typeof s.customColor === 'string' && HEX_RE.test(s.customColor) ? s.customColor : DEFAULT_STROKE.customColor,
+  }
+}
+
+/** Move a possibly-partial strokes map into the full shape the UI reads. */
+function strokesFrom(raw: unknown): PartStrokes {
+  const s = (raw ?? {}) as Partial<PartStrokes>
+  const out = {} as PartStrokes
+  for (const k of STROKE_GROUPS) out[k] = adoptStroke(s[k])
+  return out
+}
+
+export function rStrokes(): PartStrokes {
+  return strokesFrom(cfg.strokes)
+}
 export function rWop(): number { return clamp01(cfg.wallpaperOpacity, DEFAULT_CONFIG.wallpaperOpacity) }
 export function rBl(): number {
   return typeof cfg.blur === 'number' ? Math.min(60, Math.max(0, cfg.blur)) : DEFAULT_CONFIG.blur
@@ -185,6 +230,7 @@ export function currentAppearance(): ProfileAppearance {
     color: cfg.color,
     opacities: { ...rOps() },
     blurs: { ...rBlurs() },
+    strokes: rStrokes(),
     settingsOpacity: rSop(),
     wallpaperOpacity: rWop(),
     blur: rBl(),
@@ -200,6 +246,7 @@ export function applyAppearance(ap: ProfileAppearance): void {
   cfg.color = Array.isArray(ap.color) && ap.color.length === 3 ? [...ap.color] as [number, number, number] : null
   cfg.opacities = { ...DEFAULT_CONFIG.opacities, ...(ap.opacities ?? {}) }
   cfg.blurs = { ...DEFAULT_CONFIG.blurs, ...(ap.blurs ?? {}) }
+  cfg.strokes = strokesFrom(ap.strokes)
   cfg.settingsOpacity = clamp01(ap.settingsOpacity, DEFAULT_CONFIG.settingsOpacity)
   cfg.wallpaperOpacity = clamp01(ap.wallpaperOpacity, DEFAULT_CONFIG.wallpaperOpacity)
   cfg.blur = typeof ap.blur === 'number' ? Math.min(60, Math.max(0, ap.blur)) : DEFAULT_CONFIG.blur
@@ -231,6 +278,7 @@ function adoptProfiles(raw: unknown): ProfileEntry[] {
         color: Array.isArray(ac.color) && ac.color.length === 3 ? [...ac.color] as [number, number, number] : null,
         opacities: { ...DEFAULT_CONFIG.opacities, ...(ac.opacities ?? {}) },
         blurs: { ...DEFAULT_CONFIG.blurs, ...(ac.blurs ?? {}) },
+        strokes: strokesFrom(ac.strokes),
         settingsOpacity: clamp01(ac.settingsOpacity, DEFAULT_CONFIG.settingsOpacity),
         wallpaperOpacity: clamp01(ac.wallpaperOpacity, DEFAULT_CONFIG.wallpaperOpacity),
         blur: num(ac.blur, DEFAULT_CONFIG.blur),
@@ -320,6 +368,7 @@ export function adoptConfig(raw: unknown): void {
       input: num(ops.input, DEFAULT_CONFIG.opacities.input),
     },
     blurs,
+    strokes: strokesFrom(c.strokes),
     settingsOpacity: num(c.settingsOpacity, DEFAULT_CONFIG.settingsOpacity),
     wallpaperOpacity: num(c.wallpaperOpacity, DEFAULT_CONFIG.wallpaperOpacity),
     blur: num(c.blur, DEFAULT_CONFIG.blur),
@@ -328,6 +377,8 @@ export function adoptConfig(raw: unknown): void {
     backgroundType: bgType,
     bgMode,
     videoMime: typeof c.videoMime === 'string' ? c.videoMime : null,
+    fontMime: typeof c.fontMime === 'string' ? c.fontMime : null,
+    fontEnabled: typeof c.fontEnabled === 'boolean' ? c.fontEnabled : DEFAULT_CONFIG.fontEnabled,
     generatedBg: generatedBg ? normalizeGeneratedBg(generatedBg) : null,
     regenerateOnReload: typeof c.regenerateOnReload === 'boolean' ? c.regenerateOnReload : DEFAULT_CONFIG.regenerateOnReload,
     chatTextOpacity: clamp01(c.chatTextOpacity, DEFAULT_CONFIG.chatTextOpacity),

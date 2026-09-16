@@ -130,6 +130,11 @@ export const XIcon = ({ size, className }: { size?: number; className?: string }
   <Glyph size={size} className={className}><path d="M4 4l8 8M12 4l-8 8" /></Glyph>
 )
 
+/** Letterform glyph: a stroked capital A (the font/type page + nav entry). */
+export const FontIcon = ({ size, className }: { size?: number; className?: string }) => (
+  <Glyph size={size} className={className}><path d="M4 12.2 8 3.8l4 8.4" /><path d="M5.6 9.6h4.8" /></Glyph>
+)
+
 export const PlayIcon = ({ size, className }: { size?: number; className?: string }) => (
   <Glyph size={size} className={className}><path d="M5.2 3.4l7.4 4.6-7.4 4.6V3.4z" /></Glyph>
 )

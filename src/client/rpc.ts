@@ -10,10 +10,17 @@ export const WALLPAPER_SERVE_URL = '/dsh-any-background/wallpaper'
 const WALLPAPER_UPLOAD_URL = '/dsh-any-background/wallpaper/upload'
 /** HTTP route new videos are POSTed to as raw bytes (see uploadVideo). */
 export const VIDEO_UPLOAD_URL = '/dsh-any-background/video/upload'
+/** Same-origin serve URL of the persisted custom font (enough for @font-face). */
+export const FONT_SERVE_URL = '/dsh-any-background/font'
+/** HTTP route custom fonts are POSTed to as raw bytes (see uploadFont). */
+export const FONT_UPLOAD_URL = '/dsh-any-background/font/upload'
 const RPC_NS = 'dshAnyBackground'
 const rpcEndpoint = (method: string): string => `${RPC_NS}/${method}`
 
 let rpcCallFn: ((endpoint: string, payload: unknown) => Promise<RpcResultLike | undefined>) | null = null
+
+/** Serve URL of the persisted custom font, filled by loadPersisted. */
+export let fontServeUrl: string | null = null
 
 export function initRpc(call: (endpoint: string, payload: unknown) => Promise<RpcResultLike | undefined>): void {
   rpcCallFn = call
@@ -61,11 +68,14 @@ export function persistConfig(): void {
 /** Load the persisted theme (config + wallpaper URL + video URL) from the node
  *  half. Image and video both travel as serve URLs — never bytes — so this RPC
  *  stays tiny. Resolves true when the server advanced a due wallpaper rotation
- *  during the read — the restored wallpaper is then already the new pick. */
-export async function loadPersisted(): Promise<boolean> {
+ *  during the read — the restored wallpaper is then already the new pick.
+ *  `firstRun` means the server had no theme-config.json and just materialized
+ *  its defaults: the caller should persist the browser side's own defaults and
+ *  re-read once so every slider starts from a value that is really on disk. */
+export async function loadPersisted(): Promise<{ rotated: boolean; firstRun: boolean }> {
   const data = await rpcCall('read', {})
   if (data && typeof data === 'object') {
-    const d = data as { config?: unknown; wallpaperUrl?: unknown; videoUrl?: unknown; rotated?: unknown }
+    const d = data as { config?: unknown; wallpaperUrl?: unknown; videoUrl?: unknown; fontUrl?: unknown; rotated?: unknown; firstRun?: unknown }
     if (d.config) adoptConfig(d.config)
     // Uploaded image and video keep their own slots so type switches never
     // discard them; in image mode the caller points wpUrl at it.
@@ -75,11 +85,15 @@ export async function loadPersisted(): Promise<boolean> {
     // the boot restore in index.tsx when needed.
     if (typeof d.videoUrl === 'string') setWpVideoUrl(d.videoUrl, cfg.videoMime)
     else if (d.videoUrl === null) setWpVideoUrl(null, null)
+    // The custom font travels as a serve URL too; the caller applies the
+    // @font-face from it (config.fontEnabled decides whether it is active).
+    if (typeof d.fontUrl === 'string') fontServeUrl = d.fontUrl
+    else if (d.fontUrl === null) fontServeUrl = null
     // Mirror the same rev'd URL setWpImageUrl stored, so wpUrl never diverges.
     if (cfg.backgroundType === 'image') setWpUrl(rWpImage())
-    return d.rotated === true
+    return { rotated: d.rotated === true, firstRun: d.firstRun === true }
   }
-  return false
+  return { rotated: false, firstRun: false }
 }
 
 /** Persist a wallpaper (null removes it); one-shot, no debounce. */
@@ -167,6 +181,31 @@ export async function uploadWallpaper(blob: Blob): Promise<boolean> {
     console.warn('dsh-any-background: wallpaper upload failed', e)
     return false
   }
+}
+
+/** Upload a custom font's raw bytes over HTTP; resolves the sniffed MIME on
+ *  success (the server validates the container from magic bytes) or null. */
+export async function uploadFont(blob: Blob): Promise<string | null> {
+  try {
+    const res = await fetch(FONT_UPLOAD_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': blob.type || 'application/octet-stream' },
+      body: blob,
+    })
+    if (!res.ok) return null
+    const data = await res.json().catch(() => null) as { mime?: string } | null
+    return typeof data?.mime === 'string' ? data.mime : 'font/ttf'
+  } catch (e) {
+    console.warn('dsh-any-background: font upload failed', e)
+    return null
+  }
+}
+
+/** Remove the stored custom font (server deletes every variant + clears the
+ *  recorded MIME); resolves true once the slot is empty. */
+export async function removeFont(): Promise<boolean> {
+  const res = await rpcCall('removeFont', {})
+  return res === true
 }
 
 // ── Wallpaper rotation RPCs ──────────────────────────────────────────────────

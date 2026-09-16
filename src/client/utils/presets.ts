@@ -1,4 +1,4 @@
-import type { ProfileAppearance } from '../types'
+import type { PartStrokes, ProfileAppearance, StrokeConfig } from '../types'
 
 /**
  * Built-in appearance presets. Each bundles the surface parameters a profile
@@ -13,6 +13,17 @@ export interface BuiltinPreset {
 
 const zeroBlurs = { bg: 0, sidebar: 0, card: 0, settings: 0, chat: 0, trajectory: 0, input: 0, panel: 0, produced: 0 }
 
+/** Presets ship with strokes off — text outlines are an opt-in look. Fresh
+ *  objects per call so a profile restore can never alias another preset's
+ *  stroke config (applyAppearance copies, but mutation-proofing is free). */
+const zeroStrokes = (): PartStrokes => {
+  const off = (): StrokeConfig => ({ width: 0, color: 'auto', customColor: '#808080' })
+  return {
+    bg: off(), sidebar: off(), card: off(), settings: off(), chat: off(),
+    trajectory: off(), input: off(), panel: off(), produced: off(),
+  }
+}
+
 export const BUILTIN_PRESETS: BuiltinPreset[] = [
   {
     key: 'default',
@@ -20,6 +31,7 @@ export const BUILTIN_PRESETS: BuiltinPreset[] = [
       color: null,
       opacities: { bg: 0.85, sidebar: 0.93, card: 1, input: 1 },
       blurs: { ...zeroBlurs },
+      strokes: zeroStrokes(),
       settingsOpacity: 1,
       wallpaperOpacity: 1,
       blur: 0,
@@ -36,6 +48,7 @@ export const BUILTIN_PRESETS: BuiltinPreset[] = [
       color: [212, 0.5, 0.38],
       opacities: { bg: 0.62, sidebar: 0.55, card: 0.62, input: 0.58 },
       blurs: { ...zeroBlurs, bg: 20, sidebar: 14, card: 12, settings: 20, trajectory: 8, input: 14, panel: 12 },
+      strokes: zeroStrokes(),
       settingsOpacity: 0.88,
       wallpaperOpacity: 1,
       blur: 0,
@@ -52,6 +65,7 @@ export const BUILTIN_PRESETS: BuiltinPreset[] = [
       color: null,
       opacities: { bg: 0.97, sidebar: 0.97, card: 1, input: 1 },
       blurs: { ...zeroBlurs },
+      strokes: zeroStrokes(),
       settingsOpacity: 1,
       wallpaperOpacity: 1,
       blur: 0,
@@ -68,6 +82,7 @@ export const BUILTIN_PRESETS: BuiltinPreset[] = [
       color: [262, 0.45, 0.16],
       opacities: { bg: 0.5, sidebar: 0.45, card: 0.55, input: 0.6 },
       blurs: { ...zeroBlurs, bg: 24, sidebar: 18, card: 14, settings: 22, trajectory: 10, input: 16, panel: 16 },
+      strokes: zeroStrokes(),
       settingsOpacity: 0.85,
       wallpaperOpacity: 0.92,
       blur: 2,
@@ -84,6 +99,7 @@ export const BUILTIN_PRESETS: BuiltinPreset[] = [
       color: [315, 0.7, 0.22],
       opacities: { bg: 0.42, sidebar: 0.5, card: 0.45, input: 0.55 },
       blurs: { ...zeroBlurs, bg: 16, sidebar: 12, card: 10, settings: 18, trajectory: 6, input: 20, panel: 18 },
+      strokes: zeroStrokes(),
       settingsOpacity: 0.8,
       wallpaperOpacity: 1,
       blur: 0,
@@ -100,6 +116,7 @@ export const BUILTIN_PRESETS: BuiltinPreset[] = [
       color: [28, 0.6, 0.72],
       opacities: { bg: 0.92, sidebar: 0.95, card: 1, input: 1 },
       blurs: { ...zeroBlurs },
+      strokes: zeroStrokes(),
       settingsOpacity: 1,
       wallpaperOpacity: 1,
       blur: 0,

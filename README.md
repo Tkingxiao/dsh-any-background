@@ -66,9 +66,9 @@ A **DeepSeek Harness** appearance plugin: custom theme color, background wallpap
 - **Precise HSL / RGB Input** — Enter exact color values numerically with instant bidirectional sync to the wheel.
 - **Smart Color Extraction** — One click derives a theme color from your wallpaper by sampling the visible region, quantizing, and filtering out gray / near-black / near-white pixels. Video wallpapers contribute via an auto-captured frame. Fully client-side.
 - **Eyedropper** — Hover the wallpaper to preview a color and click to pick it as the theme color.
-- **Background Wallpaper** — Upload any image as your wallpaper. Drag to pan and scroll to zoom inside a viewport-proportional editor.
+- **Background Wallpaper** — Upload any image as your wallpaper. Drag to pan and scroll to zoom inside a viewport-proportional editor (one finger to pan, two to pinch-zoom on touchscreens).
 - **Video Wallpaper** — Use a video as a live wallpaper: muted looping playback that survives refreshes (file persistence + HTTP streaming with Range seek), with an auto-captured frame powering the preview, theme-color extraction, and the position editor.
-- **Position Editor** — One shared editor for images and videos: drag to pan, scroll to zoom, one-click reset. Image and video placements are stored separately and never overwrite each other.
+- **Position Editor** — One shared editor for images and videos: drag to pan, scroll or pinch to zoom, one-click reset. Image and video placements are stored separately and never overwrite each other.
 - **Layout Modes** — Fit / Fill / Stretch / Tile / Center for both images and videos; in Fit mode the editor-committed framing stays consistent across window resizes and cross-monitor moves.
 - **Generated Dynamic Backgrounds** — Choose mesh gradient, Shader, or geometric patterns with adjustable spread, intensity, and seed locking.
 - **Per-surface Interface Opacity** — Independent sliders for the main background, sidebar, cards & panels (including the dropdowns and menus around the dialog), the input & controls (composer box, Cordis panel), the settings panel, the conversation text frame, the trajectory view, the better-sidebar workbench, and produced / highlighted content.
@@ -80,6 +80,8 @@ A **DeepSeek Harness** appearance plugin: custom theme color, background wallpap
 - **Appearance Presets & Profiles** — Six one-click presets (Default / Frosted glass / Minimal / Midnight / Cyber / Warm daylight) plus named profiles: save the current look and re-apply it anytime. A two-step confirm guards deletion.
 - **Wallpaper Rotation** — Add images to a rotation pool (thumbnail picker included) and let the wallpaper change by shuffle or order on every refresh, daily, or weekly. Advancing copies the chosen image into the active wallpaper slot, so export/import and color extraction keep working unchanged.
 - **Day/Night Auto Switch** — Assign a day profile and a night profile; the plugin switches automatically at fixed clock times or by following the OS dark mode.
+- **Custom Font** — Upload a ttf / otf / woff / woff2 file (up to 100 MB) and apply it to the whole interface through `@font-face`; toggle it off or remove it at any time. Fonts stream as raw bytes and persist in the plugin data dir; code blocks keep their monospace stack.
+- **Per-part Text Outline** — The same nine surface groups as the interface page, each with its own `-webkit-text-stroke`: width 0–4 px (0 = off) and a color of auto-contrast / gray / black / white / accent / custom. Code blocks, inline `code` and icons are exempted automatically, so multi-color syntax never smears.
 - **Forced Interface Scheme** — Force light or dark token palettes regardless of the accent color's lightness; in `Auto` both the surface and font directions follow the accent's lightness (dark pick → light fonts, light pick → dark fonts), falling back to the wallpaper's perceived brightness when no color is picked.
 - **File-based Persistence** — All settings are stored on the filesystem under `~/.dsh/.dsh-any-background-data/`, not `localStorage`.
 - **Bilingual** — Full Chinese / English UI with automatic locale detection.
@@ -87,20 +89,24 @@ A **DeepSeek Harness** appearance plugin: custom theme color, background wallpap
 
 ## Changelog
 
+### v0.2.9
+
+- **Fixed: opacity and blur sliders looked inert until each was dragged once** — Not a defaults problem: two gates stood in the application path. ① `applyCustomTokensNow()` returned early whenever there was no palette, and `paletteTokens()` returns exactly null when **no color is picked and no scheme is forced** — so the four opacity sliders' alpha variables were never written at all. ② `applyWp()` additionally gated the call behind `rHasColor() || rBgDark() !== null || ...`, all false on a fresh install, so it was never even invoked. Opacity now applies unconditionally, falling back to the host's own resolved surface tokens when the plugin has no palette (`readHostOpacityTokens()`, the same host fallback the workbench-panel slider already used). The sliders only supply the alpha — colors still come from the host skin, so a custom host theme survives.
+- **Defaults moved to mid-scale** — Every per-part opacity now defaults to 0.5 and every blur to 30px (half of the 0–60px range), so a fresh install shows the controls working instead of appearing to do nothing. **Fresh installs only:** existing `theme-config.json` files are untouched. The wallpaper's own alpha (`wallpaperOpacity`) stays at 100% — halving it would dim every newly uploaded picture. The server-side `DEFAULT_CONFIG` was updated in lockstep, since one-sided declarations are exactly what silently dropped fields in v0.2.8.
+- **Fresh installs now persist immediately and re-read once** — When `theme-config.json` is missing, the `read` RPC writes the defaults straight to disk and returns `firstRun`; the client then persists the browser half's full default set, calls `loadPersisted()` again, and runs `applyWp()` so the interface paints from a config that genuinely exists on disk.
+- **Mobile / touch support for the background editor** — The editor only understood a mouse, so on a phone or tablet the wallpaper could neither be dragged nor zoomed. One finger now pans the picture and two fingers pinch to zoom, with the image point that started under your fingers staying pinned to them — which means a two-finger drag pans while it scales, both falling out of the same relation. The touch listeners are attached natively with `passive: false` on purpose: React registers `touchmove` passively at the root, where `preventDefault()` is a no-op, so the page would scroll and the browser would pinch-zoom the whole viewport behind the open dialog; the preview also declares `touch-action: none` to cover the same ground declaratively. Lifting one of two fingers re-baselines the pan against the finger still down, so the picture no longer snaps back by its offset.
+
+- **New "Font" settings page** — A fifth page, right after "Interface", holding two new capabilities: the custom interface font and per-part text outlines.
+- **Custom font** — Upload a ttf / otf / woff / woff2 file and apply it to the entire interface. Raw bytes POST to `/dsh-any-background/font/upload` (never base64 through the RPC channel, capped at 100 MB); the server sniffs the real container from its magic bytes, names the slot accordingly, and serves it back from `/dsh-any-background/font` as an `@font-face` source. The host's base font token `--dsw-font-family` is re-scoped to `'DAnyFont', <original host stack>` while the code stack stays untouched. The font can be disabled (file kept) or removed (file deleted), and a rejected upload rolls back to whatever was applied before. Like wallpapers, font files are machine-local — they stay out of profiles and theme exports.
+- **Per-part text outline** — Nine groups, each with its own outline width (0–4 px, 0.5 steps, 0 = off) and color. Colors are stored as **preset keys**, not resolved values: "auto" inverts the font direction (light glyphs get a dark outline) and "accent" follows the current primary, so both re-derive automatically with the theme. Code blocks, inline `code`, icons and placeholders are explicitly exempted.
+- **Known trade-off** — `-webkit-text-stroke` may clip by about 1px inside some single-line ellipsis containers; multi-line containers are unaffected.
+
 ### v0.2.8
 
 - **Fixed: produced / highlight opacity and blur were lost on reload** — The config shape is declared twice, once per half, and the node half (which sanitizes before writing to disk) never learned `producedOpacity` / `blurs.produced`. The sliders stayed live in memory, `writeConfig` silently dropped both fields, and the next load fell back to the defaults. The host now declares them in `PartBlurs`, `ThemeConfig` and `ProfileAppearance` — structure, defaults, and both sanitizers (the config itself plus the profile snapshot).
 - **Saved profiles lost those two values as well** — A profile snapshot never carried the produced parameters, so applying one quietly reset that slider to its default. Profiles, the six presets and the day/night switch all carry them now.
 - **New two-half drift guard** — When sanitizing, the host now logs a one-time warning for any field declared on only one side (`ignoring unknown config field "blurs.xxx"`), so this class of drift surfaces in the host log instead of silently discarding a setting.
 - **Imported configs now refresh the whole UI** — Importing a theme JSON used to refresh only the background and colors, leaving the profile list, wallpaper rotation pool, day/night schedule and scheme control showing their pre-import values; the import now pushes that meta state too.
-
-### v0.2.7
-
-- **New "Produced / Highlights" sliders** — Code blocks in conversation content (language banner included), inline `code` highlight chips and produced chips now share one opacity + blur slider. The opacity is the alpha of each surface's **own background color**: 100% reproduces the host look byte-for-byte, and lowering it fades exactly that color out instead of stacking a second one on top of the original (previously the code block's outer wrapper stayed opaque, so the slider merely blended the plugin palette into it and the blur had nothing to reveal). The blur frosts that same layer with `backdrop-filter`. Code blocks in the document preview — which live outside `.md-code-block` and take their color from `--shiki-background` alone — are covered too.
-- **New better-sidebar workbench sliders** — `panelOpacity` / `blurs.panel` drive dsh-better-sidebar's bottom workbench panel through `[data-dsh-bottom-panel]` and the native right sidebar through `[data-sidebar-right-panel]`, re-scoping the panel's surface tokens to the plugin palette (dedicated token remap + panel blur rules). Without that plugin the row is hidden and the sliders are inert.
-- **Popover blur fixed** — A new `POPOVER_BLUR_RULE` makes the "card" blur slider land on dropdown / popover surfaces as well, not just the panels inside the dialog.
-- **Host support narrowed to DSH 0.1.5-rc.2** — `engines.dsh` and `dsh.compatibility.dshReleases` now declare that single release (verified on it) and the old 8-version matrix is gone from the README. `panelOpacity` joined the full profile / export / day-night-schedule pipeline.
-- **Six presets carry the new parameters** — workbench opacity follows each preset (Frosted glass 0.85, Midnight 0.8, Warm daylight 0.75, …); the produced slider defaults to 100% (the untouched host look).
 
 ## Installation
 
@@ -145,6 +151,7 @@ pnpm dsh web
 ## Compatibility
 
 - **[`dsh web`](https://github.com/deepseek-ai/deepseek-harness) 0.1.5-rc.2** — This release targets `0.1.5-rc.2` only (verified on it); `engines.dsh` and `dsh.compatibility.dshReleases` in `package.json` declare that single release as well.
+- **[DSHA](https://github.com/DSH-APP/DSHA)** — DeepSeek Harness Android launcher (ROOT-free, Termux-free). Its bundled `dsh` is `0.1.5-rc.2`, the exact release this plugin targets, so it is compatible; the mobile UI shell is provided by `dsh-web-mobile`.
 - **[deepseek-harness-desktop](https://github.com/anywhere-labs/deepseek-harness-desktop)** — Supported
 
 ## Star History

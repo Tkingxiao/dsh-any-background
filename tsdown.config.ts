@@ -25,6 +25,14 @@ const EXTERNALS = [
   '@deepseek-ai/dsh-client-ui-theme',
 ]
 
+/**
+ * The client half bundles everything that is not one of the loader-table ids
+ * above. Same function shape the old `noExternal` took: `true` bundles the id,
+ * `undefined` leaves it to `neverBundle`.
+ */
+const bundleEverythingElse = (id: string): boolean | undefined =>
+  EXTERNALS.includes(id) ? undefined : true
+
 const configs: UserConfig[] = [
   // Node half: lib/index.js + lib/invariant.js
   {
@@ -37,7 +45,7 @@ const configs: UserConfig[] = [
     format: ['esm'],
     platform: 'node',
     target: 'es2024',
-    external: EXTERNALS,
+    deps: { neverBundle: EXTERNALS },
     dts: false,
     clean: false,
     fixedExtension: false,
@@ -52,8 +60,7 @@ const configs: UserConfig[] = [
     dts: false,
     sourcemap: true,
     clean: false,
-    external: EXTERNALS,
-    noExternal: (id: string) => (EXTERNALS.includes(id) ? undefined : true),
+    deps: { neverBundle: EXTERNALS, alwaysBundle: bundleEverythingElse },
     define: {
       'process.env.NODE_ENV': JSON.stringify(process.env.NODE_ENV ?? 'production'),
       'import.meta.env.MODE': JSON.stringify(process.env.NODE_ENV ?? 'production'),
