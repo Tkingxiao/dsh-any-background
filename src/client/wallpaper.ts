@@ -24,9 +24,13 @@ function clearDynamicBg(): void {
 }
 
 /** Register a callback fired once a generated snapshot is ready (so the caller
- *  can re-sync the settings preview / store). */
-export function onGeneratedSnapshot(cb: () => void): void {
+ *  can re-sync the settings preview / store). Returns an unsubscribe: HMR
+ *  re-runs apply and would otherwise leave the previous apply's closure as the
+ *  live listener (a stale this-session callback invoked by a lingering
+ *  controller). */
+export function onGeneratedSnapshot(cb: () => void): () => void {
   snapshotListener = cb
+  return () => { if (snapshotListener === cb) snapshotListener = null }
 }
 
 function ensureTokenStyle(): HTMLStyleElement {
@@ -593,6 +597,19 @@ function strokeColor(s: StrokeConfig): string {
 
 /** Write every group's stroke width/color variables + the two column strokes.
  *  Called from applyWp so palette/verdict changes re-derive 'auto'/'theme'. */
+/** Write (or clear) one column's inline text stroke. The stroke rides inline
+ *  styles and is fully removed at width 0 so nothing lingers after the slider
+ *  resets. */
+function applyInlineStroke(el: HTMLElement, s: StrokeConfig): void {
+  if (s.width > 0) {
+    el.style.setProperty('-webkit-text-stroke', `${s.width}px ${strokeColor(s)}`)
+    el.style.setProperty('paint-order', 'stroke fill')
+  } else {
+    el.style.removeProperty('-webkit-text-stroke')
+    el.style.removeProperty('paint-order')
+  }
+}
+
 export function applyStrokes(): void {
   const strokes = rStrokes()
   const root = document.documentElement
@@ -601,20 +618,12 @@ export function applyStrokes(): void {
     root.style.setProperty(`--dsh-any-stroke-${g}-w`, `${s.width}px`)
     root.style.setProperty(`--dsh-any-stroke-${g}-c`, strokeColor(s))
   }
-  // Columns are dynamically discovered; their stroke rides inline styles and
-  // is fully removed at width 0 so nothing lingers after the slider resets.
+  // Columns are dynamically discovered; the var groups above ride CSS
+  // variables, the two column groups ride inline styles.
   discoverParts()
   for (const g of STROKE_INLINE_GROUPS) {
     const el = g === 'bg' ? centerEl : sidebarEl
-    if (el === null) continue
-    const s = strokes[g]
-    if (s.width > 0) {
-      el.style.setProperty('-webkit-text-stroke', `${s.width}px ${strokeColor(s)}`)
-      el.style.setProperty('paint-order', 'stroke fill')
-    } else {
-      el.style.removeProperty('-webkit-text-stroke')
-      el.style.removeProperty('paint-order')
-    }
+    if (el !== null) applyInlineStroke(el, strokes[g])
   }
 }
 
@@ -628,13 +637,7 @@ export function setPartStroke(part: StrokeGroup, s: StrokeConfig): void {
   discoverParts()
   const el = part === 'bg' ? centerEl : sidebarEl
   if (el === null) return
-  if (s.width > 0) {
-    el.style.setProperty('-webkit-text-stroke', `${s.width}px ${strokeColor(s)}`)
-    el.style.setProperty('paint-order', 'stroke fill')
-  } else {
-    el.style.removeProperty('-webkit-text-stroke')
-    el.style.removeProperty('paint-order')
-  }
+  applyInlineStroke(el, s)
 }
 
 /** Teardown only: drop every stroke variable and column inline stroke. */
@@ -789,29 +792,34 @@ export const PLACEHOLDER_RULE =
   '.dab-input input::placeholder' +
   '{color:var(--dsh-any-placeholder,var(--dsw-alias-label-caption,#8a8f98))!important;font-style:italic;opacity:.85}'
 
-export function applySettingsOverrides(op: number): void {
-  // Always written explicitly (including 100%) — removing them would make
-  // SETTINGS_STYLE_RULE fall back to the body layer tokens that
-  // applyCustomTokens rewrites with the homepage card alpha.
+type LayerPrefix = '--dsh-any-bg-settings' | '--dsh-any-traj'
+
+/** Re-scope one surface group's layer tokens onto plugin-owned variables so a
+ *  dedicated slider owns its alpha (the host has no per-surface opacity). The
+ *  settings group additionally retints its dialog surface variable. Always
+ *  written explicitly — including at 100% — so removing a slider's effect means
+ *  writing 1, not deleting the variable (the style rules below have no fallback
+ *  and would otherwise resolve the body tokens that applyCustomTokens rewrote
+ *  with the homepage card alpha). */
+function applyLayerOverrides(prefix: LayerPrefix, op: number, surface: boolean): void {
   const [h, s, l] = rColor()
   const tokens = genTokens(h, s, l, rColorScheme()).tokens
-  const layer1 = tokens['--dsw-alias-bg-layer-1']
-  const layer2 = tokens['--dsw-alias-bg-layer-2']
-  const layer3 = tokens['--dsw-alias-bg-layer-3']
-  if (layer2 !== undefined) {
-    document.documentElement.style.setProperty('--dsh-any-bg-settings-surface', toRgba(layer2, op))
+  if (surface) {
+    const surfaceColor = tokens['--dsw-alias-bg-layer-2']
+    if (surfaceColor !== undefined) {
+      document.documentElement.style.setProperty(`${prefix}-surface`, toRgba(surfaceColor, op))
+    }
   }
-  // Dialog-scoped layer overrides consumed by SETTINGS_STYLE_RULE; opacity
-  // follows the settings slider only (the card slider reaches panels via blur).
-  if (layer1 !== undefined) {
-    document.documentElement.style.setProperty('--dsh-any-bg-settings-layer-1', toRgba(layer1, op))
+  for (const layer of [1, 2, 3] as const) {
+    const c = tokens[`--dsw-alias-bg-layer-${layer}`]
+    if (c !== undefined) {
+      document.documentElement.style.setProperty(`${prefix}-layer-${layer}`, toRgba(c, op))
+    }
   }
-  if (layer2 !== undefined) {
-    document.documentElement.style.setProperty('--dsh-any-bg-settings-layer-2', toRgba(layer2, op))
-  }
-  if (layer3 !== undefined) {
-    document.documentElement.style.setProperty('--dsh-any-bg-settings-layer-3', toRgba(layer3, op))
-  }
+}
+
+export function applySettingsOverrides(op: number): void {
+  applyLayerOverrides('--dsh-any-bg-settings', op, true)
 }
 
 // ── Trajectory view opacity ──────────────────────────────────────────────
@@ -826,21 +834,7 @@ export const TRAJECTORY_STYLE_RULE =
   '--dsw-alias-bg-layer-3:var(--dsh-any-traj-layer-3)}'
 
 export function applyTrajectoryOverrides(op: number): void {
-  // Always written explicitly so the view stays owned by this slider at 100%.
-  const [h, s, l] = rColor()
-  const tokens = genTokens(h, s, l, rColorScheme()).tokens
-  const layer1 = tokens['--dsw-alias-bg-layer-1']
-  const layer2 = tokens['--dsw-alias-bg-layer-2']
-  const layer3 = tokens['--dsw-alias-bg-layer-3']
-  if (layer1 !== undefined) {
-    document.documentElement.style.setProperty('--dsh-any-traj-layer-1', toRgba(layer1, op))
-  }
-  if (layer2 !== undefined) {
-    document.documentElement.style.setProperty('--dsh-any-traj-layer-2', toRgba(layer2, op))
-  }
-  if (layer3 !== undefined) {
-    document.documentElement.style.setProperty('--dsh-any-traj-layer-3', toRgba(layer3, op))
-  }
+  applyLayerOverrides('--dsh-any-traj', op, false)
 }
 
 /** Register a callback fired when a wallpaper-extracted theme color is
@@ -848,7 +842,10 @@ export function applyTrajectoryOverrides(op: number): void {
  *  host skin, sync the editor UI and persist the pick (wallpaper.ts cannot
  *  do those itself — they live in the section). */
 let colorAdoptedListener: ((hsl: [number, number, number]) => void) | null = null
-export function onColorAdopted(cb: (hsl: [number, number, number]) => void): void { colorAdoptedListener = cb }
+export function onColorAdopted(cb: (hsl: [number, number, number]) => void): () => void {
+  colorAdoptedListener = cb
+  return () => { if (colorAdoptedListener === cb) colorAdoptedListener = null }
+}
 
 /** Apply the theme color: use the saved pick directly, or fall back to
  *  extracting a dominant color from the current wallpaper. */
@@ -875,8 +872,12 @@ export function applyThemeColor(): void {
         // The listener runs before applyWp so the freshly registered skin and
         // the token pass below describe the same color.
         colorAdoptedListener?.(hsl)
+        // The color changed, so a re-apply is needed for the token pass. When
+        // the decode yielded nothing (or the wallpaper was swapped out) the
+        // first applyWp above still describes the screen and a second one
+        // would only re-do the same work.
+        applyWp()
       }
-      applyWp()
     })
   } else {
     applyWp()
@@ -918,7 +919,10 @@ function randomSeed(): number {
  *  preserving the user's scale/intensity/speed/density/preset choices. */
 export function regenerateGeneratedBg(): void {
   const params = cfg.generatedBg
-  if (!params || cfg.backgroundType === 'image') return
+  // 'video' also carries a generatedBg-less slot: bailing here keeps this from
+  // racing applyWp's video branch (it would clear the player's state while the
+  // video branch is setting it up).
+  if (!params || cfg.backgroundType === 'image' || cfg.backgroundType === 'video') return
   cfg.generatedBg = { ...params, seed: randomSeed() }
   applyGeneratedBg(cfg.generatedBg)
 }
@@ -943,9 +947,15 @@ function applyGeneratedBg(params: GeneratedBgParams): void {
   // the snapshot meaningful. Do NOT refresh the palette here — generated
   // backgrounds must not overwrite the user's picked theme color.
   requestAnimationFrame(() => {
-    if (!wpController) return
+    // Two guards, because clearDynamicBg() stops the OLD controller without
+    // cancelling its already-scheduled rAF: a rapid regenerate (or a type
+    // switch) leaves a stale callback whose `wpController` read is the NEW one.
+    // Snapshotting through the captured `controller` and re-checking identity
+    // after keeps a dead background's frame from overwriting the live URL.
     const controller = wpController
+    if (controller === null) return
     const frame = controller.snapshot()
+    if (wpController !== controller) return
     setWpUrl(frame)
     applyWp()
     snapshotListener?.()
@@ -1002,48 +1012,49 @@ function ensurePartBlurStyle(): void {
   document.head.appendChild(partBlurStyleEl)
 }
 
-/** Find one direct child of `frame` whose `[data-rightbar-col]` marker matches.
- *  The rightbar is its own grid track, NOT a "details" twin of the center
- *  column, so it must never receive the main-bg tint or blur underlay. */
-function findRightbarInFrame(frame: HTMLElement): HTMLElement | null {
-  for (let i = 0; i < frame.children.length; i++) {
-    const child = frame.children[i]
-    if (child instanceof HTMLElement && child.dataset.rightbarCol !== undefined) return child
-  }
-  return null
-}
-
 function discoverParts(): void {
   const overlay = document.querySelector<HTMLElement>('[data-shell-overlay]')
   if (overlay === null) return
   const frame = overlay.parentElement
   if (frame === null) return
   frameEl = frame
-  // The rightbar is the only column with its own stable host marker. Find it
-  // BEFORE indexing by the overlay so it never falls into the "details"
-  // slot — 0.1.5-rc.1+ only has three columns, not four.
-  rightEl = findRightbarInFrame(frame)
-  const idx = Array.from(frame.children).indexOf(overlay)
-  // The rightbar (when found) sits between center and overlay; otherwise the
-  // legacy 3-column shape is intact (sidebar, center, details) — but on
-  // 0.1.5-rc.1+ this path is unreachable because every frame carries the
-  // rightbar marker. The two branch are kept so the function still tolerates
-  // an absent rightbar on a future build that drops the column entirely.
-  if (rightEl !== null) {
-    // Index of the rightbar in frame.children: with the host's grid it's
-    // always `idx - 1`; resolve from the children array directly instead of
-    // trusting the layout to keep that invariant.
-    const rightIdx = Array.from(frame.children).indexOf(rightEl)
-    sidebarEl = (frame.children[rightIdx - 2] as HTMLElement | undefined) ?? null
-    centerEl = (frame.children[rightIdx - 1] as HTMLElement | undefined) ?? null
+  // One pass over frame.children for both anchors: the rightbar is the only
+  // column with its own stable host marker (its own grid track — never the
+  // "details" twin of center, so it must never take the main-bg tint), and the
+  // overlay's index anchors the column order behind it.
+  let overlayIdx = -1
+  let rightIdx = -1
+  let right: HTMLElement | null = null
+  const children = frame.children
+  for (let i = 0; i < children.length; i++) {
+    const child = children[i]
+    if (child === overlay) {
+      overlayIdx = i
+    } else if (child instanceof HTMLElement && child.dataset.rightbarCol !== undefined) {
+      right = child
+      rightIdx = i
+    }
+  }
+  rightEl = right
+  // With the host's grid the rightbar sits between center and overlay; the
+  // indexes are resolved from the children array directly instead of trusting
+  // the layout to keep that invariant. The else branch covers a future build
+  // that drops the rightbar entirely (legacy 3-column shape).
+  if (right !== null) {
+    sidebarEl = (children[rightIdx - 2] as HTMLElement | undefined) ?? null
+    centerEl = (children[rightIdx - 1] as HTMLElement | undefined) ?? null
   } else {
-    sidebarEl = (frame.children[idx - 3] as HTMLElement | undefined) ?? null
-    centerEl = (frame.children[idx - 2] as HTMLElement | undefined) ?? null
+    sidebarEl = (children[overlayIdx - 3] as HTMLElement | undefined) ?? null
+    centerEl = (children[overlayIdx - 2] as HTMLElement | undefined) ?? null
   }
 }
 
 function setBlur(el: HTMLElement | null, px: number): void {
   if (el === null) return
+  // Nothing to clear and nothing applied yet: skip the querySelector and the
+  // style writes. This is the common steady state — every observer tick and
+  // every applyWp calls setBlur(el, 0) on parts that never had a blur.
+  if (px === 0 && !el.classList.contains(PART_BLUR_CLASS) && el.getAttribute('data-dab-pos-patched') !== '1') return
   const underlay = el.querySelector<HTMLDivElement>(`:scope > .${PART_UNDERLAY_CLASS}`)
   if (px > 0) {
     ensurePartBlurStyle()
@@ -1200,6 +1211,43 @@ const VIEW_CARDS: ViewCardSpec[] = [
 
 const viewTargets: Array<HTMLElement | null> = VIEW_CARDS.map(() => null)
 
+/** View specs whose real host marker has been seen at least once. Until a
+ *  marker is seen, its absence is ambiguous — "that view is not mounted" or
+ *  "this build has no such marker, keep running the generic fallback" — and the
+ *  pass has to keep probing. Once seen, absence can only mean the former, so the
+ *  pass may be skipped.
+ *
+ *  This matters because the two specs are two different MAIN VIEWS and only one
+ *  of them is mounted at a time (the host renders the main slot for the active
+ *  panel id, keyed by `entryKey` — see AppFrame's MainPanel). So "every surface
+ *  present" is never true during a normal session, and an all-or-nothing gate on
+ *  it silently never engages: that is exactly how the previous version of this
+ *  observer ended up running the full pass on every animation frame while
+ *  tokens streamed. */
+const markerSeen = new Set<number>()
+
+/** Resolve just the stable host markers for the view specs — one querySelector
+ *  each, no fallback heuristics. Cheap enough to run on every coalesced burst,
+ *  and enough to notice a view mounting/unmounting. */
+function probeViewMarkers(): (HTMLElement | null)[] {
+  const center = centerEl
+  if (center === null || !document.body.contains(center)) return VIEW_CARDS.map(() => null)
+  return VIEW_CARDS.map(spec => center.querySelector<HTMLElement>(spec.sel))
+}
+
+/** Whether the pass must run regardless of the value/identity signature. */
+function needsPartsPass(markers: (HTMLElement | null)[]): boolean {
+  // Columns missing: the pass is what discovers them.
+  if (!columnsPresent()) return true
+  // A mounted view whose marker moved (appeared, or was replaced by a fresh
+  // element) has to be re-styled — the identity gate below cannot see it,
+  // because an undiscovered target is still null in viewTargets.
+  if (markers.some((el, i) => el !== null && el !== viewTargets[i])) return true
+  // A spec with a generic fallback whose marker has never been seen on this
+  // host: the pass performs that resolution, so it cannot be skipped.
+  return VIEW_CARDS.some((spec, i) => spec.fallback === true && markers[i] === null && !markerSeen.has(i))
+}
+
 function isScrollableY(el: HTMLElement): boolean {
   const oy = getComputedStyle(el).overflowY
   // 'overlay' covers Chromium's non-standard overflow value.
@@ -1244,6 +1292,9 @@ function discoverViewTarget(idx: number, spec: ViewCardSpec): HTMLElement | null
   const marked = centerEl.querySelector<HTMLElement>(spec.sel)
   const cached = viewTargets[idx]
   if (marked !== null) {
+    // This host does expose the marker, so from now on its absence means "that
+    // view is not the active one" — see the note on markerSeen.
+    markerSeen.add(idx)
     if (cached !== null && cached !== marked) { setBlur(cached, 0); restoreCardHost(cached, spec.mark, spec.prev, spec.plain === true) }
     viewTargets[idx] = marked
     return marked
@@ -1398,18 +1449,55 @@ export function applyViewCards(): void {
 }
 
 let partsObserver: MutationObserver | null = null
+let partsApplyRaf = 0
+/** Signature of the last blur+opacity pass we actually wrote to the DOM. */
+let appliedPartsKey = ''
+/** The surfaces the last pass styled, compared BY IDENTITY: the host can swap
+ *  a view element for a fresh one while the slider values stay identical, and
+ *  the value signature alone would then skip the pass and leave the new view
+ *  unstyled until a slider moves. */
+let appliedTargets: (HTMLElement | null)[] = []
+
+/** The four frame columns are mounted and still attached. These are the frame's
+ *  own children (see the host's AppFrame: sidebar / center / rightbar carrying
+ *  `data-rightbar-col` / the overlay), so they exist as soon as the shell does —
+ *  unlike the per-view cards below, which come and go with the active view. */
+function columnsPresent(): boolean {
+  return frameEl !== null && sidebarEl !== null && centerEl !== null && rightEl !== null
+    && document.body.contains(frameEl) && document.body.contains(centerEl)
+}
+
+/** Snapshot of every surface the pass would style, for the identity check. */
+function targetsNow(): (HTMLElement | null)[] {
+  return [frameEl, sidebarEl, centerEl, rightEl, ...viewTargets]
+}
 
 /** Watch for the AppFrame mounting so persisted blurs land even when the shell
- *  renders after this plugin's apply. Cheap: once all parts are found, the
- *  callback returns. */
+ *  renders after this plugin's apply. */
 export function watchParts(): void {
   if (partsObserver !== null || typeof MutationObserver === 'undefined') return
   partsObserver = new MutationObserver(() => {
-    if (frameEl !== null && sidebarEl !== null && centerEl !== null && rightEl !== null && document.body.contains(frameEl)
-      // Keep re-applying while any card host is absent or was swapped by the host.
-      && viewTargets.every(el => el !== null && document.body.contains(el))) return
-    applyPartBlurs(rBlurs())
-    applyPartOpacities(rOps())
+    // The observer cannot tell whether a mutation touched our surfaces, so
+    // without a gate every childList change on body — streaming tokens,
+    // keystrokes — re-runs the full blur+opacity pass. Coalesce a burst into one
+    // animation frame, then skip it when it cannot change anything.
+    if (partsApplyRaf !== 0) return
+    partsApplyRaf = requestAnimationFrame(() => {
+      partsApplyRaf = 0
+      const blurs = rBlurs()
+      const ops = rOps()
+      const key = JSON.stringify([blurs, ops])
+      const markers = probeViewMarkers()
+      if (!needsPartsPass(markers) && key === appliedPartsKey
+        && !targetsNow().some((el, i) => el !== appliedTargets[i])) return
+      applyPartBlurs(blurs)
+      applyPartOpacities(ops)
+      // Snapshot AFTER the pass, not before: discovery happens inside it, and
+      // comparing the next tick against a pre-discovery snapshot would make that
+      // tick re-run the whole pass for nothing.
+      appliedPartsKey = key
+      appliedTargets = targetsNow()
+    })
   })
   partsObserver.observe(document.body, { childList: true, subtree: true })
 }
@@ -1417,6 +1505,12 @@ export function watchParts(): void {
 export function stopWatchingParts(): void {
   partsObserver?.disconnect()
   partsObserver = null
+  if (partsApplyRaf !== 0) { cancelAnimationFrame(partsApplyRaf); partsApplyRaf = 0 }
+  appliedPartsKey = ''
+  appliedTargets = []
+  // Re-probe on the next enable: a marker seen before the teardown is no longer
+  // evidence about the DOM at hand.
+  markerSeen.clear()
 }
 
 // ── Theme-reset watchdog ──────────────────────────────────────────────────
@@ -1569,7 +1663,10 @@ let verdictGen = 0
 /** Register a callback fired when the background brightness verdict CHANGES
  *  (a new wallpaper was analyzed, a generated bg regenerated), so the skin can
  *  be re-registered through the host theme service. */
-export function onVerdictApplied(cb: () => void): void { verdictListener = cb }
+export function onVerdictApplied(cb: () => void): () => void {
+  verdictListener = cb
+  return () => { if (verdictListener === cb) verdictListener = null }
+}
 
 function applyVerdict(dark: boolean | null): void {
   if (rBgDark() === dark) return
@@ -1718,6 +1815,12 @@ export function applyWp(): void {
       clearDynamicBg()
       clearVideoEl()
       wpEl?.remove(); wpEl = null
+      // An empty video slot must not keep the previous wallpaper's brightness
+      // verdict alive: nothing is on screen to justify it, and a stale verdict
+      // would flip the next background's font direction the wrong way. The
+      // no-background branch below does the same.
+      wpVerdict = null
+      setBgDark(null)
     }
   } else if (cfg.backgroundType !== 'image' && cfg.generatedBg) {
     // Recreate the live canvas from saved params if one is not active yet
@@ -1802,8 +1905,17 @@ export function teardownWp(): void {
   if (tokensRaf !== null) { cancelAnimationFrame(tokensRaf); tokensRaf = null }
   pendingOps = null
   tableFixStyleEl?.remove(); tableFixStyleEl = null
+  partBlurStyleEl?.remove(); partBlurStyleEl = null
   removeStrokes()
   removeFontFace()
+  // Drop the low-res drag cache and the drag flag: a teardown mid-drag leaves
+  // the disposer's reset path short-circuited (!wpEl), and dragLow stuck true
+  // would make every later setDragLow(true) a no-op — the drag-quality
+  // downgrade silently never engages again.
+  imgNat = null
+  lowResUrl = null
+  lowResFor = ''
+  dragLow = false
   setBlur(frameEl, 0); setBlur(sidebarEl, 0); setBlur(centerEl, 0); setBlur(rightEl, 0)
   if (frameEl !== null) frameEl.style.removeProperty('background')
   if (centerEl !== null) centerEl.style.removeProperty('background')

@@ -1,8 +1,8 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { CSSProperties, ComponentType } from 'react'
-import type { PartBlurs, PartStrokes, StrokeConfig, ThemeSectionProps } from '../../types'
+import type { PartBlurs, PartStrokes, StrokeConfig, ThemeStoreState, ThemeSectionProps } from '../../types'
 import { cfg, rStrokes } from '../../state'
-import { saveConfig } from '../../rpc'
+import { saveConfig, uploadRefusalText } from '../../rpc'
 import { setPartStroke } from '../../wallpaper'
 import { useBetterSidebar } from '../../env'
 import { LiveSlider } from '../LiveSlider'
@@ -61,7 +61,7 @@ function dotStyle(key: StrokeConfig['color'], s: StrokeConfig): CSSProperties {
 }
 
 export function FontPage({ p, notify }: { p: ThemeSectionProps; notify: (msg: string, ok?: boolean) => void }) {
-  const { t, setFont, removeFont, setFontEnabled, setStrokes } = p
+  const { t, setFont, removeFont, setFontEnabled, setStrokes, useStore } = p
   const hasBetterSidebar = useBetterSidebar()
   const fileRef = useRef<HTMLInputElement>(null)
 
@@ -73,6 +73,19 @@ export function FontPage({ p, notify }: { p: ThemeSectionProps; notify: (msg: st
     mime: cfg.fontMime, enabled: cfg.fontEnabled, name: null,
   }))
   const [busy, setBusy] = useState(false)
+
+  // Presets / imports / profile restores rewrite cfg.strokes and the font slot
+  // directly and only bump the store's metaRev. Without this re-derivation the
+  // local copies above keep rendering the values from before the change.
+  const metaRev = useStore((s: ThemeStoreState) => s.metaRev)
+  useEffect(() => {
+    setStrokesState(rStrokes())
+    setFontInfo(prev =>
+      prev.mime === cfg.fontMime && prev.enabled === cfg.fontEnabled
+        ? prev
+        : { mime: cfg.fontMime, enabled: cfg.fontEnabled, name: null },
+    )
+  }, [metaRev])
 
   const hasFont = fontInfo.mime !== null
   // After a reload only the MIME survives (the original filename is not
@@ -93,14 +106,14 @@ export function FontPage({ p, notify }: { p: ThemeSectionProps; notify: (msg: st
   const pickFont = async (file: File): Promise<void> => {
     setBusy(true)
     setFontInfo({ ...fontInfo, name: file.name })
-    const ok = await setFont(file)
+    const outcome = await setFont(file)
     setBusy(false)
-    if (ok) {
+    if (outcome.ok) {
       setFontInfo({ mime: cfg.fontMime, enabled: cfg.fontEnabled, name: file.name })
     } else {
       // Roll the optimistic name back to whatever is actually stored.
       setFontInfo({ mime: cfg.fontMime, enabled: cfg.fontEnabled, name: null })
-      notify(t('fontFail'), false)
+      notify(uploadRefusalText(outcome, t, 'fontFail'), false)
     }
   }
 

@@ -67,7 +67,10 @@ export const UI_CSS = `
 /* ── wheel card ──────────────────────────────────────────────────────────── */
 .dab-wheel-card{position:relative;display:flex;align-items:center;justify-content:center;gap:28px;flex-wrap:wrap;padding:24px 18px}
 .dab-wheel-glow{position:absolute;width:230px;height:230px;border-radius:50%;filter:blur(48px);opacity:.2;background:var(--c,#888);pointer-events:none;transition:background .4s ease}
-.dab-wheel{position:relative;cursor:crosshair;border-radius:50%;box-shadow:0 12px 32px -14px rgba(0,0,0,.4)}
+/* flex:none is load bearing, not cosmetic: the pointer maths reads client
+ * coordinates straight off this element's box, so any shrink below the 220px
+ * drawing surface would desynchronise the ring from the cursor. */
+.dab-wheel{position:relative;flex:none;cursor:crosshair;border-radius:50%;box-shadow:0 12px 32px -14px rgba(0,0,0,.4)}
 .dab-hint{font-size:11.5px;line-height:1.55;color:var(--dsw-alias-label-tertiary);padding:0 4px}
 
 /* ── precise color inputs ────────────────────────────────────────────────── */
@@ -121,7 +124,7 @@ export const UI_CSS = `
 .dab-slider::-moz-range-thumb{width:13px;height:13px;border-radius:50%;background:var(--dsw-alias-button-elevated-fill,#fff);border:2px solid var(--dsw-alias-brand-primary)}
 
 /* ── interface part cards ────────────────────────────────────────────────── */
-.dab-grid-parts{display:grid;grid-template-columns:repeat(auto-fill,minmax(256px,1fr));gap:13px}
+.dab-grid-parts{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(240px,100%),1fr));gap:13px}
 .dab-part-head{display:flex;align-items:center;gap:11px;margin-bottom:14px}
 .dab-part-ico{width:32px;height:32px;flex:none;border-radius:10px;display:grid;place-items:center;color:var(--dsw-alias-brand-primary);background:var(--dsw-alias-bg-layer-2);background:color-mix(in srgb,var(--dsw-alias-brand-primary) 12%,transparent)}
 .dab-part-name{font-size:13.5px;font-weight:600}
@@ -198,7 +201,7 @@ export const UI_CSS = `
 .dab-spin{animation:dab-rotate .7s cubic-bezier(.3,.7,.3,1) 1}
 
 /* ── profile page ────────────────────────────────────────────────────────── */
-.dab-profile-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(238px,1fr));gap:13px}
+.dab-profile-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(220px,100%),1fr));gap:13px}
 .dab-profile-ico{width:38px;height:38px;border-radius:11px;display:grid;place-items:center;margin-bottom:13px;color:var(--dsw-alias-brand-primary);background:var(--dsw-alias-bg-layer-2);background:color-mix(in srgb,var(--dsw-alias-brand-primary) 12%,transparent)}
 .dab-profile-title{font-size:14px;font-weight:650}
 .dab-profile-desc{font-size:12px;color:var(--dsw-alias-label-tertiary);line-height:1.55;margin:5px 0 15px}
@@ -207,7 +210,7 @@ export const UI_CSS = `
 
 /* ── presets / profiles / schedule / rotation ────────────────────────────── */
 .dab-row-head{display:flex;align-items:center;justify-content:space-between;gap:12px}
-.dab-preset-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
+.dab-preset-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(150px,100%),1fr));gap:10px}
 .dab-preset{display:flex;flex-direction:column;align-items:flex-start;gap:3px;padding:12px;border:1.5px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-1);border-radius:13px;cursor:pointer;font:inherit;text-align:left;transition:border-color .25s,transform .25s,box-shadow .25s;animation:dab-row-in .34s cubic-bezier(.22,1,.36,1) both;animation-delay:calc(var(--i,0) * 45ms)}
 .dab-preset:hover{transform:translateY(-2px);border-color:var(--dsw-alias-brand-primary);box-shadow:0 8px 22px -12px rgba(0,0,0,.3)}
 .dab-preset-dot{width:22px;height:22px;border-radius:50%;margin-bottom:4px;box-shadow:inset 0 0 0 1px rgba(0,0,0,.12),0 4px 10px -4px rgba(0,0,0,.35);background:var(--dsw-alias-bg-layer-2);display:grid;place-items:center;color:var(--dsw-alias-label-tertiary)}
@@ -234,7 +237,7 @@ export const UI_CSS = `
 .dab-schedule-wrap.is-open{grid-template-rows:1fr;visibility:visible;transition:grid-template-rows .42s cubic-bezier(.22,1,.36,1)}
 .dab-schedule-clip{overflow:hidden;min-height:0;opacity:0;transition:opacity .28s ease}
 .dab-schedule-wrap.is-open .dab-schedule-clip{opacity:1;transition:opacity .32s ease .1s}
-.dab-schedule-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;padding-top:12px}
+.dab-schedule-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(220px,100%),1fr));gap:16px;padding-top:12px}
 .dab-schedule-cell{min-width:0;animation:dab-row-in .34s cubic-bezier(.22,1,.36,1) both;animation-delay:calc(var(--i,0) * 60ms)}
 .dab-time-row{display:flex;flex-direction:column;gap:9px}
 .dab-time-label{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--dsw-alias-label-secondary,var(--dsw-alias-label-tertiary))}
@@ -270,6 +273,9 @@ export const UI_CSS = `
 .dab-crash{display:flex;flex-direction:column;gap:10px;align-items:center;padding:28px 18px;border:1px solid var(--dsw-alias-border-l2);border-radius:16px}
 .dab-crash-title{font-size:15px;font-weight:650}
 .dab-crash-desc{font-size:12px;color:var(--dsw-alias-label-tertiary);text-align:center;line-height:1.5}
+/* The crash cause: readable, scrollable, and clipped to a few lines so a long
+ * stack cannot push the reset button off the panel. */
+.dab-crash-detail{margin:0;max-width:min(520px,80vw);max-height:132px;overflow:auto;padding:8px 10px;border-radius:8px;background:var(--dsw-alias-bg-layer-2);border:1px solid var(--dsw-alias-border-l2);font-family:var(--dab-mono);font-size:10.5px;line-height:1.5;color:var(--dsw-alias-label-secondary,var(--dsw-alias-label-tertiary));text-align:left;white-space:pre-wrap;word-break:break-word}
 
 /* ── keyframes ───────────────────────────────────────────────────────────── */
 @keyframes dab-fade-in{from{opacity:0}to{opacity:1}}
@@ -285,6 +291,72 @@ export const UI_CSS = `
 @keyframes dab-zoom-in{from{opacity:0;transform:scale(.94) translateY(8px)}to{opacity:1;transform:none}}
 @keyframes dab-flow{to{background-position:300% 50%}}
 
+/* ── sidebar surface (a dsh-better-sidebar page) ─────────────────────────────
+ * Same shell, hosted in a panel that is handed a full-height column (the host's
+ * native tab body is height:100%) and whose width the user drags freely. So only
+ * THREE things are fixed here, all of them structural:
+ *   1. the shell fills the height and the page body owns the scroll
+ *      (flex:1 + min-height:0), so the panel stays one scrollable column instead
+ *      of pushing the whole tab into a scrollbar;
+ *   2. the nav is a rail ABOVE the page rather than beside it — a side rail would
+ *      spend 150px of a panel that is narrow by nature, and this way the page
+ *      keeps the full width for its own grids;
+ *   3. long tokens (paths, hex, URLs) may wrap instead of widening the panel.
+ *
+ * Everything else — grid columns, paddings, type scale, whether the cards lift on
+ * hover — is width-driven through the container queries below, which measure this
+ * shell (the .dab-root container, which declares container-type:inline-size) and
+ * not the viewport. A narrow sidebar compacts; a wide one falls back to the
+ * dialog's own spacing and multi-column grids, because at that point it *is* a
+ * dialog-sized surface. */
+[data-dab-surface="sidebar"].dab-root{height:100%;min-height:0;padding:12px 12px 0}
+[data-dab-surface="sidebar"] .dab-shell{display:flex;flex-direction:column;align-items:stretch;gap:11px;height:100%;min-height:0;max-width:none;padding-bottom:0}
+[data-dab-surface="sidebar"] .dab-nav{gap:0}
+[data-dab-surface="sidebar"] .dab-nav-list{flex-direction:row;gap:2px;overflow-x:auto;overflow-y:hidden;padding-bottom:1px}
+[data-dab-surface="sidebar"] .dab-nav-list::-webkit-scrollbar{display:none}
+[data-dab-surface="sidebar"] .dab-nav-ind{display:none}
+[data-dab-surface="sidebar"] .dab-nav-item{flex:none;height:32px;gap:7px;padding:0 10px;font-size:12px}
+[data-dab-surface="sidebar"] .dab-nav-item.is-active{background:var(--dsw-alias-bg-layer-2)}
+[data-dab-surface="sidebar"] .dab-page{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;padding-bottom:16px;scrollbar-width:thin}
+/* Last-resort safety for text that cannot wrap (paths, hex, URLs). */
+[data-dab-surface="sidebar"] .dab-hint,[data-dab-surface="sidebar"] .dab-part-name{overflow-wrap:anywhere}
+/* The panel's width is whatever the user dragged it to, so let the part cards
+ * fill as many columns as actually fit instead of hard-coding one. 170px is the
+ * narrowest a part card stays readable once its header can wrap (see the head
+ * rules below), which puts the second column at roughly a 380px panel — the
+ * default right-sidebar width. */
+[data-dab-surface="sidebar"] .dab-grid-parts{grid-template-columns:repeat(auto-fill,minmax(min(170px,100%),1fr));gap:12px}
+[data-dab-surface="sidebar"] .dab-types{grid-template-columns:repeat(auto-fit,minmax(min(150px,100%),1fr))}
+[data-dab-surface="sidebar"] .dab-card{padding:12px}
+[data-dab-surface="sidebar"] .dab-part-head{gap:8px;margin-bottom:10px}
+[data-dab-surface="sidebar"] .dab-part-ico{width:26px;height:26px;border-radius:8px}
+[data-dab-surface="sidebar"] .dab-part-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12.5px}
+[data-dab-surface="sidebar"] .dab-part-badge{padding:2px 7px;font-size:10px}
+
+/* Narrow panel: tighten the chrome so the content still has room. */
+@container (max-width:539px){
+  [data-dab-surface="sidebar"] .dab-page{gap:11px}
+  [data-dab-surface="sidebar"] .dab-h1{font-size:17px}
+  [data-dab-surface="sidebar"] .dab-desc{font-size:12px}
+  [data-dab-surface="sidebar"] .dab-orb-wrap{width:96px;height:96px}
+  [data-dab-surface="sidebar"] .dab-wheel-card{padding:14px 10px;gap:16px}
+  [data-dab-surface="sidebar"] .dab-wheel-glow{width:170px;height:170px}
+  /* Lift-on-hover is a dialog affordance; in a cramped scrolling panel it only
+   * adds jitter under the cursor. */
+  [data-dab-surface="sidebar"] .dab-card-hover:hover{transform:none;box-shadow:none}
+}
+/* Roomy panel: behave like the dialog again — its spacing, its type scale, and
+ * multi-column grids (a smaller track minimum than the dialog, because the page
+ * here is a few hundred px narrower than a dialog's content column). */
+@container (min-width:540px){
+  [data-dab-surface="sidebar"] .dab-shell{gap:16px}
+  [data-dab-surface="sidebar"] .dab-page{gap:13px}
+  [data-dab-surface="sidebar"] .dab-nav-item{height:34px;font-size:12.5px;padding:0 12px}
+  /* The shared ≤620px rule flattens the type cards to one column, which is right
+   * for a narrow phone-width dialog but wasteful in a roomy panel. */
+  [data-dab-surface="sidebar"] .dab-types{grid-template-columns:repeat(auto-fit,minmax(180px,1fr))}
+}
+
 /* ── responsive & motion preferences ─────────────────────────────────────── */
 @container (max-width:620px){
   .dab-shell{grid-template-columns:1fr;gap:14px}
@@ -298,6 +370,30 @@ export const UI_CSS = `
 }
 @container (min-width:621px){
   .dab-shell{grid-template-columns:158px minmax(0,1fr);gap:26px}
+}
+/* Phone: on a handset the settings dialog's content column shrinks to roughly
+ * the viewport, and the dialog-sized chrome (18px cards, 21px headings, a 118px
+ * orb, 24px paddings) stops fitting — cards end up wider than the column or the
+ * color row wraps into three cramped pieces. These are the same tightenings the
+ * sidebar surface applies at its own narrow widths, so a phone settings dialog
+ * and a narrow sidebar panel end up looking the same. */
+@container (max-width:480px){
+  .dab-shell{gap:10px}
+  .dab-page{gap:10px}
+  .dab-head{margin:0 0 2px}
+  .dab-h1{font-size:18px}
+  .dab-desc{font-size:12px}
+  .dab-card{padding:14px;border-radius:14px}
+  .dab-hero-accent{gap:16px}
+  .dab-orb-wrap{width:92px;height:92px}
+  .dab-wheel-card{padding:14px 10px;gap:16px}
+  .dab-wheel-glow{width:180px;height:180px}
+  /* Three fixed type-card columns need ~400px; two adaptive ones fit 320px. */
+  .dab-types{grid-template-columns:repeat(auto-fit,minmax(min(150px,100%),1fr))}
+  .dab-grid-parts{gap:11px}
+  .dab-part-head{margin-bottom:10px}
+  .dab-slider-block + .dab-slider-block{margin-top:10px}
+  .dab-footer{padding-top:10px}
 }
 @media (prefers-reduced-motion:reduce){
   .dab-root *,.dab-root *::before,.dab-root *::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}

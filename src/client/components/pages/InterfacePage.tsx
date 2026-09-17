@@ -1,5 +1,5 @@
 import type { CSSProperties, ComponentType } from 'react'
-import type { ThemeSectionProps, PartOpacities, PartBlurs } from '../../types'
+import type { ThemeSectionProps, ThemeStoreState, PartOpacities, PartBlurs } from '../../types'
 import { cfg, rOps, rSop, rBlurs, rChatTextOpacity, rTrajectoryOpacity, rPanelOpacity, rProducedOpacity } from '../../state'
 import { saveConfig } from '../../rpc'
 import { applyCustomTokens, applySettingsOverrides, setPartBlur, applyViewCards, applyTrajectoryOverrides, applyPanelOverrides, applyProduced } from '../../wallpaper'
@@ -36,7 +36,13 @@ const PARTS: PartDef[] = [
 ]
 
 export function InterfacePage({ p }: { p: ThemeSectionProps }) {
-  const { t, setOps, setBlurs, setSop, setPanelOp } = p
+  const { t, setOps, setBlurs, setSop, setPanelOp, useStore } = p
+  // Presets, theme imports and profile restores mutate cfg directly and only
+  // bump the store's metaRev — this page renders straight off cfg, so without
+  // this subscription it never re-renders and the sliders keep showing the
+  // values from before the change (while the interface itself already moved).
+  const metaRev = useStore((s: ThemeStoreState) => s.metaRev)
+  void metaRev
   // The right-sidebar + workbench-panel row only exists when the host is
   // actually running dsh-better-sidebar (it owns both markers the panel part
   // targets). Hide the option when that plugin is absent.

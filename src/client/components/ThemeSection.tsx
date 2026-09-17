@@ -1,14 +1,19 @@
 /**
- * dsh-any-background — settings section shell.
+ * dsh-any-background — appearance shell for the five pages.
  *
- * The host renders this section only while the settings dialog is open and the
- * section is the active nav entry, so mounting IS being visible. The section is
- * rendered INLINE inside the host settings dialog's content column (the host
- * provides the modal chrome); the shell is a left nav rail + page body. Only
- * the transient toast escapes through a Portal (the shell's container-type
- * containment would otherwise capture its fixed positioning).
+ * Two surfaces render this shell, and only the chrome differs:
+ *   · `settings` — injected into the host settings dialog's content column,
+ *     which supplies the modal frame (nav rail on the left, brand block, page
+ *     max-width, the dialog's own scrolling);
+ *   · `sidebar`  — a page inside dsh-better-sidebar, where the panel is much
+ *     narrower, is handed a full-height column, and has to own its own scroll
+ *     region. The brand block is dropped (the sidebar's tab bar already names
+ *     the page) and the rail turns into a compact row.
+ * The five pages themselves never branch on the surface: width-driven
+ * adaptation lives in the stylesheet's container queries, which measure the
+ * shell itself rather than assuming either surface's width.
  */
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ThemeSectionProps } from '../types'
 import { ensureUiCss, NAV_ITEM_H, NAV_GAP } from './ui.css'
 import { SunIcon, DropletIcon, LayersIcon, PhotoIcon, SlidersIcon, FontIcon, CheckIcon, AlertIcon } from './icons'
@@ -20,41 +25,52 @@ import { FontPage } from './pages/FontPage'
 import { BackgroundPage } from './pages/BackgroundPage'
 import { ProfilePage } from './pages/ProfilePage'
 
-export function ThemeSection(props: ThemeSectionProps) {
+/** Which chrome wraps the pages; see the module doc. */
+export type ThemeSurface = 'settings' | 'sidebar'
+
+export function ThemeSection(props: ThemeSectionProps & { surface?: ThemeSurface }) {
   ensureUiCss()
   const { t } = props
+  const surface = props.surface ?? 'settings'
   const [page, setPage] = useState(0)
   const [toast, setToast] = useState<{ msg: string; ok: boolean } | null>(null)
   const toastTimer = useRef<number | undefined>(undefined)
 
   useEffect(() => () => window.clearTimeout(toastTimer.current), [])
 
-  const notify = (msg: string, ok = true): void => {
+  const notify = useCallback((msg: string, ok = true): void => {
     setToast({ msg, ok })
     window.clearTimeout(toastTimer.current)
     toastTimer.current = window.setTimeout(() => setToast(null), 2600)
-  }
+  }, [])
 
-  const pages = [
+  // Stable element identities: an inline notify + inline array rebuilds every
+  // page element on each render, so a toast appearing (or any state tick)
+  // re-renders all five pages at once. That churn is what makes LiveSlider's
+  // sync effect fire mid-drag and yank the thumb back, so keep the elements
+  // memoized on the few props that actually change them.
+  const pages = useMemo(() => [
     { label: t('pageColor'), Icon: DropletIcon, node: <ColorPage p={props} notify={notify} /> },
     { label: t('pageInterface'), Icon: LayersIcon, node: <InterfacePage p={props} /> },
     { label: t('pageFont'), Icon: FontIcon, node: <FontPage p={props} notify={notify} /> },
-    { label: t('pageBackground'), Icon: PhotoIcon, node: <BackgroundPage p={props} /> },
+    { label: t('pageBackground'), Icon: PhotoIcon, node: <BackgroundPage p={props} notify={notify} /> },
     { label: t('pageProfile'), Icon: SlidersIcon, node: <ProfilePage p={props} notify={notify} /> },
-  ]
+  ], [t, props, notify])
 
   return (
     <ErrorBoundary t={t}>
-      <div className="dab-root">
+      <div className="dab-root" data-dab-surface={surface}>
         <div className="dab-shell">
           <nav className="dab-nav">
-            <div className="dab-brand">
-              <div className="dab-brand-tile"><SunIcon size={15} /></div>
-              <div>
-                <div className="dab-brand-name">{t('nav')}</div>
-                <div className="dab-brand-tag">{t('brandTag')}</div>
+            {surface === 'sidebar' ? null : (
+              <div className="dab-brand">
+                <div className="dab-brand-tile"><SunIcon size={15} /></div>
+                <div>
+                  <div className="dab-brand-name">{t('nav')}</div>
+                  <div className="dab-brand-tag">{t('brandTag')}</div>
+                </div>
               </div>
-            </div>
+            )}
             <div className="dab-nav-list">
               <div className="dab-nav-ind" style={{ transform: `translateY(${page * (NAV_ITEM_H + NAV_GAP)}px)` }} />
               {pages.map((pg, i) => (

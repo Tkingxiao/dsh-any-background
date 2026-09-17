@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import type { CSSProperties } from 'react'
 import type { ThemeSectionProps, ThemeStoreState } from '../../types'
-import { hsvToHsl, hslToRgb, hslToHsv } from '../../utils/color'
+import { hsvToHsl, hslToRgb, hslToHsv, rgbToHex } from '../../utils/color'
 import { ColorWheel } from '../ColorWheel'
 import { ColorInputs } from '../ColorInputs'
 import { ColorPicker } from '../ColorPicker'
@@ -12,10 +12,6 @@ const SWATCHES: Array<[number, number, number]> = [
   [356, 0.72, 0.55], [24, 0.78, 0.55], [44, 0.8, 0.55], [152, 0.62, 0.5],
   [174, 0.68, 0.48], [208, 0.72, 0.55], [252, 0.68, 0.6], [300, 0.64, 0.58],
 ]
-
-function toHex(rgb: [number, number, number]): string {
-  return '#' + rgb.map(v => Math.round(v).toString(16).padStart(2, '0')).join('')
-}
 
 export function ColorPage({ p, notify }: { p: ThemeSectionProps; notify: (msg: string, ok?: boolean) => void }) {
   const { t, hue, sat, lit, setColor, extractColor, setSchemeOverride, useStore } = p
@@ -30,7 +26,7 @@ export function ColorPage({ p, notify }: { p: ThemeSectionProps; notify: (msg: s
   const wheel = (color ?? [hue, sat, lit]) as [number, number, number]
   const [h, s, l] = hsvToHsl(wheel[0], wheel[1], wheel[2])
   const [r, g, b] = hslToRgb(h, s, l)
-  const hex = toHex([r, g, b])
+  const hex = rgbToHex([r, g, b])
   const soft = `rgba(${Math.round(r)},${Math.round(g)},${Math.round(b)},0.5)`
   const orbVars = { '--c': hex, '--c-soft': soft } as CSSProperties
 
@@ -105,7 +101,7 @@ export function ColorPage({ p, notify }: { p: ThemeSectionProps; notify: (msg: s
                 key={i} type="button"
                 className={`dab-swatch${on ? ' is-on' : ''}`}
                 style={{ background: `hsl(${sh} ${Math.round(ss * 100)}% ${Math.round(sl * 100)}%)` }}
-                title={toHex(hslToRgb(sh, ss, sl)).toUpperCase()}
+                title={rgbToHex(hslToRgb(sh, ss, sl)).toUpperCase()}
                 onClick={() => setColor(...hslToHsv(sh, ss, sl))} />
             )
           })}

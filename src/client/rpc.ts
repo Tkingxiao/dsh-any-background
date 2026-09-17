@@ -1,4 +1,4 @@
-import type { RpcResultLike } from './types'
+import type { RpcResultLike, UploadOutcome } from './types'
 import { cfg, adoptConfig, setWpUrl, setWpImageUrl, setWpVideoUrl, rWpImage } from './state'
 
 export const RPC_CHANNEL = '/dsh-any-background'
@@ -151,53 +151,86 @@ export async function setVideoFromUrl(url: string): Promise<{ ok: boolean; mime?
     : { ok: false, error: v?.error ?? 'failed' }
 }
 
+/** Map a refused upload response onto an outcome. The body has to be read: the
+ *  node half names the reason there, and an oversized transfer answers
+ *  `413 { ok:false, error:'too large', limit:'100 MB' }`. Checking `res.ok`
+ *  alone threw that away, so an oversized upload surfaced as a bare failure —
+ *  or, on the wallpaper path, as nothing at all. */
+async function refusedUpload(res: Response): Promise<UploadOutcome> {
+  const body = await res.json().catch(() => null) as { error?: unknown; limit?: unknown } | null
+  if (body?.error === 'too large') {
+    return {
+      ok: false,
+      refusal: {
+        kind: 'too-large',
+        status: res.status,
+        limit: typeof body.limit === 'string' ? body.limit : undefined,
+      },
+    }
+  }
+  return { ok: false, refusal: { kind: 'http', status: res.status } }
+}
+
+/** Localized description of a refusal for the panel's toast. `fallbackKey` is
+ *  the caller's own "…upload failed" string, used for anything that is not a
+ *  size refusal. */
+export function uploadRefusalText(o: UploadOutcome, t: (key: string) => string, fallbackKey: string): string {
+  if (o.refusal?.kind === 'too-large') {
+    const limit = o.refusal.limit ?? ''
+    return t('uploadTooLarge').split('{limit}').join(limit)
+  }
+  if (o.refusal !== undefined) return `${t(fallbackKey)} (http ${o.refusal.status})`
+  return t(fallbackKey)
+}
+
 /** Upload a video's raw bytes over HTTP (MIME in Content-Type, body untouched
  *  — no base64 inflation that would blow the RPC body limit on large clips). */
-export async function uploadVideo(blob: Blob, mime: string): Promise<boolean> {
+export async function uploadVideo(blob: Blob, mime: string): Promise<UploadOutcome> {
   try {
     const res = await fetch(VIDEO_UPLOAD_URL, {
       method: 'POST',
       headers: { 'Content-Type': mime || 'application/octet-stream' },
       body: blob,
     })
-    return res.ok
+    return res.ok ? { ok: true } : await refusedUpload(res)
   } catch (e) {
     console.warn('dsh-any-background: video upload failed', e)
-    return false
+    return { ok: false }
   }
 }
 
 /** Upload a wallpaper's raw bytes over HTTP — same streaming model as videos,
  *  original pixels preserved, zero base64 round-trips. */
-export async function uploadWallpaper(blob: Blob): Promise<boolean> {
+export async function uploadWallpaper(blob: Blob): Promise<UploadOutcome> {
   try {
     const res = await fetch(WALLPAPER_UPLOAD_URL, {
       method: 'POST',
       headers: { 'Content-Type': blob.type || 'image/jpeg' },
       body: blob,
     })
-    return res.ok
+    return res.ok ? { ok: true } : await refusedUpload(res)
   } catch (e) {
     console.warn('dsh-any-background: wallpaper upload failed', e)
-    return false
+    return { ok: false }
   }
 }
 
 /** Upload a custom font's raw bytes over HTTP; resolves the sniffed MIME on
- *  success (the server validates the container from magic bytes) or null. */
-export async function uploadFont(blob: Blob): Promise<string | null> {
+ *  success, or a refusal the caller can report (an oversized font used to be
+ *  indistinguishable from a corrupt one). */
+export async function uploadFont(blob: Blob): Promise<UploadOutcome & { mime?: string }> {
   try {
     const res = await fetch(FONT_UPLOAD_URL, {
       method: 'POST',
       headers: { 'Content-Type': blob.type || 'application/octet-stream' },
       body: blob,
     })
-    if (!res.ok) return null
+    if (!res.ok) return await refusedUpload(res)
     const data = await res.json().catch(() => null) as { mime?: string } | null
-    return typeof data?.mime === 'string' ? data.mime : 'font/ttf'
+    return { ok: true, mime: typeof data?.mime === 'string' ? data.mime : 'font/ttf' }
   } catch (e) {
     console.warn('dsh-any-background: font upload failed', e)
-    return null
+    return { ok: false }
   }
 }
 

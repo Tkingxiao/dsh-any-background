@@ -126,6 +126,10 @@ export const ColorWheel = memo(function ColorWheel({ hue, sat, lit, onChange }: 
   // trigger a React state flush + onChange on every pixel.
   const pendingRef = useRef<{ h: number; s: number; l: number } | null>(null)
   const rafRef = useRef<number | null>(null)
+  /** Unmount-time cleanup for a drag that never saw its mouseup (panel closed
+   *  mid-drag): without it the document listeners stay attached forever and the
+   *  pending rAF keeps calling setState on a dead component. */
+  const dragCleanupRef = useRef<(() => void) | null>(null)
   const flushPending = useCallback(() => {
     rafRef.current = null
     const p = pendingRef.current
@@ -162,9 +166,24 @@ export const ColorWheel = memo(function ColorWheel({ hue, sat, lit, onChange }: 
         schedule(colRef.current.hue, s, l)
       }
     }
-    const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp) }
-    document.addEventListener('mousemove', onMove); document.addEventListener('mouseup', onUp)
+    const stopDrag = () => {
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', stopDrag)
+      dragCleanupRef.current = null
+    }
+    dragCleanupRef.current = stopDrag
+    document.addEventListener('mousemove', onMove); document.addEventListener('mouseup', stopDrag)
   }, [schedule])
+
+  // Cancel the pending rAF and any live drag listeners on unmount (see
+  // dragCleanupRef above): a drag ended by closing the panel never fires mouseup.
+  useEffect(() => {
+    return () => {
+      if (rafRef.current !== null) { cancelAnimationFrame(rafRef.current); rafRef.current = null }
+      pendingRef.current = null
+      dragCleanupRef.current?.()
+    }
+  }, [])
 
   return <canvas ref={cvsRef} width={WHEEL_SIZE} height={WHEEL_SIZE} className="dab-wheel" onMouseDown={onDown} />
 })

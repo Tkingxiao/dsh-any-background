@@ -19,6 +19,15 @@ export function LiveSlider({ min, max, step, def, fmt, label, onInput, onChange 
     el.style.setProperty('--pct', String(((v - min) / (max - min)) * 100))
   }
 
+  // Read the formatter through a ref: every caller passes an inline arrow
+  // (`v => `${v}%``), whose identity changes per render. Listing `fmt` in the
+  // effect deps would re-run this sync on EVERY parent render — and since the
+  // sync writes inputRef.value from `def`, a mid-drag re-render (the 30s
+  // schedule tick, a toast, a store sync) yanks the thumb back to the old
+  // committed value. Only the numeric bounds may re-sync, never the closure.
+  const fmtRef = useRef(fmt)
+  fmtRef.current = fmt
+
   // Controlled sync: keep the knob and label aligned with the canonical prop
   // so external updates (presets, regeneration, imports) never leave it stale.
   useEffect(() => {
@@ -26,8 +35,8 @@ export function LiveSlider({ min, max, step, def, fmt, label, onInput, onChange 
       inputRef.current.value = String(def)
       paint(inputRef.current, def)
     }
-    if (valRef.current) valRef.current.textContent = fmt(def)
-  }, [def, fmt, min, max])
+    if (valRef.current) valRef.current.textContent = fmtRef.current(def)
+  }, [def, min, max])
 
   const apply = (v: number): void => {
     if (inputRef.current) {

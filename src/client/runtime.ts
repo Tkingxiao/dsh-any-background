@@ -20,7 +20,7 @@ interface StoreModule {
   defineStore: any
 }
 
-function resolveStore(): StoreModule {
+function resolveStore(): StoreModule | null {
   try {
     // New harness (dsh >= 0.1.2): dedicated store package after the runtime
     // was split. Missing here means the loader table has no such row → throw.
@@ -28,8 +28,18 @@ function resolveStore(): StoreModule {
   } catch {
     /* fall through to the legacy composite runtime below */
   }
-  // Legacy harness (npm release): composite runtime, /client subpath.
-  return require('@deepseek-ai/dsh-client-runtime/client') as StoreModule
+  try {
+    // Legacy harness (npm release): composite runtime, /client subpath.
+    return require('@deepseek-ai/dsh-client-runtime/client') as StoreModule
+  } catch {
+    // Neither resolved (host variant with no store module at all). This MUST
+    // not throw at import time: this module is evaluated while the client
+    // bundle boots, so a throw here kills the whole plugin — no theme, no
+    // wallpaper, nothing. Callers degrade to "no settings panel" instead.
+    console.warn('dsh-any-background: no client store module resolved on this host; the settings panel will be disabled')
+    return null
+  }
 }
 
-export const defineStore: any = resolveStore().defineStore
+/** null when neither store package resolves on this host (see resolveStore). */
+export const defineStore: any = resolveStore()?.defineStore ?? null

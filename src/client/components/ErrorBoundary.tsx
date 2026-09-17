@@ -35,10 +35,16 @@ export class ErrorBoundary extends Component<Props, State> {
 
   override render() {
     if (this.state.error) {
+      // Show the cause, not just the apology. The host's own console holds the
+      // full stack, but a plugin that repaints the settings panel has no other
+      // way to tell the user why it went blank — and "please open devtools" is a
+      // poor answer to "it crashed".
+      const detail = this.state.error.stack ?? `${this.state.error.name}: ${this.state.error.message}`
       return (
         <div className="dab-crash">
           <div className="dab-crash-title">{this.props.t('crashTitle')}</div>
           <div className="dab-crash-desc">{this.props.t('crashDesc')}</div>
+          <pre className="dab-crash-detail">{detail}</pre>
           <button type="button" className="dab-btn" onClick={this.reset}>{this.props.t('crashReset')}</button>
         </div>
       )

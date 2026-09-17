@@ -40,6 +40,10 @@ function NumField({ label, value, min, max, step, onChange }: {
         onBlur={() => { focused.current = false; setText(String(value)) }}
         onChange={e => {
           setText(e.target.value)
+          // An emptied field is Number('') === 0 — a finite value — so without
+          // this guard clearing the box for a moment would commit the channel
+          // to its minimum and yank the color under the user's fingers.
+          if (e.target.value === '') return
           const v = Number(e.target.value)
           if (Number.isFinite(v)) onChange(clamp(v, min, max))
         }}

@@ -17,6 +17,13 @@ export function hslToHsv(h: number, s: number, l: number): [number, number, numb
   return [h, sv, v]
 }
 
+/** Format an RGB triple as a lowercase hex string. Channels are rounded: some
+ *  callers feed float channels and a fractional byte would produce invalid
+ *  hex. */
+export function rgbToHex(rgb: [number, number, number]): string {
+  return '#' + rgb.map(v => Math.round(v).toString(16).padStart(2, '0')).join('')
+}
+
 let tokensCacheKey = ''
 let tokensCache: { colorScheme: 'light' | 'dark'; tokens: Record<string, string> } | null = null
 

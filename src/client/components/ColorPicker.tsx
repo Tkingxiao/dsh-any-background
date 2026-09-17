@@ -1,13 +1,9 @@
 import { useRef, useState, useEffect, useCallback } from 'react'
-import { rgbToHsl, hslToHsv } from '../utils/color'
+import { rgbToHsl, hslToHsv, rgbToHex } from '../utils/color'
 import { Portal } from './Portal'
 
 const MAG_SIZE = 96
 const MAG_ZOOM = 8
-
-function toHex(rgb: [number, number, number]): string {
-  return '#' + rgb.map(v => v.toString(16).padStart(2, '0')).join('')
-}
 
 /**
  * Eyedropper modal: shows the wallpaper full-bleed (no drag/zoom) and lets the
@@ -42,7 +38,10 @@ export function ColorPicker({ url, t, onPick, onClose }: {
     canvas.height = imgRef.current.naturalHeight
     const ctx = canvas.getContext('2d')
     if (ctx) ctx.drawImage(imgRef.current, 0, 0)
-  }, [ready])
+    // Deps include url (not just ready): an upload completes by rewriting the
+    // store URL while `ready` stays true, and without this dependency the
+    // canvas keeps the old pixels while sampleAt maps coordinates onto them.
+  }, [ready, url])
 
   const sampleAt = useCallback((clientX: number, clientY: number) => {
     const canvas = canvasRef.current
@@ -110,8 +109,8 @@ export function ColorPicker({ url, t, onPick, onClose }: {
             onClick={onClick} />
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 260 }}>
-          <div style={{ width: 28, height: 28, borderRadius: 8, border: '1px solid rgba(255,255,255,0.4)', background: hover ? toHex(hover.rgb) : 'transparent' }} />
-          <div style={{ color: '#fff', fontSize: 13, fontFamily: 'var(--dab-mono, monospace)' }}>{hover ? `${toHex(hover.rgb)} · rgb(${hover.rgb.join(', ')})` : '—'}</div>
+          <div style={{ width: 28, height: 28, borderRadius: 8, border: '1px solid rgba(255,255,255,0.4)', background: hover ? rgbToHex(hover.rgb) : 'transparent' }} />
+          <div style={{ color: '#fff', fontSize: 13, fontFamily: 'var(--dab-mono, monospace)' }}>{hover ? `${rgbToHex(hover.rgb)} · rgb(${hover.rgb.join(', ')})` : '—'}</div>
         </div>
         <div style={{ display: 'flex', gap: 10 }}>
           <button type="button" className="dab-btn" onClick={onClose}>{t('pickerClose')}</button>

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import type { ThemeSectionProps, ThemeStoreState, BackgroundType, GeneratedBgParams, BgMode } from '../../types'
 import { cfg, rWop, rBl, rBgMode } from '../../state'
-import { saveConfig, setWallpaperFromUrl, uploadWallpaper, WALLPAPER_SERVE_URL } from '../../rpc'
+import { saveConfig, setWallpaperFromUrl, uploadWallpaper, uploadRefusalText, WALLPAPER_SERVE_URL } from '../../rpc'
 import { applyWp, setWpOpacity, setWpBlur, pauseGeneratedBg, resumeGeneratedBg } from '../../wallpaper'
 import { defaultParamsFor } from '../../utils/bg-generators'
 import { BgEditor } from '../BgEditor'
@@ -18,7 +18,7 @@ const BG_MODES: Array<{ mode: BgMode; labelKey: string }> = [
   { mode: 'center', labelKey: 'bgModeCenter' },
 ]
 
-export function BackgroundPage({ p }: { p: ThemeSectionProps }) {
+export function BackgroundPage({ p, notify }: { p: ThemeSectionProps; notify: (msg: string, ok?: boolean) => void }) {
   const { t, setWpFromServer, setVideo, setWop, setBl, setBgType, setGeneratedBg, regenerateBg, setRegenerateOnReload, setRotation, addRotationItems, removeRotationItem, rotateNow, setVideoFromUrl, useStore } = p
   // Field-level store subscriptions: dragging sliders / picking colors changes
   // only the color fields, and the background page has no reason to re-render
@@ -41,8 +41,14 @@ export function BackgroundPage({ p }: { p: ThemeSectionProps }) {
   const [urlBusy, setUrlBusy] = useState(false)
   const [urlErr, setUrlErr] = useState<string | null>(null)
   // Layout mode is owned by cfg (persisted on click); local mirror only so
-  // the chip row re-renders on selection.
+  // the chip row re-renders on selection. It must re-derive from cfg whenever
+  // the store's bgRev moves: importTheme rewrites cfg.bgMode through
+  // adoptConfig without touching this local state, which would otherwise leave
+  // the chips — and the `mode === 'fit'` editor gate below — showing the
+  // abandoned layout mode.
+  const bgRev = useStore((s: ThemeStoreState) => s.bgRev)
   const [mode, setModeState] = useState<BgMode>(rBgMode())
+  useEffect(() => { setModeState(rBgMode()) }, [bgRev])
 
   const isVideo = backgroundType === 'video'
   const isStatic = backgroundType === 'image' || isVideo
@@ -55,27 +61,31 @@ export function BackgroundPage({ p }: { p: ThemeSectionProps }) {
   const genPreset = generatedBg !== null && generatedBg.type !== 'mesh' ? generatedBg.preset : undefined
   useEffect(() => { setPaused(false) }, [activeGenType, genPreset, generatedBg?.seed])
 
-  const onFileSelect = (f: File) => {
+  const onFileSelect = async (f: File): Promise<void> => {
     if (f.type.startsWith('video/')) {
       // Hand the raw file over directly: it streams to disk over the
       // binary upload route. A data-URL detour would inflate the bytes by a
-      // third (base64) and blow the RPC body limit on large clips.
-      setVideo(f, f.type)
+      // third (base64) and blow the RPC body limit on large clips. The clip
+      // plays from a local object URL straight away, so only a refusal of the
+      // background upload needs saying — silently it would just fail to persist
+      // and be gone after a reload.
+      const outcome = await setVideo(f, f.type)
+      if (!outcome.ok) notify(uploadRefusalText(outcome, t, 'videoUploadFail'), false)
       return
     }
     // Stream the original bytes straight to disk (no base64 round-trip, no
     // re-encoding), then point the wallpaper at the serve URL. The browser
     // decodes it natively like any <img>.
-    void uploadWallpaper(f).then(ok => {
-      if (ok) setWpFromServer(WALLPAPER_SERVE_URL)
-    })
+    const outcome = await uploadWallpaper(f)
+    if (outcome.ok) setWpFromServer(WALLPAPER_SERVE_URL)
+    else notify(uploadRefusalText(outcome, t, 'bgUploadFail'), false)
   }
 
   const onDrop = (e: React.DragEvent) => {
     e.preventDefault()
     setDragOver(false)
     const f = e.dataTransfer.files?.[0]
-    if (f && (f.type.startsWith('image/') || f.type.startsWith('video/'))) onFileSelect(f)
+    if (f && (f.type.startsWith('image/') || f.type.startsWith('video/'))) void onFileSelect(f)
   }
 
   const applyUrl = async () => {
@@ -447,7 +457,7 @@ export function BackgroundPage({ p }: { p: ThemeSectionProps }) {
 
       <input ref={fileRef} type="file" accept="image/*,video/*" style={{ display: 'none' }} onChange={e => {
         const f = e.target.files?.[0]; if (!f) return
-        onFileSelect(f); e.target.value = ''
+        void onFileSelect(f); e.target.value = ''
       }} />
 
       {/* Background editor modal (image/video + fit mode only). For videos

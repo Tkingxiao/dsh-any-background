@@ -517,13 +517,62 @@ async function ensureDir(): Promise<void> {
   }
 }
 
+// Parsed-config cache keyed on (mtime, size): the video/font serve routes and
+// the read RPC all resolve their slot through readConfig, and a Range seek on
+// a looping video otherwise re-reads and re-parses the JSON on every request.
+// Invalidation is mtime-driven, plus an explicit drop in writeConfig below.
+let configCacheKey: { mtimeMs: number; size: number } | null = null
+let configCacheValue: ThemeConfig | null = null
+
+function dropConfigCache(): void {
+  configCacheKey = null
+  configCacheValue = null
+}
+
 async function readConfig(): Promise<ThemeConfig> {
   await ensureDir()
+  const file = configPath()
+  // Only a genuine PARSE failure may count as corruption. A stat/read failure
+  // — the missing file of a first run, or a transient EBUSY/EPERM while
+  // another process holds the file — must never be treated as one: archiving a
+  // perfectly good config under a timestamped name makes the next `read` see
+  // "no config, first run" and write the defaults over it, which is exactly the
+  // silent settings wipe the atomic write above exists to prevent.
+  let text: string
+  let key: { mtimeMs: number; size: number }
   try {
-    const raw = await readFile(configPath(), 'utf8')
-    return normalizeConfig(JSON.parse(raw))
+    const st = await stat(file)
+    key = { mtimeMs: st.mtimeMs, size: st.size }
+    if (configCacheKey !== null && configCacheValue !== null
+      && configCacheKey.mtimeMs === key.mtimeMs && configCacheKey.size === key.size) {
+      return configCacheValue
+    }
+    text = await readFile(file, 'utf8')
   } catch {
-    // First run (no file yet) or unreadable config — fall back to defaults.
+    // Absent or momentarily unreadable: serve the defaults and leave whatever
+    // is on disk untouched (a file that exists also keeps `firstRun` false, so
+    // nothing overwrites it either).
+    dropConfigCache()
+    return { ...DEFAULT_CONFIG }
+  }
+  try {
+    const parsed = normalizeConfig(JSON.parse(text))
+    configCacheKey = key
+    configCacheValue = parsed
+    return parsed
+  } catch (e) {
+    // Truncated or corrupt JSON (a killed write, a bad editor save). Silently
+    // falling back to the defaults would quietly wipe every setting, so archive
+    // the bad bytes under a timestamped name first — the user keeps them for
+    // manual recovery and the log says what happened.
+    try {
+      const into = `${file}.corrupt-${Date.now()}`
+      await rename(file, into)
+      console.warn(`dsh-any-background: theme-config.json was corrupt, archived to "${into}" and reset to defaults`, e)
+    } catch {
+      // Unmovable file: the defaults below are still the right answer.
+    }
+    dropConfigCache()
     return { ...DEFAULT_CONFIG }
   }
 }
@@ -561,15 +610,28 @@ function warnUnknownConfigKeys(raw: unknown, normalized: ThemeConfig): void {
   }
 }
 
+// Write through a temp file + same-volume rename: a crash or kill mid-write
+// otherwise leaves a truncated JSON on disk, and readConfig's fallback then
+// silently resets every setting to the defaults (which is exactly how a
+// "my whole theme reverted" report looks). rename() is atomic on the same
+// filesystem, so the reader always sees either the old or the new full file.
 async function writeConfig(config: ThemeConfig): Promise<boolean> {
   await ensureDir()
+  const tmp = `${configPath()}.tmp`
   try {
     const normalized = normalizeConfig(config)
     warnUnknownConfigKeys(config, normalized)
-    await writeFile(configPath(), JSON.stringify(normalized, null, 2), 'utf8')
+    await writeFile(tmp, JSON.stringify(normalized, null, 2), 'utf8')
+    await rename(tmp, configPath())
+    // mtime would catch this too, but not under the coarse mtime granularity
+    // some filesystems hand back for back-to-back writes.
+    dropConfigCache()
     return true
   } catch (e) {
     console.error(`dsh-any-background: failed to write "${CONFIG_FILE}"`, e)
+    // A failed write must not leave a half-written temp file next to the real
+    // config: it would be picked up by any later scan of the data directory.
+    try { await rm(tmp, { force: true }) } catch { /* best effort */ }
     return false
   }
 }
@@ -612,6 +674,18 @@ function sniffImageMime(buf: Buffer): string {
   return 'image/jpeg'
 }
 
+/** True when the leading bytes are a container the serve route knows how to
+ *  sniff. The Content-Type only reflects what the server claims; validating the
+ *  bytes themselves rejects a mislabeled or hostile payload with a clear error
+ *  instead of persisting a file that renders as a broken image. */
+function isImageBytes(buf: Buffer): boolean {
+  if (buf.length >= 4 && buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) return true
+  if (buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return true
+  if (buf.length >= 6 && buf[0] === 0x47 && buf[1] === 0x49 && buf[2] === 0x46) return true
+  if (buf.length >= 12 && buf[0] === 0x52 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x46 && buf[8] === 0x57 && buf[9] === 0x45 && buf[10] === 0x42 && buf[11] === 0x50) return true
+  return false
+}
+
 /** Download a wallpaper from a network URL and persist it into the local
  *  wallpaper.jpg slot (replacing whatever was stored), so type switches and
  *  rotation keep working through the single active slot. The response carries
@@ -646,6 +720,10 @@ async function writeWallpaperFromUrl(url: string | null): Promise<{ ok: boolean;
   } catch {
     return { ok: false, error: 'read failed' }
   }
+  // The declared Content-Type said image/*, but the bytes must agree: a
+  // mismatched or hostile payload gets a clear error instead of a slot that
+  // later renders as a broken image.
+  if (!isImageBytes(buf)) return { ok: false, error: 'not an image' }
   // Write the downloaded bytes straight to disk — no base64 string round-trip.
   await ensureDir()
   try {
@@ -801,19 +879,21 @@ async function writeVideoFromUrl(url: string | null): Promise<{ ok: boolean; mim
     const out = createWriteStream(tmp)
     let received = 0
     let failed = false
-    const fail = (): void => {
-      if (failed) return
-      failed = true
-      out.destroy()
-      void rm(tmp, { force: true })
-    }
     const nodeStream = Readable.fromWeb(res.body as any)
     // The 2 GB cap makes a hard total-time budget meaningless on slower links;
     // arm an inactivity watchdog that refreshes on every chunk instead.
     let idle: NodeJS.Timeout | null = null
+    const clearIdle = (): void => { if (idle !== null) { clearTimeout(idle); idle = null } }
     const pokeIdle = (): void => {
-      if (idle) clearTimeout(idle)
+      clearIdle()
       idle = setTimeout(() => { nodeStream.destroy(); fail() }, VIDEO_FETCH_IDLE_TIMEOUT)
+    }
+    const fail = (): void => {
+      if (failed) return
+      failed = true
+      clearIdle()
+      out.destroy()
+      rmWhenClosed(out, tmp)
     }
     nodeStream.on('data', (chunk: Buffer) => {
       pokeIdle()
@@ -823,7 +903,7 @@ async function writeVideoFromUrl(url: string | null): Promise<{ ok: boolean; mim
         fail()
       }
     })
-    nodeStream.on('end', () => { if (idle) clearTimeout(idle); idle = null })
+    nodeStream.on('end', clearIdle)
     nodeStream.on('aborted', fail)
     nodeStream.on('error', fail)
     out.on('error', fail)
@@ -879,6 +959,30 @@ async function writeVideo(dataUrl: string | null): Promise<boolean> {
     console.error('dsh-any-background: failed to write the background video', e)
     return false
   }
+}
+
+/** Drop a partial upload's temp file once its sink is really closed. Windows
+ *  refuses to unlink a file that still has an open handle, so removing it in the
+ *  same tick as `out.destroy()` silently fails and leaves the aborted transfer
+ *  on disk (up to the full limit) until some later upload overwrites it. */
+function rmWhenClosed(out: any, tmp: string): void {
+  const drop = (): void => { void rm(tmp, { force: true }) }
+  if (out.closed === true) drop()
+  else out.once('close', drop)
+}
+
+/** Reject an oversized upload with a real status and tear the transfer down.
+ *  The bare req.destroy()+fail() path left the client holding a network error
+ *  with no way to tell "too large" from "connection died". The body is machine
+ *  readable (`error` + the enforced `limit`) so the panel can phrase the
+ *  refusal in the user's own language, with `message` kept for logs. */
+function rejectOversizedUpload(req: any, res: any, fail: () => void, limit: string): void {
+  try {
+    res.writeHead(413, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ ok: false, error: 'too large', limit, message: `too large (limit ${limit})` }))
+  } catch { /* response already sent */ }
+  fail()
+  try { req.destroy() } catch { /* already gone */ }
 }
 
 /** Stream the stored video: correct MIME, no caching, Range answers so the
@@ -961,16 +1065,16 @@ async function handleVideoUpload(req: any, res: any): Promise<void> {
       if (failed) return
       failed = true
       out.destroy()
-      void rm(tmp, { force: true })
+      rmWhenClosed(out, tmp)
     }
     req.on('aborted', fail)
     req.on('error', fail)
     req.on('data', (chunk: Buffer) => {
+      // Idempotent: the destroy below needs a moment, and every chunk that
+      // still arrives would otherwise re-send the 413 on a finished response.
+      if (failed) return
       received += chunk.byteLength
-      if (received > VIDEO_UPLOAD_MAX) {
-        req.destroy()
-        fail()
-      }
+      if (received > VIDEO_UPLOAD_MAX) rejectOversizedUpload(req, res, fail, '2 GB')
     })
     out.on('error', () => {
       fail()
@@ -1070,7 +1174,7 @@ async function handleWallpaperUpload(req: any, res: any): Promise<void> {
       if (failed) return
       failed = true
       out.destroy()
-      void rm(tmp, { force: true })
+      rmWhenClosed(out, tmp)
     }
     req.on('aborted', fail)
     req.on('error', fail)
@@ -1079,11 +1183,10 @@ async function handleWallpaperUpload(req: any, res: any): Promise<void> {
       try { res.writeHead(500); res.end() } catch { /* response already sent */ }
     })
     req.on('data', (chunk: Buffer) => {
+      // Idempotent (see the video upload above).
+      if (failed) return
       received += chunk.byteLength
-      if (received > WALLPAPER_UPLOAD_MAX) {
-        req.destroy()
-        fail()
-      }
+      if (received > WALLPAPER_UPLOAD_MAX) rejectOversizedUpload(req, res, fail, '100 MB')
     })
     req.pipe(out)
     out.on('finish', async () => {
@@ -1157,7 +1260,7 @@ async function handleFontUpload(req: any, res: any): Promise<void> {
       if (failed) return
       failed = true
       out.destroy()
-      void rm(tmp, { force: true })
+      rmWhenClosed(out, tmp)
     }
     req.on('aborted', fail)
     req.on('error', fail)
@@ -1166,11 +1269,10 @@ async function handleFontUpload(req: any, res: any): Promise<void> {
       try { res.writeHead(500); res.end() } catch { /* response already sent */ }
     })
     req.on('data', (chunk: Buffer) => {
+      // Idempotent (see the video upload above).
+      if (failed) return
       received += chunk.byteLength
-      if (received > FONT_UPLOAD_MAX) {
-        req.destroy()
-        fail()
-      }
+      if (received > FONT_UPLOAD_MAX) rejectOversizedUpload(req, res, fail, '100 MB')
     })
     req.pipe(out)
     out.on('finish', async () => {
@@ -1294,10 +1396,21 @@ async function advanceRotationIfDue(): Promise<boolean> {
     console.error('dsh-any-background: failed to advance the rotation pool', e)
     return false
   }
-  cfg.rotation = { ...rot, current: idx, lastRotate: now.toISOString() }
+  // Persist only the rotation fields, merged into the FRESHEST on-disk config:
+  // the browser half saves slider moves on a 250 ms debounce, and writing the
+  // snapshot read at the top of this function (before the multi-MB file copy)
+  // would clobber a save that landed in that window. Reading back-to-back with
+  // the write minimizes the window, and only rotation is overwritten. The merge
+  // builds a COPY — readConfig hands back its cached object, and mutating that
+  // in place would leave the cache describing a rotation the disk never got if
+  // the write below fails.
+  const merged: ThemeConfig = {
+    ...(await readConfig()),
+    rotation: { ...rot, current: idx, lastRotate: now.toISOString() },
+  }
   // A failed write means lastRotate/current never land on disk — report "not
   // advanced" so the client-side fallback performs (and persists) the switch.
-  if (!(await writeConfig(cfg))) return false
+  if (!(await writeConfig(merged))) return false
   return true
 }
 
@@ -1375,6 +1488,16 @@ export function apply(ctx: any): void {
           if (req.method !== 'POST') {
             res.writeHead(405, { 'Content-Type': 'application/json' })
             res.end(JSON.stringify({ ok: false, error: { code: 'dsh-any-background/bad-request', message: 'expected POST', details: {} } }))
+            return
+          }
+          // Byte-carrying payloads (video / wallpaper / font uploads) stream to
+          // disk over their own HTTP routes; this channel carries JSON only.
+          // Reject an oversized declared length BEFORE buffering it into memory:
+          // the in-loop cap below still guards a lying or chunked sender.
+          const declaredLen = Number(req.headers['content-length'] ?? '')
+          if (Number.isFinite(declaredLen) && declaredLen > RPC_BODY_MAX) {
+            res.writeHead(413, { 'Content-Type': 'application/json', connection: 'close' })
+            res.end(JSON.stringify({ ok: false, error: { code: 'dsh-any-background/too-large', message: `body exceeds ${RPC_BODY_MAX} bytes; uploads must use the binary routes`, details: {} } }))
             return
           }
           const pathname = new URL(req.url ?? '/', 'http://dsh.internal').pathname

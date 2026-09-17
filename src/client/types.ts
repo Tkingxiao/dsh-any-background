@@ -20,9 +20,31 @@ export interface SlotsService {
 export interface ConnectionService {
   rpc: { call(channel: string, endpoint: string, payload: unknown): Promise<unknown> }
 }
+/**
+ * An observable store INSTANCE — what `defineStore` returns on newer host
+ * builds. Older ones (`@deepseek-ai/dsh-client-store` 0.1.2-alpha.x) instead
+ * return a declaration `{ spec, create(scopeKey) }` that the renderer
+ * instantiates per scope, so the plugin must normalize before it reads
+ * `getSnapshot` or `actions` off the object it asked for.
+ */
+export interface StoreInstance<S = ThemeStoreState> {
+  getSnapshot: () => S
+  subscribe: (onChange: () => void) => () => void
+  /** Draft-baked actions: the same object the settings slot hands to `inject`. */
+  actions: BoundActions
+}
+
 export interface Ctx {
   effect(cb: () => unknown, label?: string): void
   on(event: string, cb: (...a: any[]) => void): () => void
+  /**
+   * Cordis dynamic injection: runs the callback once every named service is
+   * available (immediately when it already is, later when the providing plugin
+   * mounts after this one) and never when it never arrives. Optional in this
+   * declaration because the plugin only relies on it for the better-sidebar
+   * integration, which must degrade to a no-op on a build that lacks it.
+   */
+  inject?(deps: string[], cb: (scope: Ctx) => void): unknown
   locale: LocaleService; slots: SlotsService; theme: ThemeService; connection: ConnectionService
 }
 
@@ -256,6 +278,15 @@ export interface ThemeStoreState {
 }
 
 /** Props the slots host injects into the theme section. */
+/** Why a binary upload (wallpaper / video / font) was refused. The node half
+ *  tags the reason and echoes the limit it enforced for a size refusal, so the
+ *  panel can say what happened in the user's own language — a bare "the fetch
+ *  failed" left an oversized wallpaper looking like a silent no-op. */
+export interface UploadOutcome {
+  ok: boolean
+  refusal?: { kind: 'too-large' | 'http'; status: number; limit?: string }
+}
+
 export interface ThemeSectionProps {
   t: (key: string) => string
   /** Wheel/input color in HSV space. */
@@ -269,13 +300,15 @@ export interface ThemeSectionProps {
   setWpFromServer: (url: string | null) => void
   /** Set/remove the background video. Prefers the raw Blob (streamed to
    *  disk over the binary upload route); a data URL string is the small-file
-   *  legacy path through RPC. */
-  setVideo: (source: Blob | string | null, mime: string | null) => void
+   *  legacy path through RPC. Resolves with the upload's outcome so the caller
+   *  can report a refusal (the local playback starts either way). */
+  setVideo: (source: Blob | string | null, mime: string | null) => Promise<UploadOutcome>
   setOps: (ops: PartOpacities) => void
   setBlurs: (blurs: PartBlurs) => void
   setStrokes: (strokes: PartStrokes) => void
-  /** Upload a font file (raw bytes stream to disk); resolves once stored. */
-  setFont: (file: File) => Promise<boolean>
+  /** Upload a font file (raw bytes stream to disk); resolves with the stored
+   *  MIME on success, or a refusal the caller can report. */
+  setFont: (file: File) => Promise<UploadOutcome>
   /** Remove the stored custom font. */
   removeFont: () => void
   /** Toggle the stored custom font on/off without deleting it. */

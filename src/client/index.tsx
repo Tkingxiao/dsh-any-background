@@ -6,7 +6,7 @@
  * lifting lives in the sibling modules (state/rpc/wallpaper/utils/components).
  */
 import { defineStore } from './runtime'
-import type { Ctx, RpcResultLike, BoundActions, ThemeSectionProps, PartOpacities, PartBlurs, PartStrokes, BackgroundType, GeneratedBgParams, ProfileAppearance, ProfileEntry, RotationItem, ScheduleConfig, SchemeOverride } from './types'
+import type { Ctx, RpcResultLike, BoundActions, ThemeSectionProps, PartOpacities, PartBlurs, PartStrokes, BackgroundType, GeneratedBgParams, ProfileAppearance, ProfileEntry, RotationItem, ScheduleConfig, SchemeOverride, UploadOutcome, StoreInstance } from './types'
 import { NS, zh, en } from './i18n'
 import { cfg, rHasColor, rColor, rWp, rWpImage, rWpVideo, rBgState, rVideoBgState, setWpUrl, setWpImageUrl, setWpVideoUrl, setWpVideoSnapshot, setBgState, adoptConfig, DEFAULT_CONFIG, setBgDark, rBgDark, rProfiles, rRotation, rSchedule, rScheme, rColorScheme, rSchemeOverride, currentAppearance, applyAppearance } from './state'
 import { RPC_CHANNEL, VIDEO_SERVE_URL, FONT_SERVE_URL, fontServeUrl, initRpc, saveConfig, flushSave, loadPersisted, persistWallpaper, persistVideo, persistConfig, uploadVideo, uploadFont, removeFont as rpcRemoveFont, rotationAdd, rotationRemove, rotationActivate, setVideoFromUrl as rpcSetVideoFromUrl } from './rpc'
@@ -15,6 +15,7 @@ import { genTokens, hslToHsv, hsvToHsl, extractWallpaperColor } from './utils/co
 import { captureVideoSnapshot } from './utils/video'
 import { readImgAsync, makeThumb, blobToDataUrl } from './utils/image'
 import { ThemeSection } from './components/ThemeSection'
+import { registerThemeSidebarTab } from './sidebar/tab'
 import { SUN_PATHS } from './components/icons'
 import { startBetterSidebarWatch } from './env'
 
@@ -40,6 +41,11 @@ export function apply(ctx: Ctx): void {
   //                     the wallpaper (perceptual luma, threshold 0.5).
   const [initH, initS, initL] = rColor()
   let customDispose: (() => void) | null = null
+  // Records that the host theme service rejected our skin for a reason other
+  // than the HMR duplicate below: logged once so the 1s watchdog's retries do
+  // not spam the console (or, worse, fail in total silence while the user's
+  // theme quietly never applies).
+  let registerFailed = false
   // registerCustom takes HSL (the storage/wheel space and genTokens space).
   const registerCustom = (h?: number, s?: number, l?: number): boolean => {
     customDispose?.()
@@ -65,14 +71,25 @@ export function apply(ctx: Ctx): void {
         for (const name of LABEL_TOKENS) tokens[name] = font
       }
       customDispose = ctx.theme.register({ id: CUSTOM_ID, colorScheme, tokens })
-    } catch {
-      // A live registration from an earlier HMR apply pass cannot be torn down
-      // here; keep it and activate it below. Without this the duplicate-id
-      // throw would abort apply and skip the wallpaper/opacity restore.
+    } catch (e) {
+      // HMR tolerance: an earlier apply pass may still hold a live registration
+      // for this id, and register throws on the duplicate — the registry then
+      // already contains the skin, so fall through and activate it below.
+      // Any OTHER failure (host API drift, version mismatch) must not be
+      // swallowed here: the watchdog would retry it every second forever.
+      const alreadyLive = (() => { try { return ctx.theme.getTheme().themes.some(t => t.id === CUSTOM_ID) } catch { return false } })()
+      if (!alreadyLive) {
+        if (!registerFailed) {
+          registerFailed = true
+          console.error('dsh-any-background: host theme register failed; the custom skin will stay inactive', e)
+        }
+        customDispose = null
+        return false
+      }
       customDispose = null
     }
     // Only activate the custom theme if it is actually registered.
-    const present = ctx.theme.getTheme().themes.some(t => t.id === CUSTOM_ID)
+    const present = (() => { try { return ctx.theme.getTheme().themes.some(t => t.id === CUSTOM_ID) } catch { return false } })()
     if (present) ctx.theme.setTheme(CUSTOM_ID)
     return present
   }
@@ -81,19 +98,23 @@ export function apply(ctx: Ctx): void {
   // A fresh background brightness verdict (wallpaper swapped in, generated bg
   // regenerated) re-registration trigger: without a picked color the adopted
   // skin must be rebuilt so its fonts follow the new wallpaper.
-  onVerdictApplied(() => {
+  const disposeVerdict = onVerdictApplied(() => {
     if (!rHasColor()) registerCustom()
   })
   // A wallpaper-extracted color adopted by the auto path (applyThemeColor's
   // no-saved-pick branch) must finish the full adaptation here: register the
   // skin in the color's direction, persist, and sync the editor wheel — the
   // bare cfg.color write in wallpaper.ts cannot reach any of those.
-  onColorAdopted(hsl => {
+  const disposeColorAdopted = onColorAdopted(hsl => {
     registerCustom(hsl[0], hsl[1], hsl[2])
     saveConfig()
     colorRev++
     bound?.syncColor(hslToHsv(hsl[0], hsl[1], hsl[2]), colorRev)
   })
+  // Drop this apply's listener closures on teardown: HMR re-runs apply and the
+  // module-level slots would otherwise keep invoking the previous session's
+  // callbacks (and the closures above hold dead `bound`/`customDispose` state).
+  ctx.effect(() => () => { disposeVerdict(); disposeColorAdopted() }, 'dsh-any-background: verdict/color listeners')
   ctx.effect(() => () => {
     customDispose?.()
     if (colorTimerRef.current !== null) window.clearTimeout(colorTimerRef.current)
@@ -112,12 +133,24 @@ export function apply(ctx: Ctx): void {
   const disposeDragQuality = watchWallpaperDragQuality()
   ctx.effect(() => () => disposeDragQuality(), 'dsh-any-background: drag quality')
 
-  // 3. State store.
+  // 3. State store. defineStore is null on a host variant where neither store
+  //    package resolved (see runtime.ts): keep applying theme/wallpaper and skip
+  //    only the settings section rather than crashing the whole client half.
+  //
+  //    `defineStore` returns two different things across host builds:
+  //      · newer builds hand back the STORE INSTANCE (getSnapshot/subscribe/
+  //        actions) directly;
+  //      · dsh-client-store 0.1.2-alpha.x hands back a DECLARATION
+  //        `{ spec, create(scopeKey) }` that the renderer instantiates per scope
+  //        — the object the plugin holds has neither getSnapshot nor actions.
+  //    The settings panel only ever worked because the renderer did the
+  //    instantiation; anything the plugin itself reads off that object has to
+  //    normalize first.
   let rev = 0
   let colorRev = 0
   let bgRev = 0
   const colorTimerRef: { current: number | null } = { current: null }
-  const store = defineStore({
+  const storeSpec = defineStore === null ? null : defineStore({
     init: () => ({
       url: null as string | null,
       rev: -1,
@@ -149,14 +182,55 @@ export function apply(ctx: Ctx): void {
       },
     },
   })
+  /** One shared instance, whatever the host build handed back.
+   *
+   *  The plugin publishes a single appearance state that BOTH surfaces read —
+   *  the settings section (through the renderer's `useStore`) and the
+   *  better-sidebar page (through the hook in `sidebar/store-hook`). Handing the
+   *  host a declaration whose `create` always returns this very instance is what
+   *  keeps them from drifting: letting the renderer mint its own would give the
+   *  sidebar a second, permanently empty copy of the state. */
+  const storeInstance = storeSpec === null
+    ? null
+    : (typeof (storeSpec as { getSnapshot?: unknown }).getSnapshot === 'function'
+      ? storeSpec as StoreInstance
+      : (storeSpec as { create: (scopeKey?: string) => StoreInstance }).create())
+  /** What gets registered: the instance on newer builds, a single-instance
+   *  declaration on the ones that expect a declaration. */
+  const store = storeSpec === null || storeInstance === storeSpec
+    ? storeSpec
+    : { spec: (storeSpec as { spec?: unknown }).spec ?? {}, create: () => storeInstance }
+  // The instance's actions ARE the sync face the settings slot hands back
+  // (`defineStore` bakes the draft into each action, so their signatures match
+  // BoundActions exactly). Binding them here rather than waiting for the
+  // settings section's first render keeps the store fed from boot: the
+  // better-sidebar page can be opened without the settings panel ever having
+  // been, and it must not render boot-time defaults for profiles/rotation.
   let bound: BoundActions | null = null
+  if (storeInstance !== null) bound = storeInstance.actions as BoundActions
   const syncBg = () => {
     rev++; bgRev++
     bound?.syncBg(rWp(), rev, cfg.backgroundType, cfg.generatedBg, bgRev, cfg.regenerateOnReload)
   }
   // When a generated background finishes its first frame, its snapshot becomes
   // the display/preview URL — re-sync the store so the preview follows.
-  onGeneratedSnapshot(syncBg)
+  const disposeSnapshot = onGeneratedSnapshot(syncBg)
+  ctx.effect(() => () => disposeSnapshot(), 'dsh-any-background: snapshot listener')
+
+  /** Capture the first frame of the video now applied and finish its
+   *  adaptation: the frame stands in for every still-image API (previews,
+   *  color extraction) and the brightness verdict follows it. The stale guard
+   *  skips a capture whose video was swapped out from under it (another
+   *  upload or a rotation switch landing mid-decode). */
+  const captureAndApplyVideo = (url: string | null): void => {
+    if (url === null) return
+    void captureVideoSnapshot(url).then(snap => {
+      if (rWpVideo() !== url) return
+      setWpVideoSnapshot(snap)
+      applyThemeColor()
+      syncBg()
+    })
+  }
 
   // ── Profiles / presets / scheme / rotation / schedule ────────────────────────
   let metaRev = 0
@@ -300,8 +374,12 @@ export function apply(ctx: Ctx): void {
   const scheduleTick = (): void => {
     const sc = rSchedule()
     if (!sc.enabled) return
+    // Both steps are optional: `matchMedia?.(…)` alone still throws on the
+    // `.matches` read, and this runs inside the boot restore chain and the 30 s
+    // schedule timer — a throw here would abort the whole restore (font, skin,
+    // wallpaper) and then repeat every tick.
     const night = sc.mode === 'system'
-      ? (window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false)
+      ? (window.matchMedia?.('(prefers-color-scheme: dark)')?.matches ?? false)
       : isNightNow(sc)
     const want = night ? sc.nightProfile : sc.dayProfile
     if (!want || want === cfg.activeProfile) return
@@ -357,12 +435,7 @@ export function apply(ctx: Ctx): void {
       const v = rWpVideo()
       if (v) {
         // The frame snapshot is not persisted: re-capture it for previews.
-        void captureVideoSnapshot(v).then(snap => {
-          if (rWpVideo() !== v) return
-          setWpVideoSnapshot(snap)
-          applyThemeColor()
-          syncBg()
-        })
+        captureAndApplyVideo(v)
         applyWp()
       } else {
         // Stored video missing: fall back to the retained image slot.
@@ -426,11 +499,15 @@ export function apply(ctx: Ctx): void {
   document.body.append(sentinel)
   const viewportObserver = new ResizeObserver(applySoon)
   viewportObserver.observe(sentinel)
-  const dprQuery = window.matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`)
-  dprQuery.addEventListener('change', applySoon)
+  // A DPI-only move changes no layout box, so the sentinel above misses it;
+  // a resolution media query catches it. Optional-chained like the scheme
+  // query above: an old WebView without matchMedia must not take down the
+  // rest of apply (i18n, section injection, the watchdogs) with a TypeError.
+  const dprQuery = window.matchMedia?.(`(resolution: ${window.devicePixelRatio}dppx)`)
+  dprQuery?.addEventListener?.('change', applySoon)
   ctx.effect(() => () => {
     viewportObserver.disconnect()
-    dprQuery.removeEventListener('change', applySoon)
+    dprQuery?.removeEventListener?.('change', applySoon)
     sentinel.remove()
   }, 'dsh-any-background: viewport watch')
 
@@ -438,16 +515,26 @@ export function apply(ctx: Ctx): void {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'dsh-any-background: i18n')
 
   // 6. Section injection.
-  const sectionInject = (actions: BoundActions): Omit<ThemeSectionProps, 'useStore'> => {
-    bound = actions; syncBg()
-    // The panel opens long after boot: push the current meta snapshot so the
-    // profiles/rotation/schedule/scheme controls render live state, not the
+  /** The business face, built once on first use and shared by both surfaces
+   *  (the settings section and the better-sidebar page). Memoizing is not just
+   *  about cost: the face closes over per-surface state — the font preview blob
+   *  URL behind releaseFontPreview — so a second build would give the sidebar
+   *  its own preview slot and leak whichever copy never gets released. */
+  let themeFace: Omit<ThemeSectionProps, 'useStore'> | null = null
+  const buildFace = (): Omit<ThemeSectionProps, 'useStore'> => {
+    if (themeFace !== null) return themeFace
+    // Both surfaces open long after boot: push the current snapshots so the
+    // profiles / rotation / schedule controls render live state, not the
     // store's boot-time defaults.
+    syncBg()
     syncMetaNow()
     // Play a picked/imported video instantly from a local object URL while its
     // raw bytes stream to disk in the background — no upload + first-buffer
-    // wait after import. The serve URL takes over on the next reload.
-    const playVideoFromBlob = (blob: Blob, mime: string | null): void => {
+    // wait after import. The serve URL takes over on the next reload. The
+    // upload's outcome is returned so the panel can report a refusal: a video
+    // that streams to disk but is refused (oversized) still plays locally and
+    // would otherwise look saved.
+    const playVideoFromBlob = (blob: Blob, mime: string | null): Promise<UploadOutcome> => {
       const localUrl = URL.createObjectURL(blob)
       cfg.backgroundType = 'video'
       setWpUrl(null)
@@ -455,15 +542,10 @@ export function apply(ctx: Ctx): void {
       setWpVideoUrl(localUrl, mime ?? blob.type ?? 'video/mp4')
       applyWp()
       syncBg()
-      const applied = rWpVideo()
-      void captureVideoSnapshot(localUrl).then(snap => {
-        if (rWpVideo() !== applied) return
-        setWpVideoSnapshot(snap)
-        applyThemeColor()
-        syncBg()
-      })
-      void uploadVideo(blob, mime ?? blob.type ?? 'video/mp4').then(ok => {
-        if (ok) persistConfig()
+      captureAndApplyVideo(rWpVideo())
+      return uploadVideo(blob, mime ?? blob.type ?? 'video/mp4').then(outcome => {
+        if (outcome.ok) persistConfig()
+        return outcome
       })
     }
     // ── Custom interface font ────────────────────────────────────────────────
@@ -492,7 +574,7 @@ export function apply(ctx: Ctx): void {
 
     const [wh, ws, wl] = rColor()
     const [dh, ds, dv] = hslToHsv(wh, ws, wl)
-    return {
+    const built: Omit<ThemeSectionProps, 'useStore'> = {
       t: ctx.locale.bind(NS),
       hue: dh, sat: ds, lit: dv,
       setColor: (nh: number, ns: number, nl: number) => {
@@ -534,7 +616,7 @@ export function apply(ctx: Ctx): void {
         applyThemeColor()
         syncBg()
       },
-      setVideo: async (u: Blob | string | null, mime: string | null) => {
+      setVideo: async (u: Blob | string | null, mime: string | null): Promise<UploadOutcome> => {
         setBgDark(null)
         if (u === null) {
           // Removing: clear the stored video and return to the image slot.
@@ -545,13 +627,12 @@ export function apply(ctx: Ctx): void {
           applyThemeColor()
           syncBg()
           saveConfig()
-          return
+          return { ok: true }
         }
         if (typeof u !== 'string') {
           // A picked file plays instantly from a local object URL while its raw
           // bytes stream to disk in the background — no upload + buffer wait.
-          playVideoFromBlob(u, mime)
-          return
+          return playVideoFromBlob(u, mime)
         }
         // Legacy data-URL string path: persist, then play from the serve URL.
         const ok = await persistVideo(u)
@@ -563,13 +644,8 @@ export function apply(ctx: Ctx): void {
         applyWp()
         saveConfig()
         syncBg()
-        const applied = rWpVideo()
-        void captureVideoSnapshot(live).then(snap => {
-          if (rWpVideo() !== applied) return
-          setWpVideoSnapshot(snap)
-          applyThemeColor()
-          syncBg()
-        })
+        captureAndApplyVideo(rWpVideo())
+        return { ok }
       },
       setBgType: (type: BackgroundType) => {
         setBackgroundType(type)
@@ -604,23 +680,23 @@ export function apply(ctx: Ctx): void {
       // once, stream the bytes to disk, then swap the @font-face to the
       // persisted slot. A rejected upload rolls the preview back to whatever
       // was stored before (nothing, on a first failure).
-      setFont: async (file: File): Promise<boolean> => {
+      setFont: async (file: File): Promise<UploadOutcome> => {
         releaseFontPreview(0)
         const localUrl = URL.createObjectURL(file)
         fontPreviewUrl = localUrl
         applyFontFace(localUrl, true, fontMimeFromName(file.name))
-        const mime = await uploadFont(file)
-        if (mime === null) {
+        const outcome = await uploadFont(file)
+        if (!outcome.ok || outcome.mime === undefined) {
           applyStoredFont()
           releaseFontPreview(4000)
-          return false
+          return { ok: false, refusal: outcome.refusal }
         }
-        cfg.fontMime = mime
+        cfg.fontMime = outcome.mime
         cfg.fontEnabled = true
-        applyFontFace(FONT_SERVE_URL, true, mime)
+        applyFontFace(FONT_SERVE_URL, true, outcome.mime)
         releaseFontPreview(4000)
         persistConfig()
-        return true
+        return { ok: true }
       },
       removeFont: () => {
         releaseFontPreview(0)
@@ -711,7 +787,10 @@ export function apply(ctx: Ctx): void {
         a.href = url
         a.download = 'dsh-any-theme.json'
         a.click()
-        URL.revokeObjectURL(url)
+        // Firefox and Safari start the download asynchronously; revoking in the
+        // same tick can abort it. releaseFontPreview below already uses this
+        // delayed-revoke pattern for the same reason.
+        window.setTimeout(() => URL.revokeObjectURL(url), 4000)
       },
       // Import a theme JSON: apply the config to memory, then persist through
       // the same paths as manual edits — config → theme-config.json, wallpaper
@@ -733,19 +812,16 @@ export function apply(ctx: Ctx): void {
               let blob: Blob | null = null
               try { blob = await fetch(video).then(r => r.blob()) } catch { blob = null }
               if (blob !== null) {
-                playVideoFromBlob(blob, cfg.videoMime)
+                // Fire and forget: the import's own success/failure is already
+                // reported, and the embedded video typically exceeds the upload
+                // limit anyway (the same cap that made the fetch path win).
+                void playVideoFromBlob(blob, cfg.videoMime)
               } else {
                 const ok = await persistVideo(video)
                 const live = ok ? VIDEO_SERVE_URL : video
                 setWpVideoUrl(live, cfg.videoMime)
                 applyWp()
-                const applied = rWpVideo()
-                void captureVideoSnapshot(live).then(snap => {
-                  if (rWpVideo() !== applied) return
-                  setWpVideoSnapshot(snap)
-                  applyThemeColor()
-                  syncBg()
-                })
+                captureAndApplyVideo(rWpVideo())
               }
             } else {
               // Export lacked the video payload: fall back to no background.
@@ -911,22 +987,37 @@ export function apply(ctx: Ctx): void {
         applyWp()
         saveConfig()
         syncBg()
-        const applied = rWpVideo()
-        void captureVideoSnapshot(applied!).then(snap => {
-          if (rWpVideo() !== applied) return
-          setWpVideoSnapshot(snap)
-          applyThemeColor()
-          syncBg()
-        })
+        captureAndApplyVideo(rWpVideo())
         return true
       },
     }
+    themeFace = built
+    return built
   }
-  ctx.slots.inject('settings.section', () => ctx.slots.register({
-    name: 'settings.section', id: 'dsh-any-background', order: 35,
-    label: () => ctx.locale.bind(NS)('nav'),
-    locale: NS, store, inject: sectionInject,
-  }, ThemeSection as any))
+  // The settings slot's inject face: it still owns binding the actions the host
+  // hands over (the very actions of the shared instance), then returns the shared
+  // face so both surfaces read one instance of it.
+  const sectionInject = (actions: BoundActions): Omit<ThemeSectionProps, 'useStore'> => {
+    bound = actions
+    return buildFace()
+  }
+  if (store === null) {
+    // No host store module (see runtime.ts): the section needs one to bind its
+    // props, so register nothing. The theme/wallpaper half above still works.
+    console.error('dsh-any-background: settings panel disabled on this host (no store module)')
+  } else {
+    ctx.slots.inject('settings.section', () => ctx.slots.register({
+      name: 'settings.section', id: 'dsh-any-background', order: 35,
+      label: () => ctx.locale.bind(NS)('nav'),
+      locale: NS, store, inject: sectionInject,
+    }, ThemeSection as any))
+  }
+
+  // 6.1. Sidebar page: the same five pages, registered as a better-sidebar tab
+  // when that plugin is installed. Runtime-optional — see the module for how the
+  // service is resolved without importing the package. `storeInstance` (not the
+  // declaration) is what the page's selector hook has to bind.
+  registerThemeSidebarTab(ctx, { face: buildFace, store: storeInstance })
 
   // 6.5. Settings-nav icon: the harness derives the nav glyph from the section
   // id (unknown ids fall back to the settings gear) with no plugin hook, so
