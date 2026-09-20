@@ -1,6 +1,6 @@
 {
   "name": "dsh-any-background",
-  "version": "0.2.10",
+  "version": "0.3.0",
   "description": "Appearance plugin for DeepSeek Harness: custom theme color (PS-style color wheel), background wallpaper with opacity/blur controls, and separate main/settings interface opacity.",
   "keywords": [
     "deepseek-harness",
@@ -67,17 +67,21 @@
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.2",
-    "@deepseek-ai/dsh-client-locale": "^0.1.2-alpha.2",
-    "@deepseek-ai/dsh-client-store": "^0.1.2-alpha.2",
-    "@deepseek-ai/dsh-client-connection": "^0.1.2-alpha.2",
-    "@deepseek-ai/dsh-client-ui-settings": "^0.1.2-alpha.2",
-    "@deepseek-ai/dsh-client-ui-theme": "^0.1.2-alpha.2",
-    "@deepseek-ai/dsh-invariants": "^0.1.2-alpha.2",
+    "@deepseek-ai/dsh-client-locale": ">=0.1.2-alpha.2",
+    "@deepseek-ai/dsh-client-store": ">=0.1.2-alpha.2",
+    "@deepseek-ai/dsh-client-connection": ">=0.1.2-alpha.2",
+    "@deepseek-ai/dsh-client-ui-settings": ">=0.1.2-alpha.2",
+    "@deepseek-ai/dsh-client-ui-sidebar-right": ">=0.1.5-rc.2",
+    "@deepseek-ai/dsh-client-ui-theme": ">=0.1.2-alpha.2",
+    "@deepseek-ai/dsh-invariants": ">=0.1.2-alpha.2",
     "react": "^18.2.0",
     "dsh-better-sidebar": ">=0.4.0"
   },
   "peerDependenciesMeta": {
     "dsh-better-sidebar": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-client-ui-sidebar-right": {
       "optional": true
     },
     "react": {
@@ -107,9 +111,10 @@
   },
   "dsh": {
     "compatibility": {
-      "dsh": "0.1.5-rc.2",
+      "dsh": ">=0.1.5-rc.2",
       "dshReleases": {
-        "0.1.5-rc.2": "compatible"
+        "0.1.5-rc.2": "compatible",
+        "0.1.6-alpha.2": "compatible"
       }
     },
     "bundle": {

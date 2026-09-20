@@ -4,7 +4,7 @@
   <a href="https://www.npmjs.com/package/dsh-any-background"><img alt="npm version" src="https://img.shields.io/npm/v/dsh-any-background?color=4d6bfe"></a>
   <a href="https://www.npmjs.com/package/dsh-any-background"><img alt="npm monthly downloads" src="https://img.shields.io/npm/dm/dsh-any-background?color=4d6bfe"></a>
   <a href="https://github.com/Tkingxiao/dsh-any-background/blob/main/LICENSE"><img alt="License: MIT" src="https://img.shields.io/npm/l/dsh-any-background?color=4d6bfe"></a>
-  <a href="https://www.npmjs.com/package/@deepseek-ai/dsh?activeTab=versions"><img alt="Supported DSH version: 0.1.5-rc.2" src="https://img.shields.io/badge/DSH-0.1.5--rc.2-4d6bfe" /></a>
+  <a href="https://www.npmjs.com/package/@deepseek-ai/dsh?activeTab=versions"><img alt="Supported DSH versions: 0.1.5-rc.2 ~ 0.1.6-alpha.2" src="https://img.shields.io/badge/DSH-0.1.5--rc.2%20~%200.1.6--alpha.2-4d6bfe" /></a>
   <a href="https://github.com/topics/dsh-better-sidebar"><img alt="Plugin ecosystem: GitHub topic dsh-better-sidebar" src="https://img.shields.io/badge/plugin%20ecosystem-topic%20dsh--better--sidebar-4d6bfe" /></a><br /><br />
   <a href="https://github.com/Tkingxiao/dsh-any-background"><img src="https://img.shields.io/github/stars/Tkingxiao/dsh-any-background?style=social" alt="GitHub stars"></a>
   <a href="https://dsh.directory/plugins/tkingxiao/dsh-any-background"><img src="https://dsh.directory/badges/listed.svg" alt="dsh.directory listed"></a>
@@ -12,7 +12,7 @@
 
 English | [中文](README.zh.md)
 
-A **DeepSeek Harness** appearance plugin: custom theme color, background wallpaper (image / video / algorithmically generated), and fine-grained per-surface opacity & blur controls. This release targets **DSH 0.1.5-rc.2**.
+A **DeepSeek Harness** appearance plugin: custom theme color, background wallpaper (image / video / algorithmically generated), and fine-grained per-surface opacity & blur controls. Compatible with **DSH 0.1.5-rc.2 ~ 0.1.6-alpha.2** (official-Sidebar features such as the "Theme" card appear only on hosts that expose the Sidebar registry API; older hosts skip them automatically).
 
 ---
 
@@ -71,11 +71,11 @@ A **DeepSeek Harness** appearance plugin: custom theme color, background wallpap
 - **Position Editor** — One shared editor for images and videos: drag to pan, scroll or pinch to zoom, one-click reset. Image and video placements are stored separately and never overwrite each other.
 - **Layout Modes** — Fit / Fill / Stretch / Tile / Center for both images and videos; in Fit mode the editor-committed framing stays consistent across window resizes and cross-monitor moves.
 - **Generated Dynamic Backgrounds** — Choose mesh gradient, Shader, or geometric patterns with adjustable spread, intensity, and seed locking.
-- **Per-surface Interface Opacity** — Independent sliders for the main background, sidebar, cards & panels (including the dropdowns and menus around the dialog), the input & controls (composer box, Cordis panel), the settings panel, the conversation text frame, the trajectory view, the better-sidebar workbench, and produced / highlighted content.
+- **Per-surface Interface Opacity** — Independent sliders for the main background, sidebar, cards & panels (including the dropdowns and menus around the dialog), the input & controls (composer box, Cordis panel), the settings panel, the conversation text frame, the trajectory view, the right sidebar (or bettersidebar), and produced / highlighted content.
 - **Per-surface Interface Blur** — Frosted-glass `backdrop-filter` blur (0–60 px) per surface, including a real backdrop on the composer, the Cordis panel and popover surfaces via stable host selectors.
 - **Produced / Highlights** — Code blocks in conversation content (with their language banner), inline `code` highlight chips and produced chips share one opacity + blur slider. The opacity is the alpha of **each surface's own background color** (no second color stacked on top of the original), and the blur frosts that same layer so the wallpaper shows through the content.
-- **better-sidebar workbench** — With dsh-better-sidebar installed, a dedicated slider pair (`panelOpacity` / `blurs.panel`) takes over its bottom workbench panel and the native right sidebar's surface tokens. Without that plugin the row is hidden and the sliders are inert.
-- **Sidebar "Theme" page** — With dsh-better-sidebar installed, its sidebar gains a "Theme" card: opening it shows **the very same five pages** as the settings panel (Color / Interface / Font / Background / Profiles) with a shell rebuilt for the panel — full height with the page body owning the scroll, and a compact one-row tab rail (not a side rail, which would spend 150px of a narrow panel). **The layout adapts to the panel width**: card grids fill as many columns as fit (two from roughly 430px, three or four in a wide panel), and only a narrow panel tightens padding and headings and falls back to a single column. The background type cards do the same. Both surfaces share one page implementation and one state store, so editing in either place shows up in the other. Without better-sidebar the page simply never registers, and nothing else changes.
+- **Ninth surface: right sidebar / bettersidebar** — One slider pair (`panelOpacity` / `blurs.panel`), two identities: without dsh-better-sidebar it reads "右方侧边栏" (Right sidebar) and drives the official right Sidebar's surface tokens and frosted blur (works on both 0.1.5-rc.2 and 0.1.6+); with dsh-better-sidebar installed it reads "bettersidebar" and takes over that plugin's bottom workbench panel (the official sidebar keeps responding too). The row is always visible.
+- **Sidebar "Theme" page (dual mode)** — The same five pages (Color / Interface / Font / Background / Profiles) register into two surfaces: without dsh-better-sidebar, a "Theme" card is contributed to the **official right Sidebar's guide page** through its public extension points (`sidebarRightTabs` + the `sidebar.right.pane.tab` keyed seat); with dsh-better-sidebar installed, the page registers in that plugin's sidebar instead and the official guide card withdraws itself, so the two never duplicate. Settings panel, official sidebar and better-sidebar all share one page implementation and one state store — a change in any of them shows up everywhere. The shell adapts to the panel width, and a narrow panel tightens padding and falls back to a single column. On a host without the right Sidebar the registration silently never happens.
 - **Conversation View Cards** — The message list is wrapped in a translucent card automatically, and the trajectory page gets whole-page opacity & blur controls, letting the wallpaper shine through the content.
 - **Theme Export / Import** — One-click export to a self-contained `dsh-any-theme.json` (config + wallpaper, video embedded as a data URL) and import to restore it anywhere.
 - **Appearance Presets & Profiles** — Six one-click presets (Default / Frosted glass / Minimal / Midnight / Cyber / Warm daylight) plus named profiles: save the current look and re-apply it anytime. A two-step confirm guards deletion.
@@ -89,6 +89,13 @@ A **DeepSeek Harness** appearance plugin: custom theme color, background wallpap
 - **Theme Watchdog** — Re-asserts the custom theme if the host resets it.
 
 ## Changelog (latest two releases)
+
+### v0.3.0 (DSH 0.1.6 adaptation, compatible with 0.1.5-rc.2 ~ 0.1.6-alpha.2)
+
+- **Native support for the official right Sidebar**: a "Theme" card is contributed to the official Sidebar's guide page through its public extension points (a page type in `ctx.sidebarRightTabs` plus the keyed `sidebar.right.pane.tab` body seat), opening the same five pages as the settings panel. Active without dsh-better-sidebar; when that plugin is present, its own "Theme" page takes over and the official guide card withdraws itself. Registration waits on the service at runtime — hosts without the Sidebar registry API skip it silently, so older hosts are unaffected.
+- **The ninth slider row follows the environment**: the Interface page's ninth group (`panelOpacity` / `blurs.panel`) reads "右方侧边栏" (Right sidebar) without better-sidebar — driving the official right Sidebar's surface tokens and frosted blur on both 0.1.5-rc.2 and 0.1.6 — and "bettersidebar" with it. The row is now always visible instead of hiding when better-sidebar is absent.
+- The better-sidebar presence probe no longer counts `[data-sidebar-right-panel]`: on both host generations that is the official right Sidebar's stable marker (present whenever a session is open), so counting it pinned the "bettersidebar" verdict to true forever.
+- Compatibility declarations now cover both `0.1.5-rc.2` and `0.1.6-alpha.2`; peerDependencies widened to span both generations of the client packages; `@deepseek-ai/dsh-home-paths` stays at the lockfile-consistent `^0.1.0-rc.6` (build-time only — the host injects its own copy at runtime).
 
 ### v0.2.10 （Last version 0.15 RC2 update）
 
@@ -104,17 +111,6 @@ A **DeepSeek Harness** appearance plugin: custom theme color, background wallpap
 - Fixed the night schedule throwing on hosts without `matchMedia`, which aborted the boot restore and repeated every 30 seconds.
 - Streaming no longer re-runs the full blur/opacity pass on every token (the observer's short-circuit condition could never hold on the real host). Bursts are coalesced into one animation frame and skipped when neither the values nor the targets moved.
 - Also: config writes are atomic now (temp file + rename, temp cleaned up on failure) with the parsed result cached by mtime/size; and a batch of leak and race fixes (document listeners left behind when a panel closed mid-drag, stale animation frames overwriting a regenerated background, rotation writes clobbering debounced saves, leftover styles after disabling the plugin).
-### v0.2.9
-
-- **Fixed: opacity and blur sliders looked inert until each was dragged once** — Not a defaults problem: two gates stood in the application path. ① `applyCustomTokensNow()` returned early whenever there was no palette, and `paletteTokens()` returns exactly null when **no color is picked and no scheme is forced** — so the four opacity sliders' alpha variables were never written at all. ② `applyWp()` additionally gated the call behind `rHasColor() || rBgDark() !== null || ...`, all false on a fresh install, so it was never even invoked. Opacity now applies unconditionally, falling back to the host's own resolved surface tokens when the plugin has no palette (`readHostOpacityTokens()`, the same host fallback the workbench-panel slider already used). The sliders only supply the alpha — colors still come from the host skin, so a custom host theme survives.
-- **Defaults moved to mid-scale** — Every per-part opacity now defaults to 0.5 and every blur to 30px (half of the 0–60px range), so a fresh install shows the controls working instead of appearing to do nothing. **Fresh installs only:** existing `theme-config.json` files are untouched. The wallpaper's own alpha (`wallpaperOpacity`) stays at 100% — halving it would dim every newly uploaded picture. The server-side `DEFAULT_CONFIG` was updated in lockstep, since one-sided declarations are exactly what silently dropped fields in v0.2.8.
-- **Fresh installs now persist immediately and re-read once** — When `theme-config.json` is missing, the `read` RPC writes the defaults straight to disk and returns `firstRun`; the client then persists the browser half's full default set, calls `loadPersisted()` again, and runs `applyWp()` so the interface paints from a config that genuinely exists on disk.
-- **Mobile / touch support for the background editor** — The editor only understood a mouse, so on a phone or tablet the wallpaper could neither be dragged nor zoomed. One finger now pans the picture and two fingers pinch to zoom, with the image point that started under your fingers staying pinned to them — which means a two-finger drag pans while it scales, both falling out of the same relation. The touch listeners are attached natively with `passive: false` on purpose: React registers `touchmove` passively at the root, where `preventDefault()` is a no-op, so the page would scroll and the browser would pinch-zoom the whole viewport behind the open dialog; the preview also declares `touch-action: none` to cover the same ground declaratively. Lifting one of two fingers re-baselines the pan against the finger still down, so the picture no longer snaps back by its offset.
-
-- **New "Font" settings page** — A fifth page, right after "Interface", holding two new capabilities: the custom interface font and per-part text outlines.
-- **Custom font** — Upload a ttf / otf / woff / woff2 file and apply it to the entire interface. Raw bytes POST to `/dsh-any-background/font/upload` (never base64 through the RPC channel, capped at 100 MB); the server sniffs the real container from its magic bytes, names the slot accordingly, and serves it back from `/dsh-any-background/font` as an `@font-face` source. The host's base font token `--dsw-font-family` is re-scoped to `'DAnyFont', <original host stack>` while the code stack stays untouched. The font can be disabled (file kept) or removed (file deleted), and a rejected upload rolls back to whatever was applied before. Like wallpapers, font files are machine-local — they stay out of profiles and theme exports.
-- **Per-part text outline** — Nine groups, each with its own outline width (0–4 px, 0.5 steps, 0 = off) and color. Colors are stored as **preset keys**, not resolved values: "auto" inverts the font direction (light glyphs get a dark outline) and "accent" follows the current primary, so both re-derive automatically with the theme. Code blocks, inline `code`, icons and placeholders are explicitly exempted.
-- **Known trade-off** — `-webkit-text-stroke` may clip by about 1px inside some single-line ellipsis containers; multi-line containers are unaffected.
 
 ## Installation
 
@@ -158,9 +154,20 @@ pnpm dsh web
 
 ## Compatibility
 
-- **[`dsh web`](https://github.com/deepseek-ai/deepseek-harness) 0.1.5-rc.2** — This release targets `0.1.5-rc.2` only (verified on it); `engines.dsh` and `dsh.compatibility.dshReleases` in `package.json` declare that single release as well.
-- **[DSHA](https://github.com/DSH-APP/DSHA)** — DeepSeek Harness Android launcher (ROOT-free, Termux-free). Its bundled `dsh` is `0.1.5-rc.2`, the exact release this plugin targets, so it is compatible; the mobile UI shell is provided by `dsh-web-mobile`.
+- **[`dsh web`](https://github.com/deepseek-ai/deepseek-harness) 0.1.5-rc.2 ~ 0.1.6-alpha.2** — The range covers both releases (`0.1.6-alpha.2` verified hands-on); `engines.dsh` declares `>=0.1.5-rc.2` and `dsh.compatibility.dshReleases` lists both. Official-Sidebar features rely on runtime service probing and enable themselves only on hosts that provide the API; everything else behaves identically on both versions.
+- **[DSHA](https://github.com/DSH-APP/DSHA)** — DeepSeek Harness Android launcher (ROOT-free, Termux-free). Its bundled `dsh` is `0.1.5-rc.2`, inside the supported range; the mobile UI shell is provided by `dsh-web-mobile`.
 - **[deepseek-harness-desktop](https://github.com/anywhere-labs/deepseek-harness-desktop)** — Supported
+
+## Permissions, side effects & boundaries
+
+- **Integration form**: official Profile Bundle — `package.json` declares `dsh.bundle.patch: ./cordis.patch.yml` (a loader insert layer), the repository ships prebuilt runtime artifacts ready to use (`lib/index.js`, `lib/invariant.js`, `lib/client.js`), and there are no install scripts, no `postinstall`, no native binaries, and no build step at install time.
+- **Filesystem**: the server half reads and writes only inside `<dsh home>/.dsh-any-background-data/` (config JSON, wallpaper, rotation pool, video, font) and touches nothing outside it; config writes are atomic (temp file + rename). These files live on the real disk, so they are **outside generation restore — it neither captures nor rolls them back**; deleting the directory is a full plugin reset.
+- **Network**: one outbound fetch happens only when the user pastes an http/https image or video URL and presses Apply; no telemetry, no other external calls.
+- **Shell / native**: none. No `child_process`, no native modules, no dynamically downloaded executables.
+- **HTTP surface**: registers only `/dsh-any-background/{video,wallpaper,font}` (GET/HEAD streaming) with matching `*/upload` POST routes (100 MB cap) and the dedicated RPC channel `/dsh-any-background` under the local dsh web server; no extra listening ports.
+- **Restart requirements**: the first install needs a (re)start of `dsh web` to load the client bundle; settings changes afterwards apply live and persist automatically. Updating the plugin requires a restart to pick up the new `lib/client.js`.
+- **Tests & verification**: `pnpm run typecheck` (full tsc check) and `pnpm run bundle` (tsdown emits `lib/`); no automated unit tests — behavior is verified manually.
+- **Known limitations**: the styling relies on stable host DOM markers (`[data-sidebar-right-panel]`, `[data-dsh-bottom-panel]`, …) and CSS token names; a host restyle of those layers can leave a slider ineffective for its surface (cosmetic only — nothing breaks). `-webkit-text-stroke` may clip about 1px at the edge of some single-line ellipsis containers.
 
 ## Star History
 

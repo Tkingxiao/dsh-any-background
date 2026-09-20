@@ -16,6 +16,7 @@ import { captureVideoSnapshot } from './utils/video'
 import { readImgAsync, makeThumb, blobToDataUrl } from './utils/image'
 import { ThemeSection } from './components/ThemeSection'
 import { registerThemeSidebarTab } from './sidebar/tab'
+import { registerNativeSidebarTab } from './sidebar/native-tab'
 import { SUN_PATHS } from './components/icons'
 import { startBetterSidebarWatch } from './env'
 
@@ -1013,11 +1014,14 @@ export function apply(ctx: Ctx): void {
     }, ThemeSection as any))
   }
 
-  // 6.1. Sidebar page: the same five pages, registered as a better-sidebar tab
-  // when that plugin is installed. Runtime-optional — see the module for how the
-  // service is resolved without importing the package. `storeInstance` (not the
-  // declaration) is what the page's selector hook has to bind.
+  // 6.1. Sidebar pages: the same five pages, registered twice by surface —
+  // as a better-sidebar tab when that plugin is installed, and as a native
+  // right-Sidebar tab ("主题" card on the official Sidebar's guide page) when
+  // it is not. Both are runtime-optional — see the modules for how each
+  // service is resolved without importing it. `storeInstance` (not the
+  // declaration) is what either page's selector hook has to bind.
   registerThemeSidebarTab(ctx, { face: buildFace, store: storeInstance })
+  registerNativeSidebarTab(ctx, { face: buildFace, store: storeInstance })
 
   // 6.5. Settings-nav icon: the harness derives the nav glyph from the section
   // id (unknown ids fall back to the settings gear) with no plugin hook, so

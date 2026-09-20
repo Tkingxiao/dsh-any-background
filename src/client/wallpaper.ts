@@ -384,27 +384,27 @@ function applyBgBlurGlobal(px: number): void {
   else document.documentElement.style.removeProperty('--dsh-any-part-blur-global')
 }
 
-// ── Workbench panel (dsh-better-sidebar) ──────────────────────────────────────
-// The bottom workbench panel of dsh-better-sidebar paints every surface from
-// the layer/bg-base tokens ([data-dsh-bottom-panel] is its stable marker), and
-// it hangs off document.body — OUTSIDE the AppFrame columns, so neither the
-// column opacities nor the part-blur underlays ever reach it. Three rules
-// close the gap: a static blur rule, a token re-scope, and a stacking-context
-// promotion. The promotion is necessary because the bottom panel is a child
-// of [data-dsh-panel-host] (z-index 25, position: fixed — a stacking
-// context), and `backdrop-filter` only blurs content in the SAME stacking
-// context; with the panel nested in the host, the wallpaper (z-index -1 in
-// body) is invisible to the panel's backdrop-filter. Re-scoping to
-// `position: fixed` (z-index 26) re-parents the panel to body's stacking
-// context — still above the panel host (25), still below the cordis
-// floating panel (30), preserving the original layering — and the inline
-// `left/right/height` (already in viewport coordinates) keep the panel at
-// the same visual position.
+// ── Ninth surface: right sidebar / workbench panel ───────────────────────────
+// The `panelOpacity` / blurs.panel pair targets two surfaces by mode:
+//   · native — the host's own right Sidebar (`[data-sidebar-right-panel]`,
+//     DSH 0.1.6+): a `--dsw-alias-bg-base`-painted column of the page;
+//   · dsh-better-sidebar installed — its bottom workbench panel
+//     (`[data-dsh-bottom-panel]`), which paints every surface from the same
+//     layer/bg-base tokens.
+// Both hang where neither the column opacities nor the part-blur underlays
+// reach, so the same three rules close the gap for both: a static blur rule, a
+// token re-scope, and a stacking-context promotion. The promotion is necessary
+// because a backdrop-filter only blurs content in the SAME stacking context,
+// and both surfaces are trapped in one (the better-sidebar panel under
+// [data-dsh-panel-host], the native Sidebar under its animated frame track).
+// Re-scoping to `position: fixed` (z-index 26) re-parents the surfaces to
+// body's stacking context — above the panel host (25), below the cordis
+// floating panel (30), preserving the original layering.
 // The token re-scope lives in the ALWAYS-EMITTED static stylesheet (see
-// `index.tsx`) so the panel can follow the slider even when the plugin has
+// `index.tsx`) so the surfaces can follow the slider even when the plugin has
 // no palette (no picked color, no wallpaper verdict, no forced scheme).
-// Pointing at unwritten vars would make the panel's `background: var(--dsw-
-// alias-bg-layer-1)` declaration invalid and the panel would lose its
+// Pointing at unwritten vars would make a surface's `background: var(--dsw-
+// alias-bg-layer-1)` declaration invalid and it would lose its
 // surface; `applyPanelOverrides` writes the vars every call so the rule
 // always has targets. Exporting here lets `index.tsx` splice it in once,
 // avoiding the per-palette re-emit in `applyCustomTokensNow`.
@@ -472,14 +472,23 @@ export const PANEL_BLUR_RULE =
 // Values ride root CSS variables, so blocks and chips that stream in after a
 // reply pick them up without an observer.
 export const PRODUCED_RULE =
-  // Frosting only — kept outside the color-mix guard so it never depends on it.
+  // ── Frosting (backdrop-filter) ─────────────────────────────────────────────
+  // Kept outside the color-mix guard so it never depends on color-mix support.
+  // TerminalBlock ([data-terminal]), ReadBlock ([data-read]) and
+  // ContextInjectionRow body ([data-context-injection-body]) all share the
+  // --dsw-alias-markdown-code-block surface as code blocks, so they receive
+  // both blur and alpha modulation below.
+  // ChangedFiles card ([data-changed-files]) gets blur on its root.
   '[data-code-block-content] pre,[data-code-block-banner],[data-composer-chip],' +
-  ':not(pre)>code{' +
+  ':not(pre)>code,' +
+  '[data-changed-files],[data-terminal],[data-read],[data-context-injection-body]{' +
   '-webkit-backdrop-filter:var(--dsh-any-blur-prod,none);' +
   'backdrop-filter:var(--dsh-any-blur-prod,none)}' +
-  // Alpha. Guarded: without color-mix support the host look stays untouched
-  // instead of resolving the surface color to an invalid value.
+  // ── Alpha (color-mix) ──────────────────────────────────────────────────────
+  // Guarded: without color-mix support the host look stays untouched instead
+  // of resolving the surface color to an invalid value.
   '@supports (background:color-mix(in srgb,red 50%,transparent)){' +
+  // ── Existing code-block surfaces ───────────────────────────────────────────
   '.md-code-block{background:transparent!important}' +
   '.md-code-block>div{background-color:transparent!important}' +
   // Every base falls back to the older token names (0.1.2-alpha.4 has no
@@ -497,6 +506,35 @@ export const PRODUCED_RULE =
   'background-color:color-mix(in srgb,var(--dsw-alias-markdown-inline-code,transparent) var(--dsh-any-prod-pct,100%),transparent)!important}' +
   '[data-composer-chip]>*{' +
   'background-color:color-mix(in srgb,var(--dsw-alias-interactive-bg-hover,transparent) var(--dsh-any-prod-pct,100%),transparent)!important}' +
+  // ── TerminalBlock [data-terminal] ──────────────────────────────────────────
+  // Root: background: var(--dsw-alias-markdown-code-block) (TerminalBlock.module.css).
+  // The copy button inside re-asserts that same token as an opaque fill so it
+  // stays readable over scrolling output. Clear it so the card fades uniformly.
+  '[data-terminal]{' +
+  'background-color:color-mix(in srgb,var(--dsw-alias-markdown-code-block,transparent) var(--dsh-any-prod-pct,100%),transparent)!important}' +
+  '[data-terminal] button{background-color:transparent!important}' +
+  // ── ReadBlock [data-read] ─────────────────────────────────────────────────
+  // Root: background: var(--dsw-alias-markdown-code-block).
+  // First child div is the banner, using --dsw-alias-markdown-code-block-banner
+  // (a distinct, usually lighter token). Both faded with their own tokens.
+  '[data-read]{' +
+  'background-color:color-mix(in srgb,var(--dsw-alias-markdown-code-block,transparent) var(--dsh-any-prod-pct,100%),transparent)!important}' +
+  '[data-read]>div:first-child{' +
+  'background-color:color-mix(in srgb,var(--dsw-alias-markdown-code-block-banner,transparent) var(--dsh-any-prod-pct,100%),transparent)!important}' +
+  // ── ContextInjectionRow body [data-context-injection-body] ────────────────
+  // The .body element uses --dsw-alias-markdown-code-block (same as code blocks).
+  '[data-context-injection-body]{' +
+  'background-color:color-mix(in srgb,var(--dsw-alias-markdown-code-block,transparent) var(--dsh-any-prod-pct,100%),transparent)!important}' +
+  // ── ChangedFiles card [data-changed-files] ────────────────────────────────
+  // Card root has no background; the filled surface is the header <button>
+  // (first child), which paints from --changes-fill: a local CSS variable
+  // resolving to --dsw-static-neutral-50 (light) / --dsw-static-neutral-850
+  // (dark). Target those static tokens directly, gated on the dark-theme flag
+  // the plugin already writes, so light/dark palettes both fade correctly.
+  '[data-changed-files]>button:first-child{' +
+  'background-color:color-mix(in srgb,var(--dsw-static-neutral-50,transparent) var(--dsh-any-prod-pct,100%),transparent)!important}' +
+  'body[data-ds-dark-theme] [data-changed-files]>button:first-child{' +
+  'background-color:color-mix(in srgb,var(--dsw-static-neutral-850,transparent) var(--dsh-any-prod-pct,100%),transparent)!important}' +
   '}'
 
 // ── Per-part text stroke (-webkit-text-stroke) ────────────────────────────────
@@ -542,8 +580,11 @@ export const STROKE_RULE = [
   `[data-chat-flow]{-webkit-text-stroke:var(--dsh-any-stroke-chat-w,0px) var(--dsh-any-stroke-chat-c,transparent);paint-order:stroke fill}`,
   // trajectory view
   `[data-conversation-composer-overlay]{-webkit-text-stroke:var(--dsh-any-stroke-trajectory-w,0px) var(--dsh-any-stroke-trajectory-c,transparent);paint-order:stroke fill}`,
-  // produced / artifact text — direct rule doubles as the chat-inheritance shield
-  `[data-code-block-content] pre,[data-code-block-content],[data-code-block-banner],[data-composer-chip],:not(pre)>code` +
+  // produced / artifact text — direct rule doubles as the chat-inheritance shield;
+  // also covers changed-files card, tool-call terminal, file-read block and
+  // context-injection notice (all "produced/highlight" surfaces).
+  `[data-code-block-content] pre,[data-code-block-content],[data-code-block-banner],[data-composer-chip],:not(pre)>code,` +
+  `[data-changed-files],[data-terminal],[data-read],[data-context-injection-body]` +
   `{-webkit-text-stroke:var(--dsh-any-stroke-produced-w,0px) var(--dsh-any-stroke-produced-c,transparent);paint-order:stroke fill}`,
   // workbench panel
   `[data-dsh-bottom-panel],[data-sidebar-right-panel]{-webkit-text-stroke:var(--dsh-any-stroke-panel-w,0px) var(--dsh-any-stroke-panel-c,transparent);paint-order:stroke fill}`,

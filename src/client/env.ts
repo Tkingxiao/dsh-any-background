@@ -17,12 +17,16 @@ import { useSyncExternalStore } from 'react'
  *  signal and the body childList observer fires exactly when it appears. The
  *  panel surfaces we actually style are listed only as reinforcement: they are
  *  conditionally rendered (collapsed panels drop them), so they must never be
- *  the sole signal. */
+ *  the sole signal.
+ *
+ *  `[data-sidebar-right-panel]` is deliberately ABSENT: on DSH 0.1.6+ it marks
+ *  the host's own right Sidebar (always present once a session opens), so
+ *  counting it would make the better-sidebar verdict permanently true and the
+ *  ninth slider could never drop back to its native "右方侧边栏" identity. */
 export const BETTER_SIDEBAR_MARKERS = [
   '[data-dsh-better-sidebar]',
   '[data-dsh-panel-host]',
   '[data-dsh-bottom-panel]',
-  '[data-sidebar-right-panel]',
 ] as const
 
 let betterSidebar = false

@@ -56,7 +56,10 @@ function useActiveLocale(locale: LocaleService): string {
   return useSyncExternalStore(subscribe, read, read)
 }
 
-function ThemeTab({ face, useStore, locale }: {
+/** Rendered inside a sidebar tab: the five pages, `surface: 'sidebar'` shell.
+ *  Shared by the better-sidebar page and the native right-Sidebar tab — both
+ *  hand a full-height column that owns its own scroll. */
+export function ThemeTab({ face, useStore, locale }: {
   /** The plugin's business face, built once and shared with the settings section. */
   face: Omit<ThemeSectionProps, 'useStore'>
   useStore: ThemeSectionProps['useStore']

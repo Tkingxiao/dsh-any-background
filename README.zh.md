@@ -4,7 +4,7 @@
   <a href="https://www.npmjs.com/package/dsh-any-background"><img alt="npm 版本" src="https://img.shields.io/npm/v/dsh-any-background?color=4d6bfe"></a>
   <a href="https://www.npmjs.com/package/dsh-any-background"><img alt="npm 月下载量" src="https://img.shields.io/npm/dm/dsh-any-background?color=4d6bfe"></a>
   <a href="https://github.com/Tkingxiao/dsh-any-background/blob/main/LICENSE"><img alt="License: MIT" src="https://img.shields.io/npm/l/dsh-any-background?color=4d6bfe"></a>
-  <a href="https://www.npmjs.com/package/@deepseek-ai/dsh?activeTab=versions"><img alt="支持的 DSH 版本：0.1.5-rc.2" src="https://img.shields.io/badge/DSH-0.1.5--rc.2-4d6bfe" /></a>
+  <a href="https://www.npmjs.com/package/@deepseek-ai/dsh?activeTab=versions"><img alt="支持的 DSH 版本：0.1.5-rc.2 ~ 0.1.6-alpha.2" src="https://img.shields.io/badge/DSH-0.1.5--rc.2%20~%200.1.6--alpha.2-4d6bfe" /></a>
   <a href="https://github.com/topics/dsh-better-sidebar"><img alt="插件生态：GitHub topic dsh-better-sidebar" src="https://img.shields.io/badge/%E6%8F%92%E4%BB%B6%E7%94%9F%E6%80%81-topic%20dsh--better--sidebar-4d6bfe" /></a><br /><br />
   <a href="https://github.com/Tkingxiao/dsh-any-background"><img src="https://img.shields.io/github/stars/Tkingxiao/dsh-any-background?style=social" alt="GitHub stars"></a>
   <a href="https://dsh.directory/plugins/tkingxiao/dsh-any-background"><img src="https://dsh.directory/badges/listed.svg" alt="dsh.directory listed"></a>
@@ -12,7 +12,7 @@
 
 [English](README.md) | 中文
 
-一个 **DeepSeek Harness** 外观插件：自定义主题色、背景壁纸（图片 / 视频 / 算法动态生成），以及逐表面的透明度与模糊度控制。当前版本面向 **DSH 0.1.5-rc.2**。
+一个 **DeepSeek Harness** 外观插件：自定义主题色、背景壁纸（图片 / 视频 / 算法动态生成），以及逐表面的透明度与模糊度控制。兼容 **DSH 0.1.5-rc.2 ~ 0.1.6-alpha.2**（官方右侧栏「主题」卡片等新特性仅在使用右侧栏注册表 API 的宿主上出现，旧宿主自动跳过）。
 
 ---
 
@@ -71,11 +71,11 @@
 - **位置编辑器** — 图片与视频共用同一套编辑器：拖动平移、滚轮或双指缩放、一键重置；图片与视频的位置状态各自独立保存，互不覆盖。
 - **布局模式** — 适应 / 填充 / 拉伸 / 平铺 / 居中五种排布，图片与视频通用；「适应」模式下编辑器提交的构图在窗口缩放、跨屏移动后保持一致。
 - **动态生成背景** — 支持网格渐变、Shader、几何图案，可调节扩散范围、色彩强度并锁定种子。
-- **分部位界面透明度** — 主背景、侧边栏、卡片面板（含对话框周围的选项框/菜单）、输入框与控件（发送框、Cordis 插件面板）、设置面板、对话文本框、轨迹页、better-sidebar 工作台、产出物/高亮内容各自独立滑块。
+- **分部位界面透明度** — 主背景、侧边栏、卡片面板（含对话框周围的选项框/菜单）、输入框与控件（发送框、Cordis 插件面板）、设置面板、对话文本框、轨迹页、右方侧边栏（或 bettersidebar）、产出物/高亮内容各自独立滑块。
 - **分部位界面模糊度** — 每个界面部位可独立调整毛玻璃 `backdrop-filter` 模糊（0–60 px），并通过宿主的稳定选择器为发送框、Cordis 面板与弹出层提供真实背景模糊。
 - **产出物 / 高亮内容** — 对话正文里的代码块（含语言顶栏）、行内 `code` 高亮芯片与产出物 chip 共用一支滑块：透明度只**调制这些表面原本的背景色**（不会在旧背景上再叠一层新色），模糊度给同一层表面加磨砂，壁纸从内容后方透出来。
-- **better-sidebar 工作台** — 安装 dsh-better-sidebar 时出现独立滑块（`panelOpacity` / `blurs.panel`），接管其底部工作台面板与原生右侧栏的表面令牌；未安装该插件时该行不显示，滑块无副作用。
-- **侧边栏「主题」页面** — 安装 dsh-better-sidebar 后，它的侧边栏会多出一张「主题」卡片：点开是与设置面板**完全相同的五页**（色彩 / 界面 / 字体 / 背景 / 配置），外壳按侧边栏重做——全高、页面自带滚动区、导航收成一行紧凑标签（不放侧边，省下 150px 给内容）。**排版随面板宽度自适应**：卡片网格按可用宽度自动排成 2 / 3 / 4 列（约 430px 起两列），面板窄时才收紧内边距与标题字号并回到单列；类型卡片同理。两处共用同一套页面代码与同一份状态，改一处两边同步；未安装 better-sidebar 时静默不注册，不影响任何其它功能。
+- **第九栏：右方侧边栏 / bettersidebar** — 同一对滑块（`panelOpacity` / `blurs.panel`）按宿主环境自动切换目标：未安装 dsh-better-sidebar 时叫「右方侧边栏」，驱动 DSH 0.1.6+ 官方右侧栏的表面令牌与毛玻璃模糊；安装了 dsh-better-sidebar 时改叫「bettersidebar」，接管其底部工作台面板（官方右侧栏同样生效）。
+- **侧边栏「主题」页面（双模式）** — 同一套五页（色彩 / 界面 / 字体 / 背景 / 配置）注册到两处：未安装 dsh-better-sidebar 时，通过官方右侧栏的公开扩展点（`sidebarRightTabs` + `sidebar.right.pane.tab`）在**官方侧边栏**的引导页挂一张「主题」卡片，点开即五页；安装了 dsh-better-sidebar 时，改为在它的侧边栏注册同名页面，官方引导页上的卡片自动撤下，避免重复。两处（加设置面板共三处）共用同一套页面代码与同一份状态，改一处处处同步；外壳按面板宽度自适应，窄面板收紧内边距并回到单列。宿主没有右侧栏扩展点时静默不注册，不影响任何其它功能。
 - **对话视图卡片** — 消息列表自动包裹为半透明卡片，轨迹页可整页调节透明度与模糊，让壁纸从内容后方透出来。
 - **主题导出 / 导入** — 一键导出为自包含的 `dsh-any-theme.json`（配置 + 壁纸，视频以 data URL 内嵌），可随时导入还原。
 - **外观预设与配置档案** — 六套一键预设（默认 / 毛玻璃 / 极简白 / 暗夜紫 / 赛博 / 暖阳），外加自定义命名档案：随时保存当前观感、随时套回，删除有二次确认保护。
@@ -88,7 +88,14 @@
 - **中英双语** — 完整的中英文界面，自动跟随语言设置。
 - **主题守护** — 宿主重置主题后自动重新激活自定义主题。
 
-## 更新日志（最新两个版本）
+## 更新日志（只保留最新两个版本）
+
+### v0.3.0（DSH 0.1.6 适配，兼容 0.1.5-rc.2 ~ 0.1.6-alpha.2）
+
+- **原生适配官方右侧栏**：通过官方公开扩展点（`ctx.sidebarRightTabs` 注册页面类型 + `sidebar.right.pane.tab` 键控槽位挂载页面本体）在官方侧边栏的引导页挂上「主题」卡片，点开就是和设置面板一样的五页。未安装 dsh-better-sidebar 时生效；装了 better-sidebar 则让位给它自己的「主题」页（官方引导页卡片自动撤下，不重复占位）。注册走运行时动态等待：宿主没有右侧栏注册表 API 时静默跳过，旧宿主不受影响。
+- **第九栏随环境改名**：界面页第九个滑块组（`panelOpacity` / `blurs.panel`）未安装 better-sidebar 时显示为「右方侧边栏」，直接驱动官方右侧栏的表面令牌与毛玻璃模糊（0.1.5-rc.2 与 0.1.6 的官方侧栏均适用，该行现在始终显示）；安装了 better-sidebar 时改名为「bettersidebar」，语义不变。
+- better-sidebar 存在性探测摘除了 `[data-sidebar-right-panel]` 标记——两个版本的宿主中它都是官方右侧栏的稳定标记（随会话始终存在），继续计数会让「bettersidebar」判定永远为真。
+- 兼容性声明覆盖 `0.1.5-rc.2` 与 `0.1.6-alpha.2` 两个 release；peerDependencies 放宽为同时覆盖两代的客户端包版本；`@deepseek-ai/dsh-home-paths` 维持与 lockfile 一致的 `^0.1.0-rc.6`（仅构建期使用，运行时由宿主注入自身版本）。
 
 ### v0.2.10（最后一版0.15 rc2更新）
 
@@ -104,16 +111,6 @@
 - 修复夜间自动切换在缺少 `matchMedia` 的环境抛错，并因此反复中断启动恢复。
 - 正常聊天时每个流式 token 都会触发一遍完整的模糊 / 透明度应用（观察器的短路条件在真实宿主上恒为假）。现在按帧合并，值和目标都没变就整帧跳过。
 - 其它：配置写入改成原子写（tmp + rename，失败清理临时文件），解析结果按 mtime/size 缓存；修了一批泄漏和竞态（拖动中关面板遗留监听、动态背景旧帧覆盖新画面、轮换写回覆盖防抖保存、禁用后样式残留等）。
-### v0.2.9
-
-- **修复：初次安装时透明度与模糊度滑块「要手动拖一次才生效」** —— 根因不是默认值，而是应用链路有两道门槛：① `applyCustomTokensNow()` 遇到没有调色板的情况直接 return，而**没选主题色且没强制明暗**时 `paletteTokens()` 正是返回 null，于是四个透明度滑块的 alpha 变量从头到尾没被写过；② `applyWp()` 外面还有一层 `rHasColor() || rBgDark() !== null || ...` 的门，初次安装全部落空，连 apply 都没调用。现在透明度无条件应用，没有自有调色板时回落去读宿主已解析的表面 token（`readHostOpacityTokens()`，与工作台面板 opacity 的宿主回落同源）——滑块只提供 alpha，配色仍由宿主皮肤决定。
-- **默认值改为中档** —— 各分组透明度默认 0.5、模糊默认 30px（滑块量程 0–60px 的一半），初次安装即可看到滑块生效，不再是「看起来没反应」。**只影响首次安装**：已有 `theme-config.json` 的用户不受任何影响。壁纸本身的透明度（`wallpaperOpacity`）保持 100%，否则首次上传的壁纸会被直接压暗一半。服务端 `DEFAULT_CONFIG` 同步更新——两侧不同步正是 v0.2.8 静默丢字段的原因。
-- **首次安装即落盘并强制重读一次** —— `read` RPC 检测到 `theme-config.json` 不存在时立刻把默认值写盘并返回 `firstRun`；客户端收到后 `persistConfig()` 写入浏览器侧的完整默认集，再 `loadPersisted()` 重读一次并 `applyWp()`，确保界面是从磁盘上真实存在的配置渲染出来的。
-- **手机端背景位置调整适配** —— 背景编辑器此前只认鼠标，触屏设备上壁纸既拖不动也缩放不了。现在单指拖动画面、双指捏合缩放，且**捏合起手时手指下方的画面会始终钉在手指上**——所以「双指一边拖动一边缩放」由同一条关系式自然得出，不需要额外分支。触摸事件以 `passive: false` 原生挂载是有意为之：React 在根节点注册的 `touchmove` 是被动的，`preventDefault()` 在那里形同空操作，页面会在弹窗背后跟着滚动、浏览器还会把整个视口一起缩放；容器同时声明 `touch-action: none`，从声明式一侧兜住同样的行为。双指抬起其中一指时会以仍按住的那根手指重新建立平移基准，画面不会再按原偏移量弹回去。
-- **新增「字体」设置页** — 设置面板在「界面」之后多出一页，收纳两组新能力：自定义字体与分组文字描边。
-- **自定义字体** — 上传 ttf / otf / woff / woff2 文件应用到整个界面。文件以原始字节 POST 到 `/dsh-any-background/font/upload`（不走 RPC base64，上限 100 MB），服务端按魔数嗅探真实容器格式并据此命名落盘，再由 `/dsh-any-background/font` 提供 `@font-face` 源；宿主的基础字体令牌 `--dsw-font-family` 被收敛为 `'DAnyFont', <宿主原字体栈>`，代码块等宽字体不受影响。支持停用（保留文件）与移除（删除文件），上传失败会回滚到原有字体。字体文件与壁纸一样是本机资源，不进配置档案与导出包。
-- **分组文字描边** — 九个界面分组各自独立的描边粗细（0–4 px，0.5 步进，0 = 关闭）与颜色；颜色存的是**预设键**而非解析后的色值：「自动」按字体明暗取反色（浅字配深描边），「主题色」跟随当前主色，二者都会随主题自动重算。代码块、行内 `code`、图标与 placeholder 显式豁免，多色语法着色不会糊。
-- **已知取舍** — `-webkit-text-stroke` 在部分单行省略号容器边缘可能有 1px 级裁切；多行容器正常。
 
 ## 安装
 
@@ -157,9 +154,20 @@ pnpm dsh web
 
 ## 兼容性
 
-- **[`dsh web`](https://github.com/deepseek-ai/deepseek-harness) 0.1.5-rc.2** — 当前版本只面向 `0.1.5-rc.2`（已在该版本上验证）；`package.json` 的 `engines.dsh` 与 `dsh.compatibility.dshReleases` 也只声明这一项。
-- **[DSHA](https://github.com/DSH-APP/DSHA)** — DeepSeek Harness 安卓启动器（免 ROOT、免 Termux）。其包内 dsh 同为 `0.1.5-rc.2`，即本插件的目标版本，故兼容；移动端界面由 `dsh-web-mobile` 提供。
+- **[`dsh web`](https://github.com/deepseek-ai/deepseek-harness) 0.1.5-rc.2 ~ 0.1.6-alpha.2** — 兼容范围覆盖这两个 release（`0.1.6-alpha.2` 已实测验证）；`package.json` 的 `engines.dsh` 为 `>=0.1.5-rc.2`，`dsh.compatibility.dshReleases` 同时声明两个 release。官方右侧栏「主题」卡片等新特性依赖运行时动态服务探测，在提供该 API 的宿主上自动启用，其余功能两个版本一致。
+- **[DSHA](https://github.com/DSH-APP/DSHA)** — DeepSeek Harness 安卓启动器（免 ROOT、免 Termux）。其包内 dsh 为 `0.1.5-rc.2`，落在兼容范围内；移动端界面由 `dsh-web-mobile` 提供。
 - **[deepseek-harness-desktop](https://github.com/anywhere-labs/deepseek-harness-desktop)** — 支持
+
+## 权限、副作用与边界
+
+- **接入形态**：官方 Profile Bundle——`package.json` 声明 `dsh.bundle.patch: ./cordis.patch.yml`（loader 插入层），仓库提交可直接使用的预构建运行时制品（`lib/index.js`、`lib/invariant.js`、`lib/client.js`），无安装脚本、无 postinstall、无 native 二进制、安装时不执行任何构建。
+- **文件系统**：服务端仅在 `<dsh 主目录>/.dsh-any-background-data/` 内读写（配置 JSON、壁纸、轮换池、视频、字体），不触碰该目录之外的任何路径；配置写入为原子写（临时文件 + rename）。这些文件落在真实磁盘上，**不受 generation 恢复影响，也不会被其回滚**——清除它们即彻底重置插件。
+- **网络**：仅在用户主动粘贴 http/https 图片或视频网址并点击「应用」时发起一次出站请求下载该资源；除此之外无遥测、无外部服务调用。
+- **Shell / native**：无。不使用 `child_process`、不加载 native 模块、不运行动态下载的二进制。
+- **HTTP 面**：仅在本机 dsh web 服务下注册 `/dsh-any-background/{video,wallpaper,font}`（GET/HEAD 流式服务）与对应 `*/upload`（POST，上限 100 MB）及专用 RPC 通道 `/dsh-any-background`；无新增对外监听端口。
+- **是否需要重启**：首次安装后需（重新）启动 `dsh web` 加载客户端 bundle；此后的设置变更实时生效、自动落盘。更换插件版本后需重启以加载新的 `lib/client.js`。
+- **测试与验证**：`pnpm run typecheck`（tsc 全量类型检查）与 `pnpm run bundle`（tsdown 产出 `lib/`）；无自动化单测，接口行为以手动验证为准。
+- **已知限制**：依赖宿主 DOM 结构的稳定标记（如 `[data-sidebar-right-panel]`、`[data-dsh-bottom-panel]`）与 CSS 令牌名，宿主大版本重构样式层时选择器可能失效（表现为相关滑块不再作用于对应表面，不影响稳定性）；`-webkit-text-stroke` 在部分单行省略号容器边缘约有 1px 裁切。
 
 ## Star History
 
