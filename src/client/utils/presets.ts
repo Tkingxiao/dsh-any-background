@@ -11,7 +11,7 @@ export interface BuiltinPreset {
   appearance: ProfileAppearance
 }
 
-const zeroBlurs = { bg: 0, sidebar: 0, card: 0, settings: 0, chat: 0, trajectory: 0, input: 0, panel: 0, produced: 0 }
+const zeroBlurs = { bg: 0, sidebar: 0, card: 0, settings: 0, chat: 0, trajectory: 0, input: 0, panel: 0, produced: 0, header: 0 }
 
 /** Presets ship with strokes off — text outlines are an opt-in look. Fresh
  *  objects per call so a profile restore can never alias another preset's
@@ -20,7 +20,7 @@ const zeroStrokes = (): PartStrokes => {
   const off = (): StrokeConfig => ({ width: 0, color: 'auto', customColor: '#808080' })
   return {
     bg: off(), sidebar: off(), card: off(), settings: off(), chat: off(),
-    trajectory: off(), input: off(), panel: off(), produced: off(),
+    trajectory: off(), input: off(), panel: off(), produced: off(), header: off(),
   }
 }
 
@@ -39,6 +39,7 @@ export const BUILTIN_PRESETS: BuiltinPreset[] = [
       trajectoryOpacity: 1,
       panelOpacity: 1,
       producedOpacity: 1,
+      headerOpacity: 1,
     },
   },
   {
@@ -56,6 +57,7 @@ export const BUILTIN_PRESETS: BuiltinPreset[] = [
       trajectoryOpacity: 0.85,
       panelOpacity: 0.85,
       producedOpacity: 1,
+      headerOpacity: 1,
     },
   },
   {
@@ -73,6 +75,7 @@ export const BUILTIN_PRESETS: BuiltinPreset[] = [
       trajectoryOpacity: 1,
       panelOpacity: 1,
       producedOpacity: 1,
+      headerOpacity: 1,
     },
   },
   {
@@ -90,6 +93,7 @@ export const BUILTIN_PRESETS: BuiltinPreset[] = [
       trajectoryOpacity: 0.8,
       panelOpacity: 0.8,
       producedOpacity: 1,
+      headerOpacity: 1,
     },
   },
   {
@@ -107,6 +111,7 @@ export const BUILTIN_PRESETS: BuiltinPreset[] = [
       trajectoryOpacity: 0.78,
       panelOpacity: 0.75,
       producedOpacity: 1,
+      headerOpacity: 1,
     },
   },
   {
@@ -124,6 +129,7 @@ export const BUILTIN_PRESETS: BuiltinPreset[] = [
       trajectoryOpacity: 1,
       panelOpacity: 1,
       producedOpacity: 1,
+      headerOpacity: 1,
     },
   },
 ]

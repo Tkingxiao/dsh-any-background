@@ -82,6 +82,8 @@ export interface PartBlurs {
   panel: number
   /** Produced/artifact surfaces (highlighted code blocks + produced chips). */
   produced: number
+  /** Header popovers: the Agent Team panel and the background-job list. */
+  header: number
 }
 
 /** Text-stroke color of one surface group. A preset key plus the free color
@@ -122,6 +124,8 @@ export interface ProfileAppearance {
   panelOpacity: number
   /** Opacity of produced/artifact surfaces (0 = none, 1 = solid). */
   producedOpacity: number
+  /** Opacity of the header popovers (Agent Team panel + job list). */
+  headerOpacity: number
 }
 
 /** A named, saved appearance profile. */
@@ -246,6 +250,8 @@ export interface ThemeConfig {
   panelOpacity: number
   /** Opacity of produced/artifact surfaces (0 = none, 1 = solid). */
   producedOpacity: number
+  /** Opacity of the header popovers (Agent Team panel + job list). */
+  headerOpacity: number
   /** Saved appearance profiles. */
   profiles: ProfileEntry[]
   /** Wallpaper rotation pool + cadence. */

@@ -1,5 +1,6 @@
 import type { RpcResultLike, UploadOutcome } from './types'
 import { cfg, adoptConfig, setWpUrl, setWpImageUrl, setWpVideoUrl, rWpImage } from './state'
+import { adoptHostInfo } from './host'
 
 export const RPC_CHANNEL = '/dsh-any-background'
 /** Same-origin serve URL of the persisted video (enough for <video src>/fetch). */
@@ -75,7 +76,10 @@ export function persistConfig(): void {
 export async function loadPersisted(): Promise<{ rotated: boolean; firstRun: boolean }> {
   const data = await rpcCall('read', {})
   if (data && typeof data === 'object') {
-    const d = data as { config?: unknown; wallpaperUrl?: unknown; videoUrl?: unknown; fontUrl?: unknown; rotated?: unknown; firstRun?: unknown }
+    const d = data as { config?: unknown; wallpaperUrl?: unknown; videoUrl?: unknown; fontUrl?: unknown; rotated?: unknown; firstRun?: unknown; host?: unknown }
+    // Host release verdict first: feature gates read it before any appearance
+    // work runs, and it is the only source of the real version string.
+    adoptHostInfo(d.host)
     if (d.config) adoptConfig(d.config)
     // Uploaded image and video keep their own slots so type switches never
     // discard them; in image mode the caller points wpUrl at it.

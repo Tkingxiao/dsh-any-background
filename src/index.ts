@@ -14,6 +14,7 @@
  */
 import { access, mkdir, readFile, writeFile, rm, rename, stat } from 'node:fs/promises'
 import { createReadStream, createWriteStream } from 'node:fs'
+import { dirname, basename, join } from 'node:path'
 import { Readable } from 'node:stream'
 import { dshHomePath } from '@deepseek-ai/dsh-home-paths'
 
@@ -91,7 +92,7 @@ interface PartOpacities {
   bg: number; sidebar: number; card: number; input: number
 }
 interface PartBlurs {
-  bg: number; sidebar: number; card: number; settings: number; chat: number; trajectory: number; input: number; panel: number; produced: number
+  bg: number; sidebar: number; card: number; settings: number; chat: number; trajectory: number; input: number; panel: number; produced: number; header: number
 }
 /** Text-stroke color of one surface group; a preset key plus the free color
  *  used only when the key is 'custom'. */
@@ -123,6 +124,7 @@ interface ProfileAppearance {
   trajectoryOpacity: number
   panelOpacity: number
   producedOpacity: number
+  headerOpacity: number
 }
 interface ProfileEntry { id: string; name: string; createdAt: string; config: ProfileAppearance }
 interface RotationItem { file: string; thumb: string }
@@ -169,6 +171,8 @@ interface ThemeConfig {
   panelOpacity: number
   /** Opacity of produced/artifact surfaces (code blocks + highlight chips). */
   producedOpacity: number
+  /** Opacity of the header popovers (Agent Team panel + job list). */
+  headerOpacity: number
   /** Saved appearance profiles (name + appearance snapshot). */
   profiles: ProfileEntry[]
   /** Wallpaper rotation pool + cadence. */
@@ -192,7 +196,7 @@ export const DEFAULT_CONFIG: ThemeConfig = {
   // like it "saved" and then lost the value.
   color: null,
   opacities: { bg: 0.5, sidebar: 0.5, card: 0.5, input: 0.5 },
-  blurs: { bg: 30, sidebar: 30, card: 30, settings: 30, chat: 30, trajectory: 30, input: 30, panel: 30, produced: 30 },
+  blurs: { bg: 30, sidebar: 30, card: 30, settings: 30, chat: 30, trajectory: 30, input: 30, panel: 30, produced: 30, header: 30 },
   strokes: {
     bg: { width: 0, color: 'auto', customColor: '#808080' },
     sidebar: { width: 0, color: 'auto', customColor: '#808080' },
@@ -203,6 +207,7 @@ export const DEFAULT_CONFIG: ThemeConfig = {
     input: { width: 0, color: 'auto', customColor: '#808080' },
     panel: { width: 0, color: 'auto', customColor: '#808080' },
     produced: { width: 0, color: 'auto', customColor: '#808080' },
+    header: { width: 0, color: 'auto', customColor: '#808080' },
   },
   settingsOpacity: 0.5,
   wallpaperOpacity: 1,
@@ -220,11 +225,95 @@ export const DEFAULT_CONFIG: ThemeConfig = {
   trajectoryOpacity: 0.5,
   panelOpacity: 0.5,
   producedOpacity: 0.5,
+  headerOpacity: 0.5,
   profiles: [],
   rotation: { enabled: false, mode: 'shuffle', interval: 'daily', current: 0, items: [], lastRotate: null },
   schedule: { enabled: false, mode: 'time', dayProfile: null, nightProfile: null, dayStart: '07:00', nightStart: '19:00' },
   schemeOverride: 'auto',
   activeProfile: null,
+}
+
+// ── Host version detection ────────────────────────────────────────────────────
+// The client context exposes NO host version (verified against the harness: no
+// `hostVersion`/`dshVersion` field, and `window.__DSH_BOOT__.version` is the
+// module-table format tag `'client'`, not a release). So the version is derived
+// on the Node side, where the launcher's on-disk layout tells us directly.
+//
+// Two hops, most authoritative first:
+//   1. `$DSH_HOME`'s basename, because the launcher homes live in a folder named
+//      after the release (`.../homes/0.1.6-alpha.2`). This alone is a strong
+//      hint but a user may point DSH_HOME at `~/.dsh`, whose basename is not a
+//      version — hence the sanity check below.
+//   2. The installed manifest two levels up:
+//      `.../versions/<ver>/node_modules/@deepseek-ai/dsh/package.json`. When it
+//      exists its `version` field is the release's own declaration and wins.
+//
+// Anything unrecognized degrades to `null`, and callers fall back to capability
+// probing rather than guessing a generation. A wrong guess here would silently
+// change feature availability, which is exactly what this replaces.
+const VERSION_RE = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/
+
+/** True when a string looks like a release version (a bare `~/.dsh` basename does not). */
+function looksLikeVersion(value: string): boolean {
+  return VERSION_RE.test(value)
+}
+
+/** Read the installed `@deepseek-ai/dsh` manifest version for a launcher dir,
+ *  or null when the layout does not apply (plain `~/.dsh`, non-launcher hosts). */
+async function readInstalledVersion(homeDir: string): Promise<string | null> {
+  // homeDir = <root>/homes/<ver>  →  <root>/versions/<ver>
+  const root = dirname(dirname(homeDir))
+  const versionSeg = basename(homeDir)
+  const manifest = join(root, 'versions', versionSeg, 'node_modules', '@deepseek-ai', 'dsh', 'package.json')
+  try {
+    const raw = JSON.parse(await readFile(manifest, 'utf8')) as { version?: unknown }
+    if (typeof raw.version === 'string' && raw.version.trim() !== '') return raw.version.trim()
+  } catch {
+    /* fall through to the home-basename hint */
+  }
+  return null
+}
+
+/** Cached verdict: the probe touches the filesystem, and the host version never
+ *  changes within a process lifetime. */
+let hostInfoCache: HostInfo | undefined
+
+/** Resolved host release info handed to the client. */
+interface HostInfo {
+  /** The detected release string, or null when it could not be determined. */
+  version: string | null
+  /** Generation bucket used for feature gating. */
+  generation: '0.1.5' | '0.1.6' | '0.1.7' | 'unknown'
+}
+
+/** Map a release string onto the generation bucket the plugin gates features by.
+ *  The published lines are `0.1.5`, `0.1.6` and `0.1.7`, so the bucket is the
+ *  `major.minor.patch` prefix — every rc/alpha within a line shares it. */
+function generationOf(version: string | null): HostInfo['generation'] {
+  if (version === null) return 'unknown'
+  const m = /^(\d+\.\d+\.\d+)/.exec(version)
+  if (m === null) return 'unknown'
+  const key = m[1]
+  return key === '0.1.5' || key === '0.1.6' || key === '0.1.7' ? key : 'unknown'
+}
+
+/** Resolve (and cache) the host release + generation. */
+async function resolveHostInfo(): Promise<HostInfo> {
+  if (hostInfoCache !== undefined) return hostInfoCache
+  const homeDir = dshHomePath()
+  let version: string | null = null
+  try {
+    version = await readInstalledVersion(homeDir)
+  } catch {
+    /* ignore — fall back to the basename hint */
+  }
+  if (version === null) {
+    const seg = basename(homeDir)
+    if (looksLikeVersion(seg)) version = seg
+  }
+  if (version !== null && !looksLikeVersion(version)) version = null
+  hostInfoCache = { version, generation: generationOf(version) }
+  return hostInfoCache
 }
 
 const dataDir = (): string => dshHomePath(DATA_DIR)
@@ -298,7 +387,7 @@ function normalizeBgState(s: Partial<BgState>): BgState {
 }
 
 /** Coerce an unknown persisted value into a valid ThemeConfig, falling back per-field. */
-const STROKE_GROUPS = ['bg', 'sidebar', 'card', 'settings', 'chat', 'trajectory', 'input', 'panel', 'produced'] as const
+const STROKE_GROUPS = ['bg', 'sidebar', 'card', 'settings', 'chat', 'trajectory', 'input', 'panel', 'produced', 'header'] as const
 const STROKE_COLOR_KEYS = ['auto', 'gray', 'black', 'white', 'theme', 'custom'] as const
 const HEX_RE = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/
 
@@ -343,7 +432,7 @@ function normalizeConfig(raw: unknown): ThemeConfig {
   const ops = (r.opacities ?? {}) as Partial<PartOpacities>
   const bl = (r.blurs ?? {}) as Partial<PartBlurs>
   const blurs = {} as PartBlurs
-  for (const k of ['bg', 'sidebar', 'card', 'settings', 'chat', 'trajectory', 'input', 'panel', 'produced'] as const) {
+  for (const k of ['bg', 'sidebar', 'card', 'settings', 'chat', 'trajectory', 'input', 'panel', 'produced', 'header'] as const) {
     blurs[k] = clamp(bl[k], 0, 60, DEFAULT_CONFIG.blurs[k])
   }
   return {
@@ -372,6 +461,7 @@ function normalizeConfig(raw: unknown): ThemeConfig {
     trajectoryOpacity: clamp(r.trajectoryOpacity, 0, 1, DEFAULT_CONFIG.trajectoryOpacity),
     panelOpacity: clamp(r.panelOpacity, 0, 1, DEFAULT_CONFIG.panelOpacity),
     producedOpacity: clamp(r.producedOpacity, 0, 1, DEFAULT_CONFIG.producedOpacity),
+    headerOpacity: clamp(r.headerOpacity, 0, 1, DEFAULT_CONFIG.headerOpacity),
     profiles: normalizeProfiles(r.profiles),
     rotation: normalizeRotation(r.rotation),
     schedule: normalizeSchedule(r.schedule),
@@ -445,6 +535,7 @@ function normalizeProfileAppearance(raw: unknown): ProfileAppearance {
     trajectoryOpacity: clamp(a.trajectoryOpacity, 0, 1, DEFAULT_CONFIG.trajectoryOpacity),
     panelOpacity: clamp(a.panelOpacity, 0, 1, DEFAULT_CONFIG.panelOpacity),
     producedOpacity: clamp(a.producedOpacity, 0, 1, DEFAULT_CONFIG.producedOpacity),
+    headerOpacity: clamp(a.headerOpacity, 0, 1, DEFAULT_CONFIG.headerOpacity),
   }
 }
 
@@ -1435,7 +1526,10 @@ async function handleRpcMethod(
         // flag so the restored appearance comes from a file that really exists.
         const firstRun = !(await exists(configPath()))
         if (firstRun) await writeConfig(config)
-        return { ok: true, value: { config, wallpaperUrl: await wallpaperServeUrl(), videoUrl: await videoUrl(), fontUrl: await fontUrl(), rotated, firstRun } }
+        // `host` carries the detected release + generation bucket; the client
+        // gates version-specific behaviour on it and falls back to capability
+        // probing when `generation` is 'unknown'.
+        return { ok: true, value: { config, wallpaperUrl: await wallpaperServeUrl(), videoUrl: await videoUrl(), fontUrl: await fontUrl(), rotated, firstRun, host: await resolveHostInfo() } }
       }
       case 'writeConfig':
         return { ok: true, value: await writeConfig((payload as { config?: unknown } | null)?.config as ThemeConfig ?? {}) }

@@ -1,4 +1,4 @@
-import { rWp, rWpImage, rWpVideo, rBgState, rVideoBgState, rBl, rWop, rOps, rSop, rStrokes, rColor, rHasColor, rBlurs, rBgMode, rChatTextOpacity, rTrajectoryOpacity, rPanelOpacity, rProducedOpacity, rScheme, rColorScheme, rSchemeOverride, cfg, setWpUrl, rBgDark, setBgDark, disposeVideoObjectUrl } from './state'
+import { rWp, rWpImage, rWpVideo, rBgState, rVideoBgState, rBl, rWop, rOps, rSop, rStrokes, rColor, rHasColor, rBlurs, rBgMode, rChatTextOpacity, rTrajectoryOpacity, rPanelOpacity, rProducedOpacity, rHeaderOpacity, rScheme, rColorScheme, rSchemeOverride, cfg, setWpUrl, rBgDark, setBgDark, disposeVideoObjectUrl } from './state'
 import type { BackgroundType, GeneratedBgParams, PartOpacities, PartBlurs, StrokeConfig } from './types'
 import { genTokens, toRgba, extractWallpaperColor, analyzeFrameDark } from './utils/color'
 import { loadImage } from './utils/image'
@@ -75,6 +75,12 @@ export const LABEL_TOKENS = [
 // menu, model selector, popovers around the dialog) is owned by the card
 // slider; the Cordis panel shares that token but is re-scoped to the input
 // slider via INPUT_BLUR_RULE.
+//
+// `--dsw-alias-bg-base` IS the main-background surface: the AppFrame ground and
+// the conversation root that fills the center column both paint from it, which
+// is exactly what lets the wallpaper show through the main area. It must stay
+// remapped — un-remapping it makes those surfaces opaque and hides the wallpaper
+// entirely behind a solid theme color.
 const OPACITY_TOKEN_GROUPS: Array<{ part: keyof PartOpacities; names: string[] }> = [
   { part: 'bg', names: ['--dsw-alias-bg-base'] },
   { part: 'sidebar', names: ['--dsw-specific-sidebar-fill'] },
@@ -238,6 +244,11 @@ function applyCustomTokensNow(ops: PartOpacities): void {
     if (menu !== undefined) root.style.setProperty('--dsh-any-op-menu-cordis', toRgba(menu, ops.input))
     const bgKey = `${baseTokenKey}|${ops.bg}`
     if (bgKey !== lastBgKey) { lastBgKey = bgKey; applyPartOpacities(ops) }
+    // The exempt surfaces (EXEMPT_DEFAULT_RULE) point at the host's OWN token
+    // values, sampled from :root here — so re-capture them whenever the palette
+    // underneath changes. This is the one function every color/verdict/scheme
+    // path funnels through.
+    applyExemptDefaults()
   } catch {
     // ignore
   }
@@ -384,61 +395,340 @@ function applyBgBlurGlobal(px: number): void {
   else document.documentElement.style.removeProperty('--dsh-any-part-blur-global')
 }
 
-// ── Ninth surface: right sidebar / workbench panel ───────────────────────────
+// ── Right sidebar / workbench panel (the "panel" slider pair) ────────────────
 // The `panelOpacity` / blurs.panel pair targets two surfaces by mode:
-//   · native — the host's own right Sidebar (`[data-sidebar-right-panel]`,
-//     DSH 0.1.6+): a `--dsw-alias-bg-base`-painted column of the page;
+//   · native — the host's own right Sidebar (`[data-sidebar-right-panel]`),
+//     a `--dsw-alias-bg-base`-painted column of the page;
 //   · dsh-better-sidebar installed — its bottom workbench panel
 //     (`[data-dsh-bottom-panel]`), which paints every surface from the same
 //     layer/bg-base tokens.
 // Both hang where neither the column opacities nor the part-blur underlays
-// reach, so the same three rules close the gap for both: a static blur rule, a
-// token re-scope, and a stacking-context promotion. The promotion is necessary
-// because a backdrop-filter only blurs content in the SAME stacking context,
-// and both surfaces are trapped in one (the better-sidebar panel under
-// [data-dsh-panel-host], the native Sidebar under its animated frame track).
-// Re-scoping to `position: fixed` (z-index 26) re-parents the surfaces to
-// body's stacking context — above the panel host (25), below the cordis
-// floating panel (30), preserving the original layering.
-// The token re-scope lives in the ALWAYS-EMITTED static stylesheet (see
-// `index.tsx`) so the surfaces can follow the slider even when the plugin has
-// no palette (no picked color, no wallpaper verdict, no forced scheme).
-// Pointing at unwritten vars would make a surface's `background: var(--dsw-
-// alias-bg-layer-1)` declaration invalid and it would lose its
-// surface; `applyPanelOverrides` writes the vars every call so the rule
-// always has targets. Exporting here lets `index.tsx` splice it in once,
-// avoiding the per-palette re-emit in `applyCustomTokensNow`.
+// reach, so the same two rules close the gap for both: a static blur rule and a
+// token re-scope.
+//
+// DO NOT PROMOTE THESE ON 0.1.7+. An earlier revision added an UNGATED
+// `position:fixed!important;z-index:26!important` to lift the panels out of
+// their subtree's stacking context so `backdrop-filter` could sample the
+// wallpaper. That is actively wrong on 0.1.7: the right Sidebar resizes by
+// animating its in-flow track (`--dsh-sidebar-width`, 601px in the report), and
+// a fixed-positioned panel detaches from that layout, so it stops moving with
+// the sidebar and the blur appears pinned in place.
+//
+// On 0.1.7 the promotion is also unnecessary: the host's own sheet documents
+// that the panel's content root "owns no stacking context or transform", and the
+// docked Grid items carry the slide transform on CHILDREN, not on the panel
+// itself — so a backdrop-filter on the panel resolves against the page and sees
+// the wallpaper without any repositioning. Opacity stays a pure token re-scope,
+// which is layout-neutral.
+//
+// Pre-0.1.7 hosts DO still need it, and only there: see PANEL_PROMOTION_RULE,
+// which gates the promotion on the absence of the dockkit markup.
 export const PANEL_TOKEN_RULE =
-  // `!important` on position/z-index beats the host's class rules
-  // ([data-dsh-bottom-panel] and [data-sidebar-right-panel] both share 0,1,0
-  // specificity with `.bottomPanel` and `.P3OORG_panel`, so the plugin's
-  // stylesheet can lose a same-specificity tie on source order). The
-  // promotion is also non-negotiable for the backdrop-filter to work — the
-  // elements are otherwise trapped in a sub-tree stacking context.
+  // Re-scope the layer tokens so every surface inside the panel follows the
+  // panel opacity slider only. The re-scope lives in the always-emitted
+  // stylesheet so it works even with no palette (pointing at unwritten vars
+  // would invalidate the background and drop the surface entirely;
+  // `applyPanelOverrides` writes the vars on every call).
   '[data-dsh-bottom-panel],[data-sidebar-right-panel]{' +
   '--dsw-alias-bg-base:var(--dsh-any-panel-bg-base);' +
   '--dsw-alias-bg-layer-1:var(--dsh-any-panel-layer-1);' +
   '--dsw-alias-bg-layer-2:var(--dsh-any-panel-layer-2);' +
-  '--dsw-alias-bg-layer-3:var(--dsh-any-panel-layer-3);' +
-  'position:fixed!important;z-index:26!important}' +
-  // The right sidebar's fullscreen state (`data-sidebar-right-panel=fullscreen`)
-  // raises it to z-index 40 in the host CSS so the modal-level surface wins.
-  // Override the elevation when fullscreen so the slider still applies the
-  // alpha/blur; the original z-index 40 was a host layering choice that the
-  // plugin never needs to fight here (the panel still floats above the cordis
-  // inventory at 30 thanks to source order plus same-specificity; the modal
-  // dialog stack lives at 100+ which is unaffected).
-  '[data-sidebar-right-panel][data-sidebar-right-panel="fullscreen"]{z-index:40!important}'
+  '--dsw-alias-bg-layer-3:var(--dsh-any-panel-layer-3)}'
 
-// Both surfaces are now `position: fixed` (see PANEL_TOKEN_RULE), so the
-// host's transform animation no longer traps fixed-position descendants and
-// the underlay treatment from `setBlur` (used for the host columns) is
-// unnecessary. `backdrop-filter` directly on each element is safe and points
-// the blur at the wallpaper.
+// The blur must ride the element that ACTUALLY SLIDES — and that element differs
+// per host generation, which is precisely what the DOM shape exposes:
+//
+//   · 0.1.7+ — the panel is a STATIONARY frame: `[data-sidebar-right-panel]`
+//     keeps `position:absolute`, never moves, and stays visible even while
+//     collapsed. The slide is `transform: translateX(var(--dsh-sidebar-width))`
+//     on its `[data-dockkit-host='dock']` / `[data-dockkit-empty]` children,
+//     which also flip `visibility`. Verified by measurement: collapsed, the
+//     panel still reads x=783/visible while the dock is at x=1424/hidden. A
+//     `backdrop-filter` on the wrapper therefore keeps frosted glass pinned in
+//     place after the content has slid away — the "blur stays put while the
+//     sidebar moves" report.
+//
+//   · 0.1.5 / 0.1.6 — there is NO dockkit: `[data-dockkit-host]` does not exist
+//     before 0.1.7 (absent from both release trees — verified with git grep),
+//     so the child selector above matches NOTHING there. Those hosts put
+//     `transform: translateX(100%)` / `translate: none` (SidebarRight.module.css)
+//     on the PANEL ITSELF, so the wrapper is the thing that slides and the
+//     filter belongs on it. Leaving this arm out is what made the right-Sidebar
+//     blur slider inert on 0.1.6 — the regression this restores.
+//
+// `:has()` is the discriminator, so each arm sits in its OWN block: an engine
+// without :has() drops only the pre-dockkit block instead of invalidating the
+// whole selector list (a selector list is not forgiving, so one bad entry would
+// otherwise take the better-sidebar arm down with it).
+//
+// BOTH dockkit attributes are tested, not just the host cell: a pane with no
+// tabs renders `[data-dockkit-empty]` and no `data-dockkit-host`, so testing
+// `host` alone would misfire on that (transient) shape and promote a 0.1.7 panel
+// that must stay in flow.
+const NO_DOCKKIT = ':not(:has([data-dockkit-host],[data-dockkit-empty]))'
+
 export const PANEL_BLUR_RULE =
-  '[data-dsh-bottom-panel],[data-sidebar-right-panel]{' +
+  // 0.1.7+: the docked children are what slide.
+  '[data-sidebar-right-panel] [data-dockkit-host="dock"],' +
+  '[data-sidebar-right-panel] [data-dockkit-empty]{' +
+  '-webkit-backdrop-filter:var(--dsh-any-blur-panel,none);' +
+  'backdrop-filter:var(--dsh-any-blur-panel,none)}' +
+  // 0.1.5 / 0.1.6: the panel wrapper itself slides.
+  `[data-sidebar-right-panel]${NO_DOCKKIT}{` +
+  '-webkit-backdrop-filter:var(--dsh-any-blur-panel,none);' +
+  'backdrop-filter:var(--dsh-any-blur-panel,none)}' +
+  // dsh-better-sidebar workbench panel: one element, both generations.
+  '[data-dsh-bottom-panel]{' +
   '-webkit-backdrop-filter:var(--dsh-any-blur-panel,none);' +
   'backdrop-filter:var(--dsh-any-blur-panel,none)}'
+
+// Pre-0.1.7 hosts additionally need the panel promoted out of the rightbar
+// column for the backdrop-filter to resolve against the page: there the wrapper
+// is a transformed, `visibility`-toggled box inside an animated track, so the
+// filter has no wallpaper to sample without it. This is the treatment 0.2.10
+// shipped and the one the 0.1.6 report confirms working.
+//
+// It must NOT apply on 0.1.7, where the panel is a stationary frame sitting on
+// the frame's own animated track — detaching it with `position:fixed` is exactly
+// what made the blur stop travelling with the sidebar. Same `:has()` gate, again
+// in its own block so an engine without :has() cannot void the sibling rules.
+//
+// Fullscreen raises the host's own z-index to 40; matching it keeps the slider
+// effective there (the modal dialog stack lives at 100+, above both).
+export const PANEL_PROMOTION_RULE =
+  `[data-sidebar-right-panel]${NO_DOCKKIT}{` +
+  'position:fixed!important;z-index:26!important}' +
+  // Fullscreen: the host already uses position:fixed + z-index 40, so only the
+  // z-index needs re-asserting (the promotion above would otherwise drag it
+  // back to 26 and drop it under frame overlays).
+  `[data-sidebar-right-panel="fullscreen"]${NO_DOCKKIT}{` +
+  'z-index:40!important}'
+
+// ── Header popovers (Agent Team panel + background-job list + open-in-app /
+//    session-log menus + subagent lineage tree) ────────────────────────────────
+// Session-header dropdowns that paint from --dsw-specific-menu, the same token
+// the card slider owns — so they used to follow the card opacity, and the
+// non-Menu ones never got any blur (they are `position: absolute` under their
+// own trigger, not portaled to body, so POPOVER_BLUR_RULE's
+// `body > [role="dialog"]` selector misses them). This rule gives them their
+// own part: the header opacity slider retints the menu token for these
+// surfaces only, and the header blur slider frosts them.
+//
+// This rule is appended AFTER POPOVER_BLUR_RULE in the static stylesheet, and
+// each selector carries equal-or-higher specificity — so listing a surface here
+// cleanly overrides the card group instead of fighting it. That matters for the
+// menu selectors below, which DO already match `[role="menu"]`: they are moved
+// from the card group to the header group, not merely added.
+//
+// TWO MATCHING STRATEGIES, primary first:
+//
+// 1. [data-dsh-any-header-popover] — the runtime tag (see header-tag.ts). Every
+//    header dropdown portals its popover to <body> through the Menu/tree
+//    primitive, which severs the DOM link to the header and exposes no
+//    id/aria-controls back-link, so no ancestor selector can reach it. The tag
+//    module observes the stable `[data-slot="conversation.session.header*"]`
+//    anchors (emitted by the slot renderer on 0.1.5 → 0.1.7 alike) and marks the
+//    open popover. This is the ONLY strategy that still works on 0.1.7, where
+//    open-in-app moved to a portal and the session row menu became a dynamic
+//    slot — see below.
+//
+// 2. Class-shape fallbacks — retained for hosts where the tag observer has not
+//    run yet (first paint) or is unavailable, and they still cover 0.1.5/0.1.6:
+//      · ul[class*="_menu"]  — the job list is the ONLY host <ul> styled by a
+//        `menu` CSS-module class; every other `_menu` consumer (ModelSelect,
+//        TabMenu, MenuView, ScheduleCatalog, …) renders a <div>.
+//      · div[role="dialog"][class*="_panel"]:not([aria-modal="true"]) — the
+//        Agent Team panel. The other `_panel` + role="dialog" element is the
+//        settings modal (aria-modal="true"), which SETTINGS_STYLE_RULE owns.
+//      · [role="tree"][class*="_menu"] — the subagent lineage tree. Portal'd, so
+//        `body > [role="tree"]` already matched it; the class is what separates
+//        it from every other `role="tree"` (workspace lists use `.list` /
+//        `.flatList` / `.searchTree`).
+//      · [role="menu"][class*="_denseList"]:not([class*="_portal"]) — the two
+//        in-place `dense` Menu primitives: open-in-app's picker and the
+//        session-log download menu on 0.1.5/0.1.6. The `:not([_portal])` is
+//        what keeps every PORTALED dense menu (WorkspaceBrowser view options,
+//        TextPreview open-with, ReviewTab file selector) on the card slider.
+//        NOTE: on 0.1.7 open-in-app became `portal`+`dense` (see
+//        OpenTargetButton.tsx), so this fallback deliberately no longer matches
+//        it — strategy 1's tag is what restores the header grouping there.
+//        Keeping the exclusion matters: broadening it would drag the side-panel
+//        dense menus into the header group.
+// SPECIFICITY IS LOAD-BEARING HERE. The card group's rule is
+// `[role="menu"]:not([data-dockkit-tab-menu])` — specificity (0,2,0) — so a bare
+// `[data-dsh-any-header-popover]` (0,1,0) LOSES to it no matter how late it
+// appears in the sheet. That is exactly how the tagged open-in-app menu kept
+// taking the card blur. Every header selector below therefore carries an extra
+// attribute so it reaches (0,2,0)+ and genuinely overrides the card group:
+//   · [data-dsh-any-header-popover][role]     → (0,2,0)
+//   · [role="menu"][class*="_denseList"]...    → (0,2,0)+
+//
+// NO TOKEN DECLARATION LIVES HERE. The header group's surface color is written
+// as a LITERAL by `applyHeaderPopovers` into a dedicated sheet, for the same
+// reason `applyExemptDefaults` is: an earlier revision declared
+// `--dsw-specific-menu:var(--dsh-any-op-menu-header,var(--dsw-specific-menu))`,
+// which is a SELF-REFERENCE. With `--dsh-any-op-menu-header` unset (before the
+// first apply, or on a host the plugin cannot sample) the fallback names the
+// property being declared, the custom property computes to the
+// guaranteed-invalid value, and every menu background reading it goes fully
+// transparent. Literals cannot cycle; when no color resolves we emit nothing and
+// the surface keeps the re-scoped value instead.
+export const HEADER_POPOVER_RULE =
+  // `[role]` is a no-op presence test that exists purely to raise specificity
+  // above the card group for the tagged (portaled) popovers.
+  '[data-dsh-any-header-popover][role],' +
+  'ul[class*="_menu"],div[role="dialog"][class*="_panel"]:not([aria-modal="true"]),' +
+  '[role="menu"][class*="_denseList"]:not([class*="_portal"]),' +
+  '[role="tree"][class*="_menu"]{' +
+  '-webkit-backdrop-filter:var(--dsh-any-blur-header,none);' +
+  'backdrop-filter:var(--dsh-any-blur-header,none)}'
+
+// ── Surfaces pinned against the sliders (theme color kept) ────────────────────
+// Two groups the user wants the sliders to leave alone, for two reasons:
+//
+// 1. Modal-native confirm dialogs — `role="dialog"[aria-modal="true"]` WITHOUT
+//    `aria-labelledby` (which is what separates them from the settings panel
+//    that SETTINGS_STYLE_RULE owns). These are the rename / delete / risk /
+//    feedback confirmations: short-lived, destructive or decision-critical
+//    prompts whose legibility must not depend on an appearance slider. They do
+//    not match SETTINGS_STYLE_RULE, but they still inherit the body-level token
+//    re-scope, so the card slider's alpha on --dsw-alias-bg-layer-2 bleeds into
+//    them. `applyExemptDefaults` pins those tokens at alpha 1 — keeping whatever
+//    color the theme dictates, dropping only the slider's translucency.
+//
+// 2. Session row menus — the portal'd `[role="menu"]` listing rename / fork /
+//    archive / delete. Structurally identical to every other Menu primitive
+//    (model selector, @-suggestions, …) and portalled to body, so no attribute
+//    or ancestor distinguishes it. `:has([class*="_danger"])` approximates it:
+//    `_danger` is the destructive-row class, and among host menus only the
+//    session-row menu carries one (for its 删除会话 entry). Deliberately narrow,
+//    and it no-ops on engines without :has() (the menu simply keeps the card
+//    look rather than breaking).
+//
+// Both groups come AFTER POPOVER_BLUR_RULE / SETTINGS_STYLE_RULE so they win on
+// order.
+//
+// IMPORTANT — no self-referencing fallbacks. An earlier version wrote
+// `--dsw-alias-bg-layer-2:var(--dsh-any-host-layer-2,var(--dsw-alias-bg-layer-2))`.
+// When the host var is unset the fallback names the property being declared,
+// which is a CSS cycle: the custom property computes to the guaranteed-invalid
+// value and every `background:var(--dsw-alias-bg-layer-2)` consuming it becomes
+// invalid — i.e. fully transparent. That is why the pin is emitted DYNAMICALLY
+// with real literals (see applyExemptDefaults): when no color resolves we emit
+// NO declaration at all, so the element keeps the re-scoped value instead of
+// going transparent.
+//
+// Only the parts that cannot go invalid stay static: the blur/stroke resets.
+export const EXEMPT_DEFAULT_RULE =
+  '[role="dialog"][aria-modal="true"]:not([aria-labelledby]){' +
+  'backdrop-filter:none;-webkit-backdrop-filter:none}' +
+  // Session row menus (approximated by their destructive row): no plugin blur,
+  // no plugin stroke. Its surface color is restored dynamically too.
+  '[role="menu"]:has([class*="_danger"]){' +
+  'backdrop-filter:none;-webkit-backdrop-filter:none;' +
+  '-webkit-text-stroke-width:0}'
+
+/** Selector the dynamic header token rule targets — kept in sync with the
+ *  static HEADER_POPOVER_RULE selector list (specificity equal or higher than
+ *  the card group's `[role="menu"]:not(...)` so it wins). */
+const HEADER_TOKEN_SELECTOR =
+  '[data-dsh-any-header-popover][role],' +
+  'ul[class*="_menu"],div[role="dialog"][class*="_panel"]:not([aria-modal="true"]),' +
+  '[role="menu"][class*="_denseList"]:not([class*="_portal"]),' +
+  '[role="tree"][class*="_menu"]'
+
+/** Header-popover surfaces: retint the menu token and (re)write the blur.
+ *  Mirrors applyProduced: the static rule above never changes, so a drag only
+ *  rewrites the blur variable and this one dynamic rule. */
+export function applyHeaderPopovers(): void {
+  const root = document.documentElement
+  const px = rBlurs().header
+  if (px > 0) root.style.setProperty('--dsh-any-blur-header', `blur(${px}px)`)
+  else root.style.removeProperty('--dsh-any-blur-header')
+  // Alpha: re-emit the live menu token's own color with the header opacity so
+  // the popover keeps the host palette (and follows a picked color) while fading
+  // independently of the card slider.
+  //
+  // LITERAL, not a CSS var indirection — see the note on HEADER_POPOVER_RULE.
+  // The declaration goes into a dedicated sheet so the static rule stays
+  // selector-only and a drag rewrites just this one text node.
+  let opacity = rHeaderOpacity()
+  if (opacity < 0) opacity = 0
+  if (opacity > 1) opacity = 1
+  const surfaces = paletteTokens() ?? readHostOpacityTokens()
+  const menu = surfaces?.['--dsw-specific-menu']
+  const el = ensureHeaderStyle()
+  // Nothing resolved: emit NO declaration rather than an invalid one, so the
+  // surface keeps the re-scoped token value instead of going transparent.
+  const css = menu === undefined
+    ? ''
+    : `${HEADER_TOKEN_SELECTOR}{--dsw-specific-menu:${toRgba(menu, opacity)}}`
+  if (el.textContent !== css) el.textContent = css
+}
+
+let headerStyleEl: HTMLStyleElement | null = null
+function ensureHeaderStyle(): HTMLStyleElement {
+  if (headerStyleEl?.isConnected) return headerStyleEl
+  headerStyleEl = document.createElement('style')
+  headerStyleEl.dataset.plugin = 'dsh-any-background-header'
+  document.head.appendChild(headerStyleEl)
+  return headerStyleEl
+}
+
+/** Pin the exempt groups (confirm dialogs and the session-row menu) so no
+ *  appearance slider moves them — while KEEPING the active theme color.
+ *
+ *  "Default" here means "not faded, not blurred", NOT "host-palette original":
+ *  an earlier version restored the :root host colors, which also stripped the
+ *  picked theme color and made the menu look un-themed. The correct source is
+ *  the same one every other slider uses (the plugin palette when there is one,
+ *  else the host's resolved tokens) with alpha pinned to 1 — so the surface
+ *  keeps whatever color the theme currently dictates and only loses the slider's
+ *  translucency and blur.
+ *
+ *  Emitted as REAL literals into a dedicated stylesheet, never as
+ *  `var(--x, var(--x))`: a self-referencing fallback is a CSS cycle that
+ *  computes to the guaranteed-invalid value and turns every consuming
+ *  `background:var(--dsw-alias-bg-layer-2)` fully transparent. Literals also
+ *  mean that when no color can be resolved we emit NO declaration at all, so
+ *  the surface keeps the re-scoped value rather than going transparent. */
+export function applyExemptDefaults(): void {
+  if (typeof document === 'undefined') return
+  const source = paletteTokens() ?? readHostOpacityTokens()
+  const el = ensureExemptStyle()
+  const decls: string[] = []
+  // Only declare a token we actually resolved a color for, and pin it opaque.
+  const add = (token: string, value: string | undefined): void => {
+    if (value === undefined || value === '') return
+    // Literal with alpha 1 — no cycle possible, and no slider translucency.
+    decls.push(`${token}:${toRgba(value, 1)}`)
+  }
+  add('--dsw-alias-bg-layer-1', source?.['--dsw-alias-bg-layer-1'])
+  add('--dsw-alias-bg-layer-2', source?.['--dsw-alias-bg-layer-2'])
+  add('--dsw-alias-bg-layer-3', source?.['--dsw-alias-bg-layer-3'])
+  add('--dsw-specific-menu', source?.['--dsw-specific-menu'])
+  if (decls.length === 0) {
+    // Nothing resolved (pre-mount / host ships none): drop the pin rather than
+    // emit an invalid one. The surfaces keep the re-scoped look.
+    if (el.textContent !== '') el.textContent = ''
+    return
+  }
+  const dialog = '[role="dialog"][aria-modal="true"]:not([aria-labelledby])'
+  const body = decls.join(';')
+  const css =
+    `${dialog},${dialog} *{${body}}` +
+    `[role="menu"]:has([class*="_danger"]){${body}}`
+  if (el.textContent !== css) el.textContent = css
+}
+
+let exemptStyleEl: HTMLStyleElement | null = null
+function ensureExemptStyle(): HTMLStyleElement {
+  if (exemptStyleEl?.isConnected) return exemptStyleEl
+  exemptStyleEl = document.createElement('style')
+  exemptStyleEl.dataset.plugin = 'dsh-any-background-exempt'
+  document.head.appendChild(exemptStyleEl)
+  return exemptStyleEl
+}
 
 // ── Produced/artifact surfaces ─────────────────────────────────────────────
 // The surfaces owned by the "产出物/高亮内容" (produced/highlights) slider are
@@ -478,10 +768,31 @@ export const PRODUCED_RULE =
   // ContextInjectionRow body ([data-context-injection-body]) all share the
   // --dsw-alias-markdown-code-block surface as code blocks, so they receive
   // both blur and alpha modulation below.
-  // ChangedFiles card ([data-changed-files]) gets blur on its root.
+  //
+  // ChangedFiles: the card ROOT ([data-changed-files]) has NO background of its
+  // own — backdrop-filter there would frost straight through to the wallpaper
+  // and make the transparent file-list rows look broken. Blur is applied only
+  // to the header <button> (the one filled surface), keeping the effect local.
+  //
+  // SearchBlock ([data-search]) and WebBlock ([data-web]) both paint from
+  // --dsw-alias-markdown-code-block (their .block root), so they join the
+  // same produced surface group.
+  //
+  // The expanded IN/OUT card (.ioCard, ToolRow + bash-sample) also paints from
+  // --dsw-alias-markdown-code-block. It carries no data-* attribute, so it binds
+  // by its CSS-Module class shape: the harness build hashes classes as
+  // `<hash>_<localName>` (e.g. `o3BgMG_ioCard`), so `[class*="_ioCard"]` is
+  // stable across builds while a bare `.ioCard` would never match.
+  //
+  // NOTE: inline `code` chips (:not(pre)>code) are intentionally EXCLUDED from
+  // the backdrop-filter rule. They are display:inline-flex (or display:inline in
+  // compact contexts), and applying backdrop-filter on inline/inline-flex elements
+  // causes compositing-layer promotion that can expand or misalign the chip in
+  // Chromium/Electron. The alpha fade (color-mix below) still applies to them.
   '[data-code-block-content] pre,[data-code-block-banner],[data-composer-chip],' +
-  ':not(pre)>code,' +
-  '[data-changed-files],[data-terminal],[data-read],[data-context-injection-body]{' +
+  '[data-changed-files]>button:first-child,' +
+  '[data-terminal],[data-read],[data-context-injection-body],' +
+  '[data-search],[data-web],[class*="_ioCard"]{' +
   '-webkit-backdrop-filter:var(--dsh-any-blur-prod,none);' +
   'backdrop-filter:var(--dsh-any-blur-prod,none)}' +
   // ── Alpha (color-mix) ──────────────────────────────────────────────────────
@@ -526,15 +837,29 @@ export const PRODUCED_RULE =
   '[data-context-injection-body]{' +
   'background-color:color-mix(in srgb,var(--dsw-alias-markdown-code-block,transparent) var(--dsh-any-prod-pct,100%),transparent)!important}' +
   // ── ChangedFiles card [data-changed-files] ────────────────────────────────
-  // Card root has no background; the filled surface is the header <button>
-  // (first child), which paints from --changes-fill: a local CSS variable
-  // resolving to --dsw-static-neutral-50 (light) / --dsw-static-neutral-850
-  // (dark). Target those static tokens directly, gated on the dark-theme flag
-  // the plugin already writes, so light/dark palettes both fade correctly.
-  '[data-changed-files]>button:first-child{' +
-  'background-color:color-mix(in srgb,var(--dsw-static-neutral-50,transparent) var(--dsh-any-prod-pct,100%),transparent)!important}' +
-  'body[data-ds-dark-theme] [data-changed-files]>button:first-child{' +
-  'background-color:color-mix(in srgb,var(--dsw-static-neutral-850,transparent) var(--dsh-any-prod-pct,100%),transparent)!important}' +
+  // Card root has no background; the only filled surface is the header <button>
+  // (first child), which paints from --changes-fill (neutral-50 light /
+  // neutral-850 dark). That banner is NOT bound to the slider — its color stays
+  // at the host default so it reads clearly against the transparent list rows.
+  // Blur is still applied on the header button (see backdrop-filter selector
+  // above), so the wallpaper frosts through it when the blur slider is raised.
+  // ── SearchBlock [data-search] ─────────────────────────────────────────────
+  // Root (.block): background: var(--dsw-alias-markdown-code-block).
+  // Header (.header): background: var(--dsw-alias-markdown-code-block-banner).
+  // Only the root body fades — the header banner keeps its opaque host color
+  // so the white/grey title bar stays visually stable regardless of the slider.
+  '[data-search]{' +
+  'background-color:color-mix(in srgb,var(--dsw-alias-markdown-code-block,transparent) var(--dsh-any-prod-pct,100%),transparent)!important}' +
+  // ── WebBlock [data-web] ───────────────────────────────────────────────────
+  // Root (.block): background: var(--dsw-alias-markdown-code-block).
+  // No banner sub-surface; the single fill fades uniformly.
+  '[data-web]{' +
+  'background-color:color-mix(in srgb,var(--dsw-alias-markdown-code-block,transparent) var(--dsh-any-prod-pct,100%),transparent)!important}' +
+  // ── Expanded IN/OUT card [class*="_ioCard"] ───────────────────────────────
+  // ToolRow's and bash-sample's .ioCard: background: var(--dsw-alias-markdown-
+  // code-block), the same surface as a code block. No banner sub-surface.
+  '[class*="_ioCard"]{' +
+  'background-color:color-mix(in srgb,var(--dsw-alias-markdown-code-block,transparent) var(--dsh-any-prod-pct,100%),transparent)!important}' +
   '}'
 
 // ── Per-part text stroke (-webkit-text-stroke) ────────────────────────────────
@@ -583,12 +908,56 @@ export const STROKE_RULE = [
   // produced / artifact text — direct rule doubles as the chat-inheritance shield;
   // also covers changed-files card, tool-call terminal, file-read block and
   // context-injection notice (all "produced/highlight" surfaces).
+  // SearchBlock [data-search] and WebBlock [data-web] join the same group:
+  // they share the --dsw-alias-markdown-code-block surface and appear inline
+  // in the conversation column, so they inherit the chat stroke without this
+  // direct exemption, just like the other produced surfaces.
+  // The expanded IN/OUT card joins by CSS-Module class shape ([class*="_ioCard"],
+  // see PRODUCED_RULE) — same surface, same exemption.
   `[data-code-block-content] pre,[data-code-block-content],[data-code-block-banner],[data-composer-chip],:not(pre)>code,` +
-  `[data-changed-files],[data-terminal],[data-read],[data-context-injection-body]` +
+  `[data-changed-files],[data-terminal],[data-read],[data-context-injection-body],[data-search],[data-web],[class*="_ioCard"]` +
   `{-webkit-text-stroke:var(--dsh-any-stroke-produced-w,0px) var(--dsh-any-stroke-produced-c,transparent);paint-order:stroke fill}`,
   // workbench panel
   `[data-dsh-bottom-panel],[data-sidebar-right-panel]{-webkit-text-stroke:var(--dsh-any-stroke-panel-w,0px) var(--dsh-any-stroke-panel-c,transparent);paint-order:stroke fill}`,
+  // header popovers — same surfaces as HEADER_POPOVER_RULE (the runtime tag
+  // leads, since on 0.1.7 it is the only selector that still finds open-in-app).
+  `[data-dsh-any-header-popover],ul[class*="_menu"],div[role="dialog"][class*="_panel"]:not([aria-modal="true"]),` +
+  `[role="menu"][class*="_denseList"]:not([class*="_portal"]),` +
+  `[role="tree"][class*="_menu"]` +
+  `{-webkit-text-stroke:var(--dsh-any-stroke-header-w,0px) var(--dsh-any-stroke-header-c,transparent);paint-order:stroke fill}`,
   // exemptions
+  // Turn status / progress chrome — never owned by the "conversation text
+  // frame" (chat) stroke group. Both host generations render this signal on a
+  // `background-clip: text` surface, where a stroke is destructive rather than
+  // cosmetic: `-webkit-text-stroke` is INHERITED, so a rule on [data-chat-flow]
+  // reaches straight into these rows, and because their glyphs are painted by
+  // their own clipped gradient (`color: transparent`), the stroke repaints them
+  // as one flat stroke-coloured blob and the shimmer disappears.
+  //
+  // Three selectors, one per surface actually observed, so both generations are
+  // covered without a version check:
+  //   · [role="status"] — 0.1.5/0.1.6 render the live line as a bare
+  //     `.turnStatus` div under [data-chat-flow] (ChatView.module.css: brand-blue
+  //     gradient + background-clip:text + -webkit-text-fill-color:transparent).
+  //     This is the reported 0.1.6 regression. It also covers the hidden live
+  //     announcement 0.1.7 emits for a11y, and the retry/error status rows.
+  //   · [data-turn-process] — the turn-process disclosure row (0.1.6 and 0.1.7
+  //     TurnProcessNodeView). Its label is elapsed-time / activity chrome
+  //     ("深度求索中，用时40秒", "已搜索代码并协调子任务"), not conversation prose.
+  //   · [style*="--dsh-text-shimmer-spread"] / [data-text-shimmer] — the
+  //     TextShimmer primitive (0.1.7 ui-primitives) publishes that custom
+  //     property INLINE on its clipped element, so the substring match finds
+  //     every instance regardless of the hashed class name; the semantic
+  //     `data-text-shimmer` attribute (set only while the shimmer is active,
+  //     which is exactly when the clipped gradient exists) covers it too.
+  //
+  // `paint-order:normal` rides along for the same reason it does on `svg` below:
+  // it is inherited too, and a stray `stroke fill` would reorder the fill.
+  `[data-chat-flow] [role="status"],` +
+  `[data-chat-flow] [data-turn-process],` +
+  `[data-chat-flow] [data-text-shimmer],` +
+  `[data-chat-flow] [style*="--dsh-text-shimmer-spread"]` +
+  `{-webkit-text-stroke-width:0!important;paint-order:normal!important}`,
   `svg{-webkit-text-stroke-width:0!important;paint-order:normal!important}`,
   `::placeholder{-webkit-text-stroke-width:0!important}`,
 ].join('')
@@ -597,7 +966,7 @@ export const STROKE_RULE = [
  *  versus every group served by the static STROKE_RULE selectors. */
 const STROKE_INLINE_GROUPS = ['bg', 'sidebar'] as const
 type StrokeGroup = keyof PartBlurs
-const STROKE_VAR_GROUPS: StrokeGroup[] = ['card', 'settings', 'chat', 'trajectory', 'input', 'panel', 'produced']
+const STROKE_VAR_GROUPS: StrokeGroup[] = ['card', 'settings', 'chat', 'trajectory', 'input', 'panel', 'produced', 'header']
 
 /** Resolve one group's stroke color key into a concrete CSS color.
  *  'auto' contrasts the FONT direction (white fonts → black stroke and vice
@@ -1178,6 +1547,7 @@ export function applyPartBlurs(blurs: PartBlurs): void {
   applyInputBlur(blurs.input)
   applyPanelBlur(blurs.panel)
   applyProduced()
+  applyHeaderPopovers()
   applyViewCards()
 }
 
@@ -1205,6 +1575,7 @@ export function setPartBlur(part: keyof PartBlurs, v: number): void {
   if (part === 'input') { applyInputBlur(v); return }
   if (part === 'panel') { applyPanelBlur(v); return }
   if (part === 'produced') { applyProduced(); return }
+  if (part === 'header') { applyHeaderPopovers(); return }
   if (part === 'chat' || part === 'trajectory') { applyViewCards(); return }
   discoverParts()
   if (part === 'bg') { setBlur(centerEl, v); applyBgBlurGlobal(v) }
@@ -1903,6 +2274,9 @@ export function applyWp(): void {
   // no plugin palette is present so the panel follows the slider in every
   // state (picked color, wallpaper verdict, forced scheme, or none).
   applyPanelOverrides(rPanelOpacity())
+  applyProduced()
+  applyHeaderPopovers()
+  applyExemptDefaults()
   applyPartBlurs(rBlurs())
   // Strokes re-derive here so 'auto'/'theme' colors follow palette and
   // wallpaper-verdict changes (applyWp runs on every theme/color re-apply).
@@ -1940,6 +2314,9 @@ export function teardownWp(): void {
   document.documentElement.style.removeProperty('--dsh-any-blur-panel')
   document.documentElement.style.removeProperty('--dsh-any-blur-prod')
   document.documentElement.style.removeProperty('--dsh-any-prod-pct')
+  document.documentElement.style.removeProperty('--dsh-any-blur-header')
+  headerStyleEl?.remove(); headerStyleEl = null
+  exemptStyleEl?.remove(); exemptStyleEl = null
   for (const v of Object.values(OPACITY_VARS)) document.documentElement.style.removeProperty(v)
   baseTokenKey = ''
   lastBgKey = ''

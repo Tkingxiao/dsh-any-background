@@ -24,7 +24,7 @@
  * page. The native card therefore yields: it is not registered while
  * better-sidebar is detected, and it withdraws itself if better-sidebar mounts
  * later (the presence verdict is sticky-true, so no re-registration path is
- * needed). The Interface page's ninth slider follows the same split:
+ * needed). The Interface page's panel slider follows the same split:
  * "右方侧边栏" natively, "bettersidebar" when that plugin is present.
  */
 import { createElement } from 'react'
@@ -33,7 +33,8 @@ import { NS } from '../i18n'
 import { ThemeTab } from './tab'
 import { SunIcon } from '../components/icons'
 import { createStoreHook, type ObservableStore } from './store-hook'
-import { rBetterSidebar, subscribe as subscribeBetterSidebar } from '../env'
+import { rBetterSidebar, subscribe as subscribeBetterSidebar, markNativeSidebarTabs } from '../env'
+import { subscribeHostInfo, suppressesBetterSidebar } from '../host'
 
 /** Minimal restatement of the slice of `ctx.sidebarRightTabs` used here. */
 interface SidebarRightTabsService {
@@ -96,6 +97,9 @@ export function registerNativeSidebarTab(ctx: Ctx, opts: {
   ctx.inject?.(['sidebarRightTabs'], (scope: Ctx) => {
     const tabs = (scope as CtxWithTabs).sidebarRightTabs
     if (tabs === undefined || typeof tabs.register !== 'function') return
+    // This host ships its own right Sidebar (0.1.6+): record the capability so
+    // the better-sidebar page can stand down — see env.markNativeSidebarTabs.
+    markNativeSidebarTabs()
     // The face is materialized HERE, once, before the host can render the page:
     // its first build warms the store (syncBg/syncMetaNow), and a store write
     // issued from inside a render is exactly the impurity that turns into a
@@ -106,17 +110,24 @@ export function registerNativeSidebarTab(ctx: Ctx, opts: {
     // framework's props are ignored wholesale.
     const ThemeBody = () => createElement(ThemeTab, { face, useStore, locale })
     scope.effect(() => {
-      // better-sidebar owns the sidebar experience when it is present: its own
-      // "主题" page covers the same ground, and both entries would draw on the
-      // same guide page. Skip the registration entirely in that case.
-      if (rBetterSidebar()) return
+      // Which page owns the guide surface is decided by the SAME predicate the
+      // better-sidebar module uses, so the two can never both stand down and
+      // leave the Surface with no appearance card at all:
+      //   · 0.1.6+                → better-sidebar page suppressed, native wins
+      //   · 0.1.5 / unknown host  → better-sidebar page registers, native yields
+      // `suppressesBetterSidebar()` returns null until the release verdict lands
+      // (a Node round-trip), so during that window the native card registers and
+      // is withdrawn once the verdict says better-sidebar owns the surface.
+      const yieldTo = (): boolean =>
+        suppressesBetterSidebar() === false && rBetterSidebar()
+      if (yieldTo()) return
       let disposeTab: (() => void) | null = null
-      const unsubscribe = subscribeBetterSidebar(() => {
-        // better-sidebar mounted after us: withdraw the native card (sticky
-        // verdict — it never comes back, so no re-registration is needed).
+      const withdraw = (): void => {
         disposeTab?.()
         disposeTab = null
-      })
+      }
+      const unsubscribeBetter = subscribeBetterSidebar(() => { if (yieldTo()) withdraw() })
+      const unsubscribeHost = subscribeHostInfo(() => { if (yieldTo()) withdraw() })
       disposeTab = tabs.register({
         id: NATIVE_TAB_ID,
         kind: NATIVE_TAB_KIND,
@@ -132,9 +143,9 @@ export function registerNativeSidebarTab(ctx: Ctx, opts: {
         }],
       })
       return () => {
-        unsubscribe()
-        disposeTab?.()
-        disposeTab = null
+        unsubscribeBetter()
+        unsubscribeHost()
+        withdraw()
       }
     }, 'dsh-any-background: native sidebar theme tab')
     // Stage two: the body under the keyed seat, dispatched by the type's id.

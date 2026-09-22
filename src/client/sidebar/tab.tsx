@@ -23,6 +23,7 @@ import { NS } from '../i18n'
 import { ThemeSection } from '../components/ThemeSection'
 import { SunIcon } from '../components/icons'
 import { createStoreHook, type ObservableStore } from './store-hook'
+import { subscribeHostInfo, suppressesBetterSidebar } from '../host'
 
 /** Minimal restatement of the slice of `ctx.betterSidebar` used here. */
 interface BetterSidebarService {
@@ -110,21 +111,47 @@ export function registerThemeSidebarTab(ctx: Ctx, opts: {
   ctx.inject?.(['betterSidebar'], (scope: Ctx) => {
     const service = (scope as CtxWithSidebar).betterSidebar
     if (service === undefined) return
+    // A host whose own right Sidebar already carries the appearance page
+    // (0.1.6+) would show two identical entries on the same guide surface, so
+    // the better-sidebar page stands down. Driven by the DETECTED RELEASE, not
+    // by the native-sidebar service: that service also exists on 0.1.5-rc.2,
+    // where the better-sidebar page must still register.
+    const suppress = suppressesBetterSidebar()
+    if (suppress === true) return
+    let disposeTab: (() => void) | null = null
+    // Verdict not landed yet (Node round-trip): register now and withdraw if it
+    // turns out to be 0.1.6+ — better a brief duplicate than a missing page.
+    const unsubscribeHost = suppress === null
+      ? subscribeHostInfo(() => {
+        if (suppressesBetterSidebar() === true) {
+          disposeTab?.()
+          disposeTab = null
+          unsubscribeHost()
+        }
+      })
+      : () => {}
     // The face is materialized HERE, once, before the host can render the page.
     // Its first build warms the store (syncBg/syncMetaNow), and a store write
     // issued from inside a render is exactly the kind of impurity that turns
     // into a "setState while rendering" warning later.
     const face = opts.face()
-    scope.effect(() => service.registerTab({
-      id: 'dsh-any-background:theme',
-      title: () => t('nav'),
-      icon: (size: number) => createElement(SunIcon, { size }),
-      order: ORDER,
-      single: true,
-      // The tab props carry better-sidebar's own store/scope/visible seats and
-      // are not needed: this page polls nothing, and its only subscription is
-      // the plugin store, shared with the settings section.
-      component: () => createElement(ThemeTab, { face, useStore, locale }),
-    }))
+    scope.effect(() => {
+      disposeTab = service.registerTab({
+        id: 'dsh-any-background:theme',
+        title: () => t('nav'),
+        icon: (size: number) => createElement(SunIcon, { size }),
+        order: ORDER,
+        single: true,
+        // The tab props carry better-sidebar's own store/scope/visible seats
+        // and are not needed: this page polls nothing, and its only
+        // subscription is the plugin store, shared with the settings section.
+        component: () => createElement(ThemeTab, { face, useStore, locale }),
+      }) ?? null
+      return () => {
+        unsubscribeHost()
+        disposeTab?.()
+        disposeTab = null
+      }
+    })
   })
 }

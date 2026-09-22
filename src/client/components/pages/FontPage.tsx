@@ -38,6 +38,7 @@ const PARTS: PartDef[] = [
   { key: 'chat', labelKey: 'uiChatRegion', Icon: TextIcon },
   { key: 'trajectory', labelKey: 'uiTrajectory', Icon: TrajectoryIcon },
   { key: 'produced', labelKey: 'uiProduced', Icon: TextIcon },
+  { key: 'header', labelKey: 'uiHeader', Icon: PanelIcon },
   { key: 'panel', labelKey: 'uiPanelRegion', Icon: PanelIcon, needsSidebar: true },
 ]
 

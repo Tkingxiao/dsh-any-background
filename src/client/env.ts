@@ -19,10 +19,10 @@ import { useSyncExternalStore } from 'react'
  *  conditionally rendered (collapsed panels drop them), so they must never be
  *  the sole signal.
  *
- *  `[data-sidebar-right-panel]` is deliberately ABSENT: on DSH 0.1.6+ it marks
- *  the host's own right Sidebar (always present once a session opens), so
- *  counting it would make the better-sidebar verdict permanently true and the
- *  ninth slider could never drop back to its native "右方侧边栏" identity. */
+ *  `[data-sidebar-right-panel]` is deliberately ABSENT: on every host generation
+ *  it marks the host's own right Sidebar (always present once a session opens),
+ *  so counting it would make the better-sidebar verdict permanently true and the
+ *  panel slider could never drop back to its native "右方侧边栏" identity. */
 export const BETTER_SIDEBAR_MARKERS = [
   '[data-dsh-better-sidebar]',
   '[data-dsh-panel-host]',
@@ -68,4 +68,40 @@ export function startBetterSidebarWatch(): () => void {
   const observer = new MutationObserver(sync)
   observer.observe(document.body, { childList: true })
   return () => observer.disconnect()
+}
+
+// ── Native right-Sidebar capability ───────────────────────────────────────────
+// CORRECTION: the native right Sidebar is NOT a 0.1.6+ introduction. It ships and
+// is enabled on 0.1.5-rc.2 already — `@deepseek-ai/dsh-client-ui-sidebar-right`
+// is a `dsh-web-app` dependency and its `ui-sidebar-right` entry is in that
+// release's `cordis.patch.yml`, and `ctx.sidebarRightTabs` is provided there
+// too. An earlier revision of this module treated the service as a "0.1.6+"
+// probe, which wrongly suppressed the better-sidebar page on 0.1.5.
+//
+// The real release comes from `host.ts` (resolved on the Node half, where the
+// launcher's on-disk layout is readable). This flag now only records whether the
+// native registry service was actually CONFIRMED on this host — a runtime
+// availability fact used to decide whether the native tab can be registered at
+// all — while the better-sidebar suppression is driven by the host generation.
+
+let nativeTabs = false
+const nativeSubs = new Set<() => void>()
+
+/** Whether the native right-Sidebar tab registry service was confirmed present. */
+export function rNativeSidebarTabs(): boolean {
+  return nativeTabs
+}
+
+/** Mark the native right-Sidebar service as confirmed. Sticky — the service
+ *  never goes away within a session. */
+export function markNativeSidebarTabs(): void {
+  if (nativeTabs) return
+  nativeTabs = true
+  nativeSubs.forEach(cb => cb())
+}
+
+/** Subscribe to the native-Sidebar verdict. */
+export function subscribeNativeTabs(cb: () => void): () => void {
+  nativeSubs.add(cb)
+  return () => { nativeSubs.delete(cb) }
 }

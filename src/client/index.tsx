@@ -10,7 +10,7 @@ import type { Ctx, RpcResultLike, BoundActions, ThemeSectionProps, PartOpacities
 import { NS, zh, en } from './i18n'
 import { cfg, rHasColor, rColor, rWp, rWpImage, rWpVideo, rBgState, rVideoBgState, setWpUrl, setWpImageUrl, setWpVideoUrl, setWpVideoSnapshot, setBgState, adoptConfig, DEFAULT_CONFIG, setBgDark, rBgDark, rProfiles, rRotation, rSchedule, rScheme, rColorScheme, rSchemeOverride, currentAppearance, applyAppearance } from './state'
 import { RPC_CHANNEL, VIDEO_SERVE_URL, FONT_SERVE_URL, fontServeUrl, initRpc, saveConfig, flushSave, loadPersisted, persistWallpaper, persistVideo, persistConfig, uploadVideo, uploadFont, removeFont as rpcRemoveFont, rotationAdd, rotationRemove, rotationActivate, setVideoFromUrl as rpcSetVideoFromUrl } from './rpc'
-import { applyWp, teardownWp, applySettingsOverrides, applyPanelOverrides, SETTINGS_STYLE_RULE, POPOVER_BLUR_RULE, TRAJECTORY_STYLE_RULE, INPUT_BLUR_RULE, PLACEHOLDER_RULE, MOBILE_HEADER_RULE, PANEL_BLUR_RULE, PANEL_TOKEN_RULE, PRODUCED_RULE, STROKE_RULE, applyStrokes, applyFontFace, watchParts, watchThemeResets, regenerateGeneratedBg, setBackgroundType, updateGeneratedBg, applyThemeColor, onGeneratedSnapshot, watchWallpaperDragQuality, clearThemeTokens, onVerdictApplied, onColorAdopted, LABEL_TOKENS } from './wallpaper'
+import { applyWp, teardownWp, applySettingsOverrides, applyPanelOverrides, SETTINGS_STYLE_RULE, POPOVER_BLUR_RULE, TRAJECTORY_STYLE_RULE, INPUT_BLUR_RULE, PLACEHOLDER_RULE, MOBILE_HEADER_RULE, PANEL_BLUR_RULE, PANEL_PROMOTION_RULE, PANEL_TOKEN_RULE, PRODUCED_RULE, STROKE_RULE, HEADER_POPOVER_RULE, EXEMPT_DEFAULT_RULE, applyStrokes, applyFontFace, watchParts, watchThemeResets, regenerateGeneratedBg, setBackgroundType, updateGeneratedBg, applyThemeColor, onGeneratedSnapshot, watchWallpaperDragQuality, clearThemeTokens, onVerdictApplied, onColorAdopted, LABEL_TOKENS } from './wallpaper'
 import { genTokens, hslToHsv, hsvToHsl, extractWallpaperColor } from './utils/color'
 import { captureVideoSnapshot } from './utils/video'
 import { readImgAsync, makeThumb, blobToDataUrl } from './utils/image'
@@ -19,6 +19,7 @@ import { registerThemeSidebarTab } from './sidebar/tab'
 import { registerNativeSidebarTab } from './sidebar/native-tab'
 import { SUN_PATHS } from './components/icons'
 import { startBetterSidebarWatch } from './env'
+import { startHeaderPopoverTagging } from './header-tag'
 
 export const name = 'dsh-any-background'
 export const inject = ['slots', 'locale', 'theme', 'connection']
@@ -126,7 +127,7 @@ export function apply(ctx: Ctx): void {
   styleEl.dataset.plugin = 'dsh-any-background'
   // Only applies while applyCustomTokens marks the body with the plugin's
   // own dark-mode value, avoiding matches against the host's theme attribute.
-  styleEl.textContent = `body[data-ds-dark-theme="dsh-any-background"]::before{content:'';position:fixed;inset:0;z-index:-1;pointer-events:none;background:radial-gradient(ellipse 80% 60% at 50% 0%,rgba(255,255,255,0.03) 0%,transparent 60%)}${SETTINGS_STYLE_RULE}${POPOVER_BLUR_RULE}${TRAJECTORY_STYLE_RULE}${INPUT_BLUR_RULE}${MOBILE_HEADER_RULE}${PANEL_TOKEN_RULE}${PANEL_BLUR_RULE}${PRODUCED_RULE}${STROKE_RULE}` + PLACEHOLDER_RULE
+  styleEl.textContent = `body[data-ds-dark-theme="dsh-any-background"]::before{content:'';position:fixed;inset:0;z-index:-1;pointer-events:none;background:radial-gradient(ellipse 80% 60% at 50% 0%,rgba(255,255,255,0.03) 0%,transparent 60%)}${SETTINGS_STYLE_RULE}${POPOVER_BLUR_RULE}${TRAJECTORY_STYLE_RULE}${INPUT_BLUR_RULE}${MOBILE_HEADER_RULE}${PANEL_TOKEN_RULE}${PANEL_PROMOTION_RULE}${PANEL_BLUR_RULE}${PRODUCED_RULE}${STROKE_RULE}${HEADER_POPOVER_RULE}${EXEMPT_DEFAULT_RULE}` + PLACEHOLDER_RULE
   document.head.appendChild(styleEl)
   ctx.effect(() => () => { styleEl?.parentNode?.removeChild(styleEl) }, 'dsh-any-background: gradient')
 
@@ -471,6 +472,7 @@ export function apply(ctx: Ctx): void {
   }, 'dsh-any-background: schedule timer')
   ctx.effect(() => () => { teardownWp() }, 'dsh-any-background: wp cleanup')
   ctx.effect(() => startBetterSidebarWatch(), 'dsh-any-background: better-sidebar watch')
+  ctx.effect(() => startHeaderPopoverTagging(), 'dsh-any-background: header popover tagging')
   ctx.effect(() => ctx.on('theme/change', () => {
     // The custom theme's preference lives in memory, so a host adoption can
     // silently reset it; re-assert it while the skin has anything to say (a

@@ -1,8 +1,8 @@
 import type { CSSProperties, ComponentType } from 'react'
 import type { ThemeSectionProps, ThemeStoreState, PartOpacities, PartBlurs } from '../../types'
-import { cfg, rOps, rSop, rBlurs, rChatTextOpacity, rTrajectoryOpacity, rPanelOpacity, rProducedOpacity } from '../../state'
+import { cfg, rOps, rSop, rBlurs, rChatTextOpacity, rTrajectoryOpacity, rPanelOpacity, rProducedOpacity, rHeaderOpacity } from '../../state'
 import { saveConfig } from '../../rpc'
-import { applyCustomTokens, applySettingsOverrides, setPartBlur, applyViewCards, applyTrajectoryOverrides, applyPanelOverrides, applyProduced } from '../../wallpaper'
+import { applyCustomTokens, applySettingsOverrides, setPartBlur, applyViewCards, applyTrajectoryOverrides, applyPanelOverrides, applyProduced, applyHeaderPopovers } from '../../wallpaper'
 import { LiveSlider } from '../LiveSlider'
 import { CanvasIcon, SidebarIcon, ChatIcon, GearIcon, TextIcon, TrajectoryIcon, InputIcon, PanelIcon } from '../icons'
 import { useBetterSidebar } from '../../env'
@@ -21,6 +21,8 @@ interface PartDef {
   isPanel?: boolean
   /** Highlighter code blocks + produced chips: opacity + blur. */
   isProduced?: boolean
+  /** Header popovers (Agent Team panel + background-job list): opacity + blur. */
+  isHeader?: boolean
 }
 
 const PARTS: PartDef[] = [
@@ -32,6 +34,7 @@ const PARTS: PartDef[] = [
   { isChat: true, labelKey: 'uiChatRegion', Icon: TextIcon },
   { isTrajectory: true, labelKey: 'uiTrajectory', Icon: TrajectoryIcon },
   { isProduced: true, labelKey: 'uiProduced', Icon: TextIcon },
+  { isHeader: true, labelKey: 'uiHeader', Icon: PanelIcon },
   { isPanel: true, labelKey: 'uiPanelRegion', Icon: PanelIcon },
 ]
 
@@ -43,9 +46,9 @@ export function InterfacePage({ p }: { p: ThemeSectionProps }) {
   // values from before the change (while the interface itself already moved).
   const metaRev = useStore((s: ThemeStoreState) => s.metaRev)
   void metaRev
-  // The ninth row is always present, but its identity follows the host:
-  //   · native (DSH 0.1.6+ right Sidebar) — "右方侧边栏", the slider pair
-  //     drives the host's own `[data-sidebar-right-panel]` surface tokens;
+  // The panel row is always present, but its identity follows the host:
+  //   · native (right Sidebar) — "右方侧边栏", the slider pair drives the
+  //     host's own `[data-sidebar-right-panel]` surface tokens;
   //   · dsh-better-sidebar installed — "bettersidebar", the same pair takes
   //     over that plugin's bottom workbench panel as well. The verdict is
   //     sticky (see env.ts), so the label flips at most once per session and
@@ -62,9 +65,9 @@ export function InterfacePage({ p }: { p: ThemeSectionProps }) {
 
       <div className="dab-grid-parts">
         {PARTS.map((part, i) => {
-          const { labelKey, Icon, isSettings, isChat, isTrajectory, isPanel, isProduced } = part
+          const { labelKey, Icon, isSettings, isChat, isTrajectory, isPanel, isProduced, isHeader } = part
           const opKey = part.opKey
-          // The ninth row's name follows the host: native right Sidebar without
+          // The panel row's name follows the host: native right Sidebar without
           // better-sidebar, that plugin's workbench with it.
           const label = isPanel ? t(hasBetterSidebar ? 'uiPanelRegion' : 'uiPanelNative') : t(labelKey)
           // Homepage parts (bg/sidebar/card/input) bind to their own part only;
@@ -74,12 +77,14 @@ export function InterfacePage({ p }: { p: ThemeSectionProps }) {
           // panel would track the homepage center/card blur and the home-page
           // opacities. The chat region (isChat) and the trajectory view
           // (isTrajectory) own their own blur keys plus their own tint
-          // opacities; the ninth row (isPanel — native right Sidebar or the
-          // better-sidebar workbench, per the label) owns the 'panel' blur key
-          // and cfg.panelOpacity. Every homepage opKey is also a PartBlurs key
-          // (input included), so the shared blur slider dereferences it directly.
-          const blurKey: keyof PartBlurs = isChat ? 'chat' : isTrajectory ? 'trajectory' : isSettings ? 'settings' : isPanel ? 'panel' : isProduced ? 'produced' : opKey!
-          const opacity = isChat ? rChatTextOpacity() : isTrajectory ? rTrajectoryOpacity() : isSettings ? rSop() : isPanel ? rPanelOpacity() : isProduced ? rProducedOpacity() : rOps()[opKey!]
+          // opacities; the header row (isHeader) owns the 'header' blur key and
+          // cfg.headerOpacity; the panel row (isPanel — native right Sidebar or
+          // the better-sidebar workbench, per the label) owns the 'panel' blur
+          // key and cfg.panelOpacity. Every homepage opKey is also a PartBlurs
+          // key (input included), so the shared blur slider dereferences it
+          // directly.
+          const blurKey: keyof PartBlurs = isChat ? 'chat' : isTrajectory ? 'trajectory' : isSettings ? 'settings' : isPanel ? 'panel' : isProduced ? 'produced' : isHeader ? 'header' : opKey!
+          const opacity = isChat ? rChatTextOpacity() : isTrajectory ? rTrajectoryOpacity() : isSettings ? rSop() : isPanel ? rPanelOpacity() : isProduced ? rProducedOpacity() : isHeader ? rHeaderOpacity() : rOps()[opKey!]
           return (
             <section key={blurKey} className="dab-card dab-card-hover dab-rise" style={{ '--d': i + 1 } as CSSProperties}>
               <div className="dab-part-head">
@@ -107,6 +112,9 @@ export function InterfacePage({ p }: { p: ThemeSectionProps }) {
                   } else if (isProduced) {
                     cfg.producedOpacity = op
                     applyProduced()
+                  } else if (isHeader) {
+                    cfg.headerOpacity = op
+                    applyHeaderPopovers()
                   } else {
                     const ops = { ...rOps() }
                     ops[opKey!] = op
@@ -132,6 +140,10 @@ export function InterfacePage({ p }: { p: ThemeSectionProps }) {
                   } else if (isProduced) {
                     cfg.producedOpacity = op
                     applyProduced()
+                    saveConfig()
+                  } else if (isHeader) {
+                    cfg.headerOpacity = op
+                    applyHeaderPopovers()
                     saveConfig()
                   } else {
                     const ops = { ...rOps() }
