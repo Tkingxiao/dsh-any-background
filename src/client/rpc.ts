@@ -1,6 +1,6 @@
 import type { RpcResultLike, UploadOutcome } from './types'
 import { cfg, adoptConfig, setWpUrl, setWpImageUrl, setWpVideoUrl, rWpImage } from './state'
-import { adoptHostInfo } from './host'
+import { adoptHostInfo } from './host-compat/release'
 
 export const RPC_CHANNEL = '/dsh-any-background'
 /** Same-origin serve URL of the persisted video (enough for <video src>/fetch). */

@@ -15,10 +15,10 @@
  *
  * THE SIGNAL
  * The slot renderer stamps every registered slot with `data-slot="<key>"`
- * (ui-renderer `scoped-slots.tsx`), and the session header's own slots are
- * `conversation.session.header{,.actions,.utilities,.corner,.lineage}` — present
- * on 0.1.5 through 0.1.7 alike. Those anchors live in the header subtree, so the
- * plugin can detect when a header trigger is expanded.
+ * (ui-renderer `scoped-slots.tsx`). Those anchors live in the header subtree, so
+ * the plugin can detect when a header trigger is expanded — which keys identify
+ * the header is a per-release fact and comes from the host adapter, not from a
+ * hardcoded list here.
  *
  * WHY NOT GEOMETRY
  * A tempting link is the inline position the primitive writes on a portaled list
@@ -46,24 +46,31 @@
  * @module
  */
 
+import { hostAdapter } from './host-compat/capabilities'
+
 /** Marker attribute the stylesheet keys on. */
 export const HEADER_POPOVER_ATTR = 'data-dsh-any-header-popover'
-
-/** Slot anchors that identify the session header's own surfaces. */
-const HEADER_SLOT_SELECTOR = [
-  '[data-slot="conversation.session.header"]',
-  '[data-slot="conversation.session.header.actions"]',
-  '[data-slot="conversation.session.header.utilities"]',
-  '[data-slot="conversation.session.header.corner"]',
-  '[data-slot="conversation.session.header.lineage"]',
-].join(',')
 
 /** Portaled popovers a header trigger can own. */
 const POPOVER_SELECTOR = '[role="menu"], [role="tree"], [role="dialog"]'
 
+/** Which session-header slot anchors to watch — supplied by the host adapter,
+ *  because the set is not the same on every release: 0.1.6-alpha.2 registers a
+ *  sixth (`.leading`) that neither the line before nor the line after has.
+ *  Memoised on the array identity, which the adapter keeps stable until the
+ *  release verdict lands. */
+let slotAnchorCache: { keys: readonly string[]; selector: string } | null = null
+function headerSlotAnchors(): string {
+  const keys = hostAdapter().surface.headerSlotKeys
+  if (slotAnchorCache === null || slotAnchorCache.keys !== keys) {
+    slotAnchorCache = { keys, selector: keys.map(key => `[data-slot="${key}"]`).join(',') }
+  }
+  return slotAnchorCache.selector
+}
+
 /** Whether any header slot anchor has an expanded trigger. */
 function headerTriggerOpen(): boolean {
-  for (const anchor of document.querySelectorAll(HEADER_SLOT_SELECTOR)) {
+  for (const anchor of document.querySelectorAll(headerSlotAnchors())) {
     if (anchor.querySelector('[aria-expanded="true"]') !== null) return true
   }
   return false

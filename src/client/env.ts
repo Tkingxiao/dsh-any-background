@@ -78,11 +78,11 @@ export function startBetterSidebarWatch(): () => void {
 // too. An earlier revision of this module treated the service as a "0.1.6+"
 // probe, which wrongly suppressed the better-sidebar page on 0.1.5.
 //
-// The real release comes from `host.ts` (resolved on the Node half, where the
+// The real release comes from `host-compat/` (resolved on the Node half, where the
 // launcher's on-disk layout is readable). This flag now only records whether the
 // native registry service was actually CONFIRMED on this host — a runtime
 // availability fact used to decide whether the native tab can be registered at
-// all — while the better-sidebar suppression is driven by the host generation.
+// all — while the better-sidebar suppression is driven by the host adapter.
 
 let nativeTabs = false
 const nativeSubs = new Set<() => void>()

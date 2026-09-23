@@ -6,9 +6,13 @@ export const DEFAULT_CONFIG: ThemeConfig = {
   // 0.93 / 1 / 1 with every blur at 0): a fresh install then shows right away
   // that the controls are live, instead of looking inert until each slider is
   // dragged once. Only affects installs with no persisted config.
-  opacities: { bg: 0.5, sidebar: 0.5, card: 0.5, input: 0.5 },
-  // Blur sliders are px-based (0–60), so 50% of their range is 30px.
-  blurs: { bg: 30, sidebar: 30, card: 30, settings: 30, chat: 30, trajectory: 30, input: 30, panel: 30, produced: 30, header: 30 },
+  // The main background is the deliberate exception: with no persisted config it
+  // now paints nothing over the wallpaper (opacity 0) and frosts nothing (blur 0),
+  // so a first launch shows the picture as uploaded.
+  opacities: { bg: 0, sidebar: 0.5, card: 0.5, input: 0.5 },
+  // Blur sliders are px-based (0–60), so 50% of their range is 30px — except the
+  // bg pair above and below, which start untouched.
+  blurs: { bg: 0, sidebar: 30, card: 30, settings: 30, chat: 30, trajectory: 30, input: 30, panel: 30, produced: 30, header: 30 },
   strokes: {
     bg: { width: 0, color: 'auto', customColor: '#808080' },
     sidebar: { width: 0, color: 'auto', customColor: '#808080' },
@@ -24,10 +28,12 @@ export const DEFAULT_CONFIG: ThemeConfig = {
   settingsOpacity: 0.5,
   // 100% = the background picture untouched. Deliberately NOT part of the
   // 50% default batch: halving the wallpaper's own alpha would wash out a
-  // freshly uploaded picture — every surface slider above is mid-scale, this
-  // one stays opaque.
+  // freshly uploaded picture — the other surface sliders above are mid-scale,
+  // this one stays opaque.
   wallpaperOpacity: 1,
-  blur: 30,
+  // The 背景 page's own wallpaper blur, 0 for the same reason: a first install
+  // shows the wallpaper exactly as uploaded.
+  blur: 0,
   bgState: { zoom: 1, x: 0, y: 0, iw: 0, ih: 0 },
   videoBgState: { zoom: 1, x: 0, y: 0, iw: 0, ih: 0 },
   backgroundType: 'image',

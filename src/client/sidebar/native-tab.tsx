@@ -1,14 +1,19 @@
 /**
- * dsh-any-background — native right-Sidebar integration (DSH 0.1.6+).
+ * dsh-any-background — native right-Sidebar integration.
  *
- * DSH 0.1.6 ships an official right Sidebar (`dsh-client-ui-sidebar-right`)
- * with a public two-stage extension path: a static tab type into
+ * DSH ships an official right Sidebar (`dsh-client-ui-sidebar-right`) with a
+ * public two-stage extension path: a static tab type into
  * `ctx.sidebarRightTabs` — whose `guide` entry draws a card on the Sidebar's
  * guide page — and a body under the keyed `sidebar.right.pane.tab` seat. This
  * module registers the plugin's appearance pages through that path, so the
  * official Sidebar gains a "主题" card that opens the very same five pages the
  * settings panel shows (one implementation, one state store; editing in either
  * place shows up in the other).
+ *
+ * NOTE: that registry is NOT a new-host feature. It is provided on 0.1.5-rc.2
+ * already (verified against the release tag), so nothing here may treat "the
+ * service answered" as "this is a recent DSH" — whether this tab or the
+ * better-sidebar page owns the guide surface is the host adapter's call.
  *
  * The dependency is optional at every level, mirroring `sidebar/tab.tsx`:
  *   · the registry is waited on with `ctx.inject`, so a host without the
@@ -34,7 +39,8 @@ import { ThemeTab } from './tab'
 import { SunIcon } from '../components/icons'
 import { createStoreHook, type ObservableStore } from './store-hook'
 import { rBetterSidebar, subscribe as subscribeBetterSidebar, markNativeSidebarTabs } from '../env'
-import { subscribeHostInfo, suppressesBetterSidebar } from '../host'
+import { subscribeHostInfo } from '../host-compat/release'
+import { sidebarGuideOwner } from '../host-compat/capabilities'
 
 /** Minimal restatement of the slice of `ctx.sidebarRightTabs` used here. */
 interface SidebarRightTabsService {
@@ -97,8 +103,9 @@ export function registerNativeSidebarTab(ctx: Ctx, opts: {
   ctx.inject?.(['sidebarRightTabs'], (scope: Ctx) => {
     const tabs = (scope as CtxWithTabs).sidebarRightTabs
     if (tabs === undefined || typeof tabs.register !== 'function') return
-    // This host ships its own right Sidebar (0.1.6+): record the capability so
-    // the better-sidebar page can stand down — see env.markNativeSidebarTabs.
+    // This host has the native registry: record the capability so the
+    // better-sidebar page knows the surface exists at all. Presence alone does NOT
+    // decide who owns it — see markNativeSidebarTabs and the module note.
     markNativeSidebarTabs()
     // The face is materialized HERE, once, before the host can render the page:
     // its first build warms the store (syncBg/syncMetaNow), and a store write
@@ -113,13 +120,12 @@ export function registerNativeSidebarTab(ctx: Ctx, opts: {
       // Which page owns the guide surface is decided by the SAME predicate the
       // better-sidebar module uses, so the two can never both stand down and
       // leave the Surface with no appearance card at all:
-      //   · 0.1.6+                → better-sidebar page suppressed, native wins
-      //   · 0.1.5 / unknown host  → better-sidebar page registers, native yields
-      // `suppressesBetterSidebar()` returns null until the release verdict lands
-      // (a Node round-trip), so during that window the native card registers and
-      // is withdrawn once the verdict says better-sidebar owns the surface.
+      //   · the host owns it   → better-sidebar page suppressed, native wins
+      //   · the plugin owns it → better-sidebar page registers, native yields
+      //   · pending verdict    → the native card registers, and is withdrawn once
+      //     the adapter says better-sidebar owns the surface.
       const yieldTo = (): boolean =>
-        suppressesBetterSidebar() === false && rBetterSidebar()
+        sidebarGuideOwner() === 'plugin' && rBetterSidebar()
       if (yieldTo()) return
       let disposeTab: (() => void) | null = null
       const withdraw = (): void => {

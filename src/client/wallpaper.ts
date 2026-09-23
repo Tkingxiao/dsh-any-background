@@ -1,3 +1,5 @@
+import { PANEL_SURFACES } from './host-compat/versions/shared'
+import { HEADER_POPOVER_ATTR } from './header-tag'
 import { rWp, rWpImage, rWpVideo, rBgState, rVideoBgState, rBl, rWop, rOps, rSop, rStrokes, rColor, rHasColor, rBlurs, rBgMode, rChatTextOpacity, rTrajectoryOpacity, rPanelOpacity, rProducedOpacity, rHeaderOpacity, rScheme, rColorScheme, rSchemeOverride, cfg, setWpUrl, rBgDark, setBgDark, disposeVideoObjectUrl } from './state'
 import type { BackgroundType, GeneratedBgParams, PartOpacities, PartBlurs, StrokeConfig } from './types'
 import { genTokens, toRgba, extractWallpaperColor, analyzeFrameDark } from './utils/color'
@@ -403,106 +405,25 @@ function applyBgBlurGlobal(px: number): void {
 //     (`[data-dsh-bottom-panel]`), which paints every surface from the same
 //     layer/bg-base tokens.
 // Both hang where neither the column opacities nor the part-blur underlays
-// reach, so the same two rules close the gap for both: a static blur rule and a
-// token re-scope.
+// reach, so both need their own treatment: a token re-scope here, and a blur rule
+// from the adapters.
 //
-// DO NOT PROMOTE THESE ON 0.1.7+. An earlier revision added an UNGATED
-// `position:fixed!important;z-index:26!important` to lift the panels out of
-// their subtree's stacking context so `backdrop-filter` could sample the
-// wallpaper. That is actively wrong on 0.1.7: the right Sidebar resizes by
-// animating its in-flow track (`--dsh-sidebar-width`, 601px in the report), and
-// a fixed-positioned panel detaches from that layout, so it stops moving with
-// the sidebar and the blur appears pinned in place.
-//
-// On 0.1.7 the promotion is also unnecessary: the host's own sheet documents
-// that the panel's content root "owns no stacking context or transform", and the
-// docked Grid items carry the slide transform on CHILDREN, not on the panel
-// itself — so a backdrop-filter on the panel resolves against the page and sees
-// the wallpaper without any repositioning. Opacity stays a pure token re-scope,
-// which is layout-neutral.
-//
-// Pre-0.1.7 hosts DO still need it, and only there: see PANEL_PROMOTION_RULE,
-// which gates the promotion on the absence of the dockkit markup.
+// Which element the blur rides, and whether the panel has to be lifted out of its
+// stacking context to have wallpaper to sample, CHANGED between host releases —
+// that history (and the measurement behind it) lives with the adapters that answer
+// it, in `host-compat/versions/*`. The token re-scope below is layout-neutral and
+// stays correct on every release.
 export const PANEL_TOKEN_RULE =
   // Re-scope the layer tokens so every surface inside the panel follows the
   // panel opacity slider only. The re-scope lives in the always-emitted
   // stylesheet so it works even with no palette (pointing at unwritten vars
   // would invalidate the background and drop the surface entirely;
   // `applyPanelOverrides` writes the vars on every call).
-  '[data-dsh-bottom-panel],[data-sidebar-right-panel]{' +
+  `${PANEL_SURFACES}{` +
   '--dsw-alias-bg-base:var(--dsh-any-panel-bg-base);' +
   '--dsw-alias-bg-layer-1:var(--dsh-any-panel-layer-1);' +
   '--dsw-alias-bg-layer-2:var(--dsh-any-panel-layer-2);' +
   '--dsw-alias-bg-layer-3:var(--dsh-any-panel-layer-3)}'
-
-// The blur must ride the element that ACTUALLY SLIDES — and that element differs
-// per host generation, which is precisely what the DOM shape exposes:
-//
-//   · 0.1.7+ — the panel is a STATIONARY frame: `[data-sidebar-right-panel]`
-//     keeps `position:absolute`, never moves, and stays visible even while
-//     collapsed. The slide is `transform: translateX(var(--dsh-sidebar-width))`
-//     on its `[data-dockkit-host='dock']` / `[data-dockkit-empty]` children,
-//     which also flip `visibility`. Verified by measurement: collapsed, the
-//     panel still reads x=783/visible while the dock is at x=1424/hidden. A
-//     `backdrop-filter` on the wrapper therefore keeps frosted glass pinned in
-//     place after the content has slid away — the "blur stays put while the
-//     sidebar moves" report.
-//
-//   · 0.1.5 / 0.1.6 — there is NO dockkit: `[data-dockkit-host]` does not exist
-//     before 0.1.7 (absent from both release trees — verified with git grep),
-//     so the child selector above matches NOTHING there. Those hosts put
-//     `transform: translateX(100%)` / `translate: none` (SidebarRight.module.css)
-//     on the PANEL ITSELF, so the wrapper is the thing that slides and the
-//     filter belongs on it. Leaving this arm out is what made the right-Sidebar
-//     blur slider inert on 0.1.6 — the regression this restores.
-//
-// `:has()` is the discriminator, so each arm sits in its OWN block: an engine
-// without :has() drops only the pre-dockkit block instead of invalidating the
-// whole selector list (a selector list is not forgiving, so one bad entry would
-// otherwise take the better-sidebar arm down with it).
-//
-// BOTH dockkit attributes are tested, not just the host cell: a pane with no
-// tabs renders `[data-dockkit-empty]` and no `data-dockkit-host`, so testing
-// `host` alone would misfire on that (transient) shape and promote a 0.1.7 panel
-// that must stay in flow.
-const NO_DOCKKIT = ':not(:has([data-dockkit-host],[data-dockkit-empty]))'
-
-export const PANEL_BLUR_RULE =
-  // 0.1.7+: the docked children are what slide.
-  '[data-sidebar-right-panel] [data-dockkit-host="dock"],' +
-  '[data-sidebar-right-panel] [data-dockkit-empty]{' +
-  '-webkit-backdrop-filter:var(--dsh-any-blur-panel,none);' +
-  'backdrop-filter:var(--dsh-any-blur-panel,none)}' +
-  // 0.1.5 / 0.1.6: the panel wrapper itself slides.
-  `[data-sidebar-right-panel]${NO_DOCKKIT}{` +
-  '-webkit-backdrop-filter:var(--dsh-any-blur-panel,none);' +
-  'backdrop-filter:var(--dsh-any-blur-panel,none)}' +
-  // dsh-better-sidebar workbench panel: one element, both generations.
-  '[data-dsh-bottom-panel]{' +
-  '-webkit-backdrop-filter:var(--dsh-any-blur-panel,none);' +
-  'backdrop-filter:var(--dsh-any-blur-panel,none)}'
-
-// Pre-0.1.7 hosts additionally need the panel promoted out of the rightbar
-// column for the backdrop-filter to resolve against the page: there the wrapper
-// is a transformed, `visibility`-toggled box inside an animated track, so the
-// filter has no wallpaper to sample without it. This is the treatment 0.2.10
-// shipped and the one the 0.1.6 report confirms working.
-//
-// It must NOT apply on 0.1.7, where the panel is a stationary frame sitting on
-// the frame's own animated track — detaching it with `position:fixed` is exactly
-// what made the blur stop travelling with the sidebar. Same `:has()` gate, again
-// in its own block so an engine without :has() cannot void the sibling rules.
-//
-// Fullscreen raises the host's own z-index to 40; matching it keeps the slider
-// effective there (the modal dialog stack lives at 100+, above both).
-export const PANEL_PROMOTION_RULE =
-  `[data-sidebar-right-panel]${NO_DOCKKIT}{` +
-  'position:fixed!important;z-index:26!important}' +
-  // Fullscreen: the host already uses position:fixed + z-index 40, so only the
-  // z-index needs re-asserting (the promotion above would otherwise drag it
-  // back to 26 and drop it under frame overlays).
-  `[data-sidebar-right-panel="fullscreen"]${NO_DOCKKIT}{` +
-  'z-index:40!important}'
 
 // ── Header popovers (Agent Team panel + background-job list + open-in-app /
 //    session-log menus + subagent lineage tree) ────────────────────────────────
@@ -534,9 +455,17 @@ export const PANEL_PROMOTION_RULE =
 //
 // 2. Class-shape fallbacks — retained for hosts where the tag observer has not
 //    run yet (first paint) or is unavailable, and they still cover 0.1.5/0.1.6:
-//      · ul[class*="_menu"]  — the job list is the ONLY host <ul> styled by a
-//        `menu` CSS-module class; every other `_menu` consumer (ModelSelect,
-//        TabMenu, MenuView, ScheduleCatalog, …) renders a <div>.
+//      · ul[class*="_menu"]  — the background-job list. It is one of exactly TWO
+//        host <ul> elements styled by a `menu` CSS-module class; the other is the
+//        schedule catalog (`ui-schedule` ScheduleCatalogAction.tsx), verified on
+//        0.1.7-alpha.1. Every remaining `_menu` consumer (ModelSelect, TabMenu,
+//        MenuView, TerminalGuide, SubagentHeaderLineage) renders a <div>. The two
+//        <ul>s are portal'd siblings with the same attributes (class, style,
+//        aria-label) and no distinguishing marker, so this fallback cannot single
+//        out the job list: the schedule catalog takes the header look too.
+//        Strategy 1 never tags it, so that overlap comes from this rule alone.
+//        ACCEPTED as-is: keeping the job list styled on first paint is worth more
+//        than holding the catalog on the card group, so do not "fix" the match.
 //      · div[role="dialog"][class*="_panel"]:not([aria-modal="true"]) — the
 //        Agent Team panel. The other `_panel` + role="dialog" element is the
 //        settings modal (aria-modal="true"), which SETTINGS_STYLE_RULE owns.
@@ -573,13 +502,31 @@ export const PANEL_PROMOTION_RULE =
 // guaranteed-invalid value, and every menu background reading it goes fully
 // transparent. Literals cannot cycle; when no color resolves we emit nothing and
 // the surface keeps the re-scoped value instead.
+/** The header dropdown surfaces, spelled ONCE. Three rules consume this set (the
+ *  static blur rule, the dynamic token rule and the stroke group), and every one
+ *  of them drifting by a single attribute re-introduces the bug where a header
+ *  menu keeps the card slider's look instead of its own.
+ *
+ *  Strategy 1 is the runtime tag (`header-tag.ts`); strategies 2 are class-shape
+ *  fallbacks for the first paint before the tag observer runs. */
+const HEADER_TAG_SELECTOR = `[${HEADER_POPOVER_ATTR}]`
+const HEADER_SURFACES = [
+  HEADER_TAG_SELECTOR,
+  'ul[class*="_menu"],div[role="dialog"][class*="_panel"]:not([aria-modal="true"])',
+  `[role="menu"][class*="_denseList"]:not([class*="_portal"])`,
+  '[role="tree"][class*="_menu"]',
+]
+
+/** SPECIFICITY IS LOAD-BEARING HERE. The card group's rule is
+ *  `[role="menu"]:not([data-dockkit-tab-menu])` — specificity (0,2,0) — so a bare
+ *  `[data-dsh-any-header-popover]` (0,1,0) LOSES to it no matter how late it
+ *  appears in the sheet. That is exactly how the tagged open-in-app menu kept
+ *  taking the card blur. `[role]` is a no-op presence test that raises only the
+ *  tagged arm to (0,2,0); the other three already qualify at (0,2,0)+. */
+const HEADER_SURFACES_PADDED = [`${HEADER_TAG_SELECTOR}[role]`, ...HEADER_SURFACES.slice(1)]
+
 export const HEADER_POPOVER_RULE =
-  // `[role]` is a no-op presence test that exists purely to raise specificity
-  // above the card group for the tagged (portaled) popovers.
-  '[data-dsh-any-header-popover][role],' +
-  'ul[class*="_menu"],div[role="dialog"][class*="_panel"]:not([aria-modal="true"]),' +
-  '[role="menu"][class*="_denseList"]:not([class*="_portal"]),' +
-  '[role="tree"][class*="_menu"]{' +
+  `${HEADER_SURFACES_PADDED.join(',')}{` +
   '-webkit-backdrop-filter:var(--dsh-any-blur-header,none);' +
   'backdrop-filter:var(--dsh-any-blur-header,none)}'
 
@@ -628,14 +575,9 @@ export const EXEMPT_DEFAULT_RULE =
   'backdrop-filter:none;-webkit-backdrop-filter:none;' +
   '-webkit-text-stroke-width:0}'
 
-/** Selector the dynamic header token rule targets — kept in sync with the
- *  static HEADER_POPOVER_RULE selector list (specificity equal or higher than
- *  the card group's `[role="menu"]:not(...)` so it wins). */
-const HEADER_TOKEN_SELECTOR =
-  '[data-dsh-any-header-popover][role],' +
-  'ul[class*="_menu"],div[role="dialog"][class*="_panel"]:not([aria-modal="true"]),' +
-  '[role="menu"][class*="_denseList"]:not([class*="_portal"]),' +
-  '[role="tree"][class*="_menu"]'
+/** Selector the dynamic header token rule targets — the same set as the static
+ *  HEADER_POPOVER_RULE above, so the two can never drift apart. */
+const HEADER_TOKEN_SELECTOR = HEADER_SURFACES_PADDED.join(',')
 
 /** Header-popover surfaces: retint the menu token and (re)write the blur.
  *  Mirrors applyProduced: the static rule above never changes, so a drag only
@@ -918,12 +860,11 @@ export const STROKE_RULE = [
   `[data-changed-files],[data-terminal],[data-read],[data-context-injection-body],[data-search],[data-web],[class*="_ioCard"]` +
   `{-webkit-text-stroke:var(--dsh-any-stroke-produced-w,0px) var(--dsh-any-stroke-produced-c,transparent);paint-order:stroke fill}`,
   // workbench panel
-  `[data-dsh-bottom-panel],[data-sidebar-right-panel]{-webkit-text-stroke:var(--dsh-any-stroke-panel-w,0px) var(--dsh-any-stroke-panel-c,transparent);paint-order:stroke fill}`,
-  // header popovers — same surfaces as HEADER_POPOVER_RULE (the runtime tag
-  // leads, since on 0.1.7 it is the only selector that still finds open-in-app).
-  `[data-dsh-any-header-popover],ul[class*="_menu"],div[role="dialog"][class*="_panel"]:not([aria-modal="true"]),` +
-  `[role="menu"][class*="_denseList"]:not([class*="_portal"]),` +
-  `[role="tree"][class*="_menu"]` +
+  `${PANEL_SURFACES}{-webkit-text-stroke:var(--dsh-any-stroke-panel-w,0px) var(--dsh-any-stroke-panel-c,transparent);paint-order:stroke fill}`,
+  // header popovers — the same surfaces as HEADER_POPOVER_RULE, unpadded: a
+  // stroke never competed with the card group's backdrop-filter, so raising
+  // specificity here would change which group wins and is not ours to decide.
+  `${HEADER_SURFACES.join(',')}` +
   `{-webkit-text-stroke:var(--dsh-any-stroke-header-w,0px) var(--dsh-any-stroke-header-c,transparent);paint-order:stroke fill}`,
   // exemptions
   // Turn status / progress chrome — never owned by the "conversation text
@@ -1407,8 +1348,38 @@ let rightEl: HTMLElement | null = null
 
 const PART_BLUR_CLASS = 'dab-part-blur'
 const PART_UNDERLAY_CLASS = 'dab-part-underlay'
+
+/** The AppFrame's main-bg clear-out, as a class rather than an inline write.
+ *
+ * WHY NOT INLINE (measured on 0.1.7): the frame's own translucent
+ * `--dsw-alias-bg-base` is what hides the wallpaper, so `applyPartOpacities` has
+ * to clear it. Written as `frameEl.style.background = 'transparent'` the clear
+ * survived a settings change but not a sidebar open/close — the host owns that
+ * element's `style` too (it animates `grid-template-columns`), and while it
+ * re-asserts its own background the frame snaps back to an opaque
+ * `rgb(200,207,218)`: wallpaper gone, and every frost on top of it flattened,
+ * because a backdrop-filter with nothing behind it has nothing to blur. A class
+ * rule with `!important` sits outside the host's `style` writes entirely, so the
+ * clear cannot be re-clobbered and there is nothing to re-apply. */
+export const PART_FRAME_CLASS = 'dab-frame-clear'
+export const FRAME_CLEAR_RULE = `.${PART_FRAME_CLASS}{background:transparent!important}`
+
 const PART_BLUR_RULE =
-  `${PART_BLUR_CLASS}{isolation:isolate}` +
+  // The dot is load-bearing: without `isolation` the host does not create a
+  // stacking context, so the underlay's `z-index:-1` escapes into the page's and
+  // the frost paints over the wrong area instead of staying inside the surface.
+  `.${PART_BLUR_CLASS}{isolation:isolate}` +
+  // …but that same stacking context is a trap for the host's dialogs: a
+  // `position:fixed` modal mounted inside a column keeps its z-index LOCAL to the
+  // column, so a column that paints early (the sidebar) buries a modal that must
+  // cover the whole page. Verified live against 0.1.7: the settings overlay's
+  // center hit-tested to the composer card below it, and dropped back onto the
+  // dialog the moment this exemption was added. Losing the frost for as long as a
+  // modal is open is the cheaper half of the trade — a dialog you cannot see is a
+  // dead end. The cost is bounded because the match is transient: with the
+  // settings view closed the sidebar column holds no `[role="dialog"]` at all,
+  // which was counted live before this exemption was written.
+  `.${PART_BLUR_CLASS}:has([role="dialog"]){isolation:auto}` +
   `.${PART_UNDERLAY_CLASS}{position:absolute;inset:0;z-index:-1;pointer-events:none;border-radius:inherit;` +
   `backdrop-filter:var(--dsh-any-part-blur,none);-webkit-backdrop-filter:var(--dsh-any-part-blur,none)}`
 
@@ -1512,7 +1483,10 @@ function applyPartOpacities(ops: PartOpacities): void {
   discoverParts()
   if (frameEl === null) return
   const base = tokens['--dsw-alias-bg-base']
-  frameEl.style.background = 'transparent'
+  frameEl.classList.add(PART_FRAME_CLASS)
+  // An inline clear from an earlier build of this plugin would be a stale
+  // duplicate of what the class now says; drop it so the class is the only owner.
+  if (frameEl.style.background !== '') frameEl.style.removeProperty('background')
   if (centerEl !== null) centerEl.style.background = base !== undefined ? toRgba(base, ops.bg) : 'transparent'
   // Defensive: a previous build (pre-fix) may have left an inline `background`
   // on the rightbar — clear it so it stops carrying the main-bg tint.
@@ -1714,6 +1688,17 @@ function discoverViewTarget(idx: number, spec: ViewCardSpec): HTMLElement | null
   if (cached !== null && centerEl.contains(cached)) return cached
   viewTargets[idx] = null
   if (spec.fallback !== true) return null
+  // The fallback may only refine a conversation that is ALREADY there; it must
+  // never invent one. With no conversation marker in the column the chat view is
+  // simply not mounted — the settings view owns the column then, and its page is
+  // routinely the column's only tall element, so the heuristic below would dress
+  // that page up as a chat card and hang a 15px frost over the whole window.
+  // Every release in the supported range emits at least one of these four.
+  if (
+    centerEl.querySelector(
+      '[data-chat-flow],[data-conversation-scroll],[data-composer-seat],[data-conversation-composer-overlay]'
+    ) === null
+  ) return null
   // On the harness, an absent [data-chat-flow] just means the chat view is not
   // mounted (hero phase, trajectory tab) — settling on the whole scrollport
   // there would wrap the entire page in the card.
@@ -1737,6 +1722,13 @@ function discoverViewTarget(idx: number, spec: ViewCardSpec): HTMLElement | null
       if (el.clientHeight > (best?.clientHeight ?? 0)) best = el
     }
   }
+  // A settings-dialog surface is never the chat card: the dialog owns its own
+  // look through SETTINGS_STYLE_RULE, and while it is open with no conversation
+  // mounted its page IS the column's largest scroller, so the geometry above
+  // would wrap, say, the 「插件」 page in card chrome and hang a frost underlay on
+  // it. Tested on the picked element rather than on the column so it also holds
+  // when the dialog is portal'd and only its content renders inside the column.
+  if (best !== null && best.closest(SETTINGS_PANEL_SEL) !== null) best = null
   // Coarse candidates are narrowed to the message column itself.
   const refined = best !== null ? refineMessageColumn(best) : null
   viewTargets[idx] = refined
@@ -2335,7 +2327,7 @@ export function teardownWp(): void {
   lowResFor = ''
   dragLow = false
   setBlur(frameEl, 0); setBlur(sidebarEl, 0); setBlur(centerEl, 0); setBlur(rightEl, 0)
-  if (frameEl !== null) frameEl.style.removeProperty('background')
+  if (frameEl !== null) frameEl.classList.remove(PART_FRAME_CLASS)
   if (centerEl !== null) centerEl.style.removeProperty('background')
   if (rightEl !== null) rightEl.style.removeProperty('background')
   stopWatchingParts()

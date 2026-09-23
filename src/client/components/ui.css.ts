@@ -17,7 +17,11 @@ export const UI_CSS = `
  * column: the host provides the modal chrome (backdrop, centering, closing).
  * These classes style only the embedded shell; transient fixed layers (toast,
  * color picker, background editor) escape through Portals on <html>. */
-.dab-root{position:relative;color:var(--dsw-alias-label-primary);animation:dab-fade-in .35s ease both;container-type:inline-size;display:flex;flex-direction:column;align-items:center;width:100%;min-width:0;--dab-mono:ui-monospace,"Cascadia Mono","SF Mono",Consolas,"Courier New",monospace}
+.dab-root{position:relative;box-sizing:border-box;color:var(--dsw-alias-label-primary);animation:dab-fade-in .35s ease both;container-type:inline-size;display:flex;flex-direction:column;align-items:center;width:100%;min-width:0;--dab-mono:ui-monospace,"Cascadia Mono","SF Mono",Consolas,"Courier New",monospace}
+/* The root needs its OWN border-box, not just the descendants' below: the
+ * sidebar surface puts 12px of padding on it, and with the default content-box
+ * that padding landed OUTSIDE the width:100%, so the page came out 24px wider
+ * than the pane and the host clipped both edges off. */
 .dab-root *,.dab-root *::before,.dab-root *::after{box-sizing:border-box}
 .dab-root button{font-family:inherit}
 

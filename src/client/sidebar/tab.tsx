@@ -23,7 +23,8 @@ import { NS } from '../i18n'
 import { ThemeSection } from '../components/ThemeSection'
 import { SunIcon } from '../components/icons'
 import { createStoreHook, type ObservableStore } from './store-hook'
-import { subscribeHostInfo, suppressesBetterSidebar } from '../host'
+import { subscribeHostInfo } from '../host-compat/release'
+import { sidebarGuideOwner } from '../host-compat/capabilities'
 
 /** Minimal restatement of the slice of `ctx.betterSidebar` used here. */
 interface BetterSidebarService {
@@ -111,19 +112,20 @@ export function registerThemeSidebarTab(ctx: Ctx, opts: {
   ctx.inject?.(['betterSidebar'], (scope: Ctx) => {
     const service = (scope as CtxWithSidebar).betterSidebar
     if (service === undefined) return
-    // A host whose own right Sidebar already carries the appearance page
-    // (0.1.6+) would show two identical entries on the same guide surface, so
-    // the better-sidebar page stands down. Driven by the DETECTED RELEASE, not
-    // by the native-sidebar service: that service also exists on 0.1.5-rc.2,
-    // where the better-sidebar page must still register.
-    const suppress = suppressesBetterSidebar()
-    if (suppress === true) return
+    // A host whose own right Sidebar already carries the appearance page would
+    // show two identical entries on the same guide surface, so the better-sidebar
+    // page stands down there. Driven by the host adapter, not by the native
+    // sidebar service: that service also ships on 0.1.5-rc.2, where this page
+    // must still register.
+    const owner = sidebarGuideOwner()
+    if (owner === 'host') return
     let disposeTab: (() => void) | null = null
-    // Verdict not landed yet (Node round-trip): register now and withdraw if it
-    // turns out to be 0.1.6+ — better a brief duplicate than a missing page.
-    const unsubscribeHost = suppress === null
+    // Verdict not landed yet (Node round-trip): register now and withdraw if the
+    // host turns out to own the surface — better a brief duplicate than a
+    // missing page.
+    const unsubscribeHost = owner === 'pending'
       ? subscribeHostInfo(() => {
-        if (suppressesBetterSidebar() === true) {
+        if (sidebarGuideOwner() === 'host') {
           disposeTab?.()
           disposeTab = null
           unsubscribeHost()

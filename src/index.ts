@@ -14,9 +14,10 @@
  */
 import { access, mkdir, readFile, writeFile, rm, rename, stat } from 'node:fs/promises'
 import { createReadStream, createWriteStream } from 'node:fs'
-import { dirname, basename, join } from 'node:path'
 import { Readable } from 'node:stream'
 import { dshHomePath } from '@deepseek-ai/dsh-home-paths'
+import { resolveHostInfo, type HostInfo } from './host-compat/detect'
+import { UNKNOWN_HOST_INFO } from './host-compat/channel'
 
 export const name = 'dsh-any-background'
 export const inject = ['connection', 'webServer']
@@ -195,8 +196,8 @@ export const DEFAULT_CONFIG: ThemeConfig = {
   // value on the next write, which is exactly how a slider ends up looking
   // like it "saved" and then lost the value.
   color: null,
-  opacities: { bg: 0.5, sidebar: 0.5, card: 0.5, input: 0.5 },
-  blurs: { bg: 30, sidebar: 30, card: 30, settings: 30, chat: 30, trajectory: 30, input: 30, panel: 30, produced: 30, header: 30 },
+  opacities: { bg: 0, sidebar: 0.5, card: 0.5, input: 0.5 },
+  blurs: { bg: 0, sidebar: 30, card: 30, settings: 30, chat: 30, trajectory: 30, input: 30, panel: 30, produced: 30, header: 30 },
   strokes: {
     bg: { width: 0, color: 'auto', customColor: '#808080' },
     sidebar: { width: 0, color: 'auto', customColor: '#808080' },
@@ -211,7 +212,7 @@ export const DEFAULT_CONFIG: ThemeConfig = {
   },
   settingsOpacity: 0.5,
   wallpaperOpacity: 1,
-  blur: 30,
+  blur: 0,
   bgState: { zoom: 1, x: 0, y: 0, iw: 0, ih: 0 },
   videoBgState: { zoom: 1, x: 0, y: 0, iw: 0, ih: 0 },
   backgroundType: 'image',
@@ -234,88 +235,11 @@ export const DEFAULT_CONFIG: ThemeConfig = {
 }
 
 // ── Host version detection ────────────────────────────────────────────────────
-// The client context exposes NO host version (verified against the harness: no
-// `hostVersion`/`dshVersion` field, and `window.__DSH_BOOT__.version` is the
-// module-table format tag `'client'`, not a release). So the version is derived
-// on the Node side, where the launcher's on-disk layout tells us directly.
-//
-// Two hops, most authoritative first:
-//   1. `$DSH_HOME`'s basename, because the launcher homes live in a folder named
-//      after the release (`.../homes/0.1.6-alpha.2`). This alone is a strong
-//      hint but a user may point DSH_HOME at `~/.dsh`, whose basename is not a
-//      version — hence the sanity check below.
-//   2. The installed manifest two levels up:
-//      `.../versions/<ver>/node_modules/@deepseek-ai/dsh/package.json`. When it
-//      exists its `version` field is the release's own declaration and wins.
-//
-// Anything unrecognized degrades to `null`, and callers fall back to capability
-// probing rather than guessing a generation. A wrong guess here would silently
-// change feature availability, which is exactly what this replaces.
-const VERSION_RE = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/
-
-/** True when a string looks like a release version (a bare `~/.dsh` basename does not). */
-function looksLikeVersion(value: string): boolean {
-  return VERSION_RE.test(value)
-}
-
-/** Read the installed `@deepseek-ai/dsh` manifest version for a launcher dir,
- *  or null when the layout does not apply (plain `~/.dsh`, non-launcher hosts). */
-async function readInstalledVersion(homeDir: string): Promise<string | null> {
-  // homeDir = <root>/homes/<ver>  →  <root>/versions/<ver>
-  const root = dirname(dirname(homeDir))
-  const versionSeg = basename(homeDir)
-  const manifest = join(root, 'versions', versionSeg, 'node_modules', '@deepseek-ai', 'dsh', 'package.json')
-  try {
-    const raw = JSON.parse(await readFile(manifest, 'utf8')) as { version?: unknown }
-    if (typeof raw.version === 'string' && raw.version.trim() !== '') return raw.version.trim()
-  } catch {
-    /* fall through to the home-basename hint */
-  }
-  return null
-}
-
-/** Cached verdict: the probe touches the filesystem, and the host version never
- *  changes within a process lifetime. */
-let hostInfoCache: HostInfo | undefined
-
-/** Resolved host release info handed to the client. */
-interface HostInfo {
-  /** The detected release string, or null when it could not be determined. */
-  version: string | null
-  /** Generation bucket used for feature gating. */
-  generation: '0.1.5' | '0.1.6' | '0.1.7' | 'unknown'
-}
-
-/** Map a release string onto the generation bucket the plugin gates features by.
- *  The published lines are `0.1.5`, `0.1.6` and `0.1.7`, so the bucket is the
- *  `major.minor.patch` prefix — every rc/alpha within a line shares it. */
-function generationOf(version: string | null): HostInfo['generation'] {
-  if (version === null) return 'unknown'
-  const m = /^(\d+\.\d+\.\d+)/.exec(version)
-  if (m === null) return 'unknown'
-  const key = m[1]
-  return key === '0.1.5' || key === '0.1.6' || key === '0.1.7' ? key : 'unknown'
-}
-
-/** Resolve (and cache) the host release + generation. */
-async function resolveHostInfo(): Promise<HostInfo> {
-  if (hostInfoCache !== undefined) return hostInfoCache
-  const homeDir = dshHomePath()
-  let version: string | null = null
-  try {
-    version = await readInstalledVersion(homeDir)
-  } catch {
-    /* ignore — fall back to the basename hint */
-  }
-  if (version === null) {
-    const seg = basename(homeDir)
-    if (looksLikeVersion(seg)) version = seg
-  }
-  if (version !== null && !looksLikeVersion(version)) version = null
-  hostInfoCache = { version, generation: generationOf(version) }
-  return hostInfoCache
-}
-
+// Resolved by the front door in `host-compat/detect.ts` (which reads the release
+// out of the running app's own manifest, as pointed at by `ctx.profileContext
+// .installAnchor`) and handed to the client half through the `read` payload. The
+// client gates per-version behaviour on that verdict and falls back to DOM-shape
+// probing whenever the release could not be determined — see `client/host-compat/`.
 const dataDir = (): string => dshHomePath(DATA_DIR)
 const configPath = (): string => dshHomePath(DATA_DIR, CONFIG_FILE)
 const wallpaperPath = (): string => dshHomePath(DATA_DIR, WALLPAPER_FILE)
@@ -1510,6 +1434,7 @@ async function advanceRotationIfDue(): Promise<boolean> {
 async function handleRpcMethod(
   endpoint: string,
   payload: unknown,
+  hostInfo: Promise<HostInfo>,
 ): Promise<{ ok: boolean; value?: unknown; error?: { code: string; message: string; details: object } }> {
   const method = endpoint.slice(`${NS}/`.length)
   try {
@@ -1526,10 +1451,10 @@ async function handleRpcMethod(
         // flag so the restored appearance comes from a file that really exists.
         const firstRun = !(await exists(configPath()))
         if (firstRun) await writeConfig(config)
-        // `host` carries the detected release + generation bucket; the client
-        // gates version-specific behaviour on it and falls back to capability
-        // probing when `generation` is 'unknown'.
-        return { ok: true, value: { config, wallpaperUrl: await wallpaperServeUrl(), videoUrl: await videoUrl(), fontUrl: await fontUrl(), rotated, firstRun, host: await resolveHostInfo() } }
+        // `host` is the front door's verdict; the client picks a per-version
+        // adapter from it and lets the DOM arbitrate when the release is
+        // undetermined. See `host-compat/`.
+        return { ok: true, value: { config, wallpaperUrl: await wallpaperServeUrl(), videoUrl: await videoUrl(), fontUrl: await fontUrl(), rotated, firstRun, host: await hostInfo } }
       }
       case 'writeConfig':
         return { ok: true, value: await writeConfig((payload as { config?: unknown } | null)?.config as ThemeConfig ?? {}) }
@@ -1558,6 +1483,15 @@ async function handleRpcMethod(
 }
 
 export function apply(ctx: any): void {
+  // The host release is decided once, here, from the anchor the running app was
+  // composed with (`installAnchor` is that app's own package.json). A detection
+  // that throws must not take the `read` RPC down with it — that is the call the
+  // UI restores the whole theme from — so the failure answer is `unknown`, which
+  // sends the client half back to DOM-shape probing.
+  const hostInfo: Promise<HostInfo> = resolveHostInfo(ctx.profileContext?.installAnchor).catch(e => {
+    console.warn('dsh-any-background: host release detection failed, falling back to DOM probing', e)
+    return UNKNOWN_HOST_INFO
+  })
   // Register every route inside a connection+webServer-injected scope, exactly
   // as the connection plugin mounts its own `/api` transport. Doing this
   // synchronously in `apply` fails with "cannot get property webServer without
@@ -1632,7 +1566,7 @@ export function apply(ctx: any): void {
             res.end(JSON.stringify({ type: 'server-response', rpcId: env.rpcId, result: { ok: false, error: { code: 'dsh-any-background/bad-request', message: `method ${env.method} does not match endpoint ${endpoint}`, details: { issues: [] } } } }))
             return
           }
-          const result = await handleRpcMethod(endpoint, env.payload)
+          const result = await handleRpcMethod(endpoint, env.payload, hostInfo)
           res.writeHead(200, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ type: 'server-response', rpcId: env.rpcId, result }))
         },
