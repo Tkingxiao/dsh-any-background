@@ -5,7 +5,7 @@
  * Shared by both halves of the plugin: the node half resolves the release from
  * disk (see `detect.ts`) and ships the verdict to the client half, which uses it
  * to pick a per-version adapter (see `client/host-compat/versions/`). Keeping the
- * bucketing here means the two halves can never disagree about what `0.1.6-alpha`
+ * bucketing here means the two halves can never disagree about what `0.2.0-rc`
  * means — a drifted matcher on one side would silently hand the client a channel
  * the client's registry has no adapter for.
  *
@@ -13,14 +13,9 @@
  */
 
 /** Adapter channels the plugin ships an adapter for: a patch line plus its
- *  prerelease channel, so `0.1.5-rc.2` and a hypothetical `0.1.5-beta.1` are NOT
+ *  prerelease channel, so `0.2.0-rc.1` and a hypothetical `0.2.0-beta.1` are NOT
  *  the same answer. `unknown` is the "could not determine the release" bucket,
  *  not a release.
- *
- *  `0.1.7-alpha` and `0.1.7-rc` share a patch line but not an answer: the menu
- *  paint moved to `MenuSurface`'s own layer at `0.1.7-rc.2`, which is a fact about
- *  the host's CSS that no amount of "same line" reasoning carries over. A line is
- *  only as unified as its verified facts.
  *
  *  `0.2.0-rc.2` is keyed down to the BUILD because the line split against that
  *  scheme: `0.2.0-rc.1` and `0.2.0-rc.2` are the same patch line AND the same
@@ -29,12 +24,12 @@
  *  name cannot hold both halves of a line, the half that opened the new facts is
  *  named for the build that opened them, and `classifyRelease`'s "highest verified
  *  row at or below the host" hands every later `0.2.0-rc` (and `0.2.0` stable) to
- *  it. */
+ *  it.
+ *
+ *  The 0.1.5 / 0.1.6 / 0.1.7 channels are GONE: their folders went with them, and a
+ *  channel with no folder is a compile error, not a fallback. A host still sitting
+ *  on that era clamps to the oldest row here and says so (`nearest`). */
 export type HostChannel =
-  | '0.1.5-rc'
-  | '0.1.6-alpha'
-  | '0.1.7-alpha'
-  | '0.1.7-rc'
   | '0.2.0-rc'
   | '0.2.0-rc.2'
   | '0.2.1-alpha'
@@ -53,31 +48,26 @@ export interface SupportedRelease {
 
 /** What this plugin supports, in upgrade order. One row = one build whose facts
  *  were checked; several rows may share a `channel` when a newer build was
- *  verified as needing no change to that folder's adapter (as `0.1.7-rc.1` was) —
+ *  verified as needing no change to that folder's adapter (as `0.2.1-alpha.2` was) —
  *  a row then reports `exact` instead of `line`, and no new folder appears.
  *  Rows may ALSO share a patch line while carrying different channels, which is
- *  how a line says "the facts changed halfway through it" (`0.1.7-alpha.2` and
- *  `0.1.7-rc.1` speak for `0.1.7-alpha`, `0.1.7-rc.2` opens `0.1.7-rc`, and
- *  `0.2.0-rc.2` opens a second answer on a line that had one — see the note on
- *  `HostChannel` for why that row is keyed to the build).
+ *  how a line says "the facts changed halfway through it" (`0.2.0-rc.2` opens a
+ *  second answer on a line that had one — see the note on `HostChannel` for why
+ *  that row is keyed to the build).
  *  Adding an ADAPTER means adding a channel plus a folder in
  *  `client/host-compat/versions/`. */
 export const SUPPORTED_RELEASES: readonly SupportedRelease[] = [
-  { channel: '0.1.5-rc', release: '0.1.5-rc.2' },
-  { channel: '0.1.6-alpha', release: '0.1.6-alpha.2' },
-  { channel: '0.1.7-alpha', release: '0.1.7-alpha.2' },
-  { channel: '0.1.7-alpha', release: '0.1.7-rc.1' },
-  { channel: '0.1.7-rc', release: '0.1.7-rc.2' },
   { channel: '0.2.0-rc', release: '0.2.0-rc.1' },
   { channel: '0.2.0-rc.2', release: '0.2.0-rc.2' },
   { channel: '0.2.1-alpha', release: '0.2.1-alpha.1' },
+  { channel: '0.2.1-alpha', release: '0.2.1-alpha.2' },
 ]
 
 /** How the chosen adapter relates to the release that was detected. Reported so a
  *  guess never reads as a verified match:
  *  · `exact` — the host is on a build this table was checked against.
- *  · `line` — a different build of a VERIFIED patch line (`0.1.6-alpha.4`, or a
- *    future `0.1.6` stable); same line, so the adapter normally holds.
+ *  · `line` — a different build of a VERIFIED patch line (`0.2.1-alpha.3`, or a
+ *    future `0.2.1` stable); same line, so the adapter normally holds.
  *  · `nearest` — no verified line covers it, so the closest one is clamped to:
  *    the newest above everything for a newer host, the oldest for an older one.
  *  · `unresolved` — no release parsed at all; the DOM arbitrates. */
@@ -160,8 +150,8 @@ function cmp(a: Parsed, b: Parsed): number {
 /** Pick the adapter for a release, clamping to the nearest verified line when the
  *  release is outside everything this plugin has seen.
  *
- *  A release is matched by PATCH LINE before anything else: `0.1.6-alpha.4` and a
- *  future `0.1.6` stable both belong to the line verified at `0.1.6-alpha.2`, and
+ *  A release is matched by PATCH LINE before anything else: `0.2.1-alpha.3` and a
+ *  future `0.2.1` stable both belong to the line verified at `0.2.1-alpha.1/2`, and
  *  handing them that adapter beats giving up — the DOM probes only cover panel
  *  mechanics, not the surface decisions the line is known for.
  *
@@ -177,16 +167,16 @@ export function classifyRelease(version: string | null): HostVerdict {
   const sameLine = TABLE.filter(row => cmpCore(row.parsed.core, host.core) === 0)
   if (sameLine.length > 0) {
     // `exact` names THE BUILD the row was checked against, not its channel: a
-    // channel-only test would call `0.1.7-alpha.4` exact against a table verified
+    // channel-only test would call `0.2.1-alpha.3` exact against a table verified
     // at `alpha.2`, and `line` exists precisely so an unverified build says so.
     const exact = sameLine.find(row => row.release === version)
     if (exact !== undefined) return { channel: exact.channel, match: 'exact' }
     // A patch line may carry several verified builds AND several channels, so take
     // the highest row at or below the host: an unverified newer build gets the
     // newest verification that precedes it, whichever folder that was
-    // (`0.1.7-rc.3` → the `0.1.7-rc` facts checked at rc.2, not the alpha ones), and
-    // one older than every row falls back to the line's first, since the folder's
-    // facts were derived from that shape.
+    // (`0.2.0-rc.3` → the rc.2 facts, not the rc.1 ones), and one older than every
+    // row falls back to the line's first, since the folder's facts were derived from
+    // that shape.
     const atOrBelow = sameLine.filter(row => cmp(row.parsed, host) <= 0)
     const chosen = atOrBelow.length > 0 ? atOrBelow[atOrBelow.length - 1]! : sameLine[0]!
     return { channel: chosen.channel, match: 'line' }
@@ -202,14 +192,4 @@ export function classifyRelease(version: string | null): HostVerdict {
 /** The channel a release maps onto — the verdict's answer without the confidence. */
 export function channelOf(version: string | null): HostChannel {
   return classifyRelease(version).channel
-}
-
-/** Prerelease tag of a release string (`alpha.2` in `0.1.6-alpha.2`), or null
- *  when the version is bare/undetermined. Needed because a channel is coarser
- *  than reality: `conversation.session.header.leading` ships in exactly one
- *  build within the 0.1.6-alpha line. */
-export function prereleaseOf(version: string | null): string | null {
-  if (version === null) return null
-  const m = /^\d+\.\d+\.\d+-([0-9A-Za-z.-]+)$/.exec(version)
-  return m?.[1] ?? null
 }

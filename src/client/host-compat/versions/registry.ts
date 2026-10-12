@@ -5,46 +5,41 @@
  * line is a three-step change with no existing file to touch:
  *   1. `KnownChannel` (and `channelOf`) in `src/host-compat/channel.ts`,
  *   2. a folder here, mirroring the others, NAMED FOR THE EXACT TAGS ITS FACTS
- *      WERE CHECKED AGAINST (`v0-1-6-alpha-1-2`, not `v0-1-6-alpha`) so the
- *      precision of the table is readable from the tree, and the folder states
- *      inside it which prerelease gates it carries,
+ *      WERE CHECKED AGAINST (`v0-2-0-rc-1`, `v0-2-1-alpha-1-2`) so the precision
+ *      of the table is readable from the tree, and the folder states inside it
+ *      which prerelease gates it carries,
  *   3. the row below.
  * A newer build that turns out to need NO change does not get its own folder: it
- * joins the name of the folder whose facts held (`v0-1-7-alpha-1-2-rc-1`, checked
- * at rc.1) and gains a `SUPPORTED_RELEASES` row, which is what moves that host's
+ * joins the name of the folder whose facts held (`v0-2-1-alpha-1-2`, checked at
+ * both) and gains a `SUPPORTED_RELEASES` row, which is what moves that host's
  * verdict from `line` to `exact`.
- * Anything that reads an adapter then picks it up without a edit — which is the
+ * Anything that reads an adapter then picks it up without an edit — which is the
  * point: version branching must not be reachable from the styling code.
  *
  * The folder is keyed by what its FACTS cover, not by the version number's shape:
- * `v0-1-7-rc-2` sits beside `v0-1-7-alpha-1-2-rc-1` even though both are "0.1.7",
- * because rc.2 moved where a menu gets its paint. Two folders on one patch line is
- * the cost of a table that is true; a row on a folder whose facts no longer hold is
- * the cost of one that is not.
- *
  * `v0-2-0-rc-2` sits beside `v0-2-0-rc-1` on a line that does not even differ in
  * prerelease name, because that rc renamed the token a sticky menu group heading
  * paints from. When the split is that fine-grained the channel key takes the build
  * that opened the new facts (`0.2.0-rc.2`), and `classifyRelease` routes everything
  * above it there — a folder named for a line is only honest while the line agrees.
  *
+ * THE TABLE STARTS AT `0.2.0-rc.1`. The 0.1.5 / 0.1.6 / 0.1.7 folders were removed:
+ * the line moved on and nothing in the plugin still asserts a 0.1.x fact, so a
+ * table that reaches back there is a table nobody verifies any more. A 0.1.x host
+ * is not unsupported in the sense of crashing — `classifyRelease` clamps it to the
+ * oldest row and reports `nearest`, and `detect.ts` logs that verdict, so an old
+ * host gets the 0.2.0-rc.1 styling with the mismatch stated out loud rather than a
+ * silent guess.
+ *
  * @module
  */
 import type { HostAdapter, HostChannel, HostInfo } from './types'
-import { createAdapter as adapterFor015rc } from './v0-1-5-rc-2-3/adapter'
-import { createAdapter as adapterFor016alpha } from './v0-1-6-alpha-1-2/adapter'
-import { createAdapter as adapterFor017alpha } from './v0-1-7-alpha-1-2-rc-1/adapter'
-import { createAdapter as adapterFor017rc } from './v0-1-7-rc-2/adapter'
 import { createAdapter as adapterFor020rc } from './v0-2-0-rc-1/adapter'
 import { createAdapter as adapterFor020rc2 } from './v0-2-0-rc-2/adapter'
-import { createAdapter as adapterFor021alpha } from './v0-2-1-alpha-1/adapter'
+import { createAdapter as adapterFor021alpha } from './v0-2-1-alpha-1-2/adapter'
 import { createAdapter as adapterForUnknown } from './unknown/adapter'
 
 const ADAPTERS: Record<HostChannel, (host: HostInfo) => HostAdapter> = {
-  '0.1.5-rc': adapterFor015rc,
-  '0.1.6-alpha': adapterFor016alpha,
-  '0.1.7-alpha': adapterFor017alpha,
-  '0.1.7-rc': adapterFor017rc,
   '0.2.0-rc': adapterFor020rc,
   '0.2.0-rc.2': adapterFor020rc2,
   '0.2.1-alpha': adapterFor021alpha,

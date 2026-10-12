@@ -24,7 +24,7 @@
  *      from `$DSH_HOME`'s `homes/<ver>` layout. For a host that gives no
  *      `profileContext`.
  *   3. `$DSH_HOME`'s basename, because launcher homes live in a folder named after
- *      the release (`.../homes/0.1.6-alpha.2`). A user may point DSH_HOME at a
+ *      the release (`.../homes/0.2.1-alpha.2`). A user may point DSH_HOME at a
  *      plain `~/.dsh` (no launcher layout at all), whose basename is not a
  *      version — hence `looksLikeVersion` gates it.
  *

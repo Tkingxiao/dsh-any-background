@@ -6,8 +6,9 @@
  * exist) is answered in the version folders; what is stable across all of them
  * lives here so no adapter has to re-type a host selector and get it subtly wrong.
  *
- * Verified against the harness release tags (dsh-v0.1.5-rc.2 … dsh-v0.2.1-alpha.1),
- * not inferred:
+ * Verified against the harness release tags this table speaks for (dsh-v0.2.0-rc.1 …
+ * dsh-v0.2.1-alpha.2). Where an anchor's first appearance is EARLIER than that, the
+ * note says so, because it is what makes the marker a version test at all:
  *   · `[data-sidebar-right-panel]` — emitted by `ui-sidebar-right/shell/SidebarRight.tsx`
  *     on every release in range, with values `push` | `fullscreen`.
  *   · `[data-dockkit-host]` / `[data-dockkit-empty]` — emitted ONLY by
@@ -26,8 +27,11 @@
  *     `ul` in that group either. The three anchors this rule matches — `section
  *     [data-plugin-panel]`, `section[data-plugin-scope] > ul.cards` and
  *     `section[data-plugin-loading] > ul.cards` — are re-emitted unchanged at
- *     `0.2.0-rc.2` and `0.2.1-alpha.1` (checked per tag in `PluginManagerPage.tsx`),
- *     so the ONE rule below serves every tag that emits the page.
+ *     `0.2.0-rc.2`, `0.2.1-alpha.1` and `0.2.1-alpha.2` (checked per tag in
+ *     `PluginManagerPage.tsx`), and alpha.2 only ADDS a third `[data-plugin-scope]`
+ *     group (`data-plugin-group="more"`, its own `ul.cards`) inside the same panel —
+ *     a name the selector already reaches, so the ONE rule below serves every tag
+ *     that emits the page.
  *
  * @module
  */
@@ -55,7 +59,7 @@ export const BETTER_SIDEBAR_PANEL = '[data-dsh-bottom-panel]'
  *  renders the elected takeover beside the fallback bar (verified per tag in
  *  `ConversationContent.tsx` and both packages' `slots.inject('conversation.composer')`)
  *  — and each paints the capsule's own `--dsw-specific-input-major`, from
- *  `dsh-v0.1.5-rc.2` through `dsh-v0.2.1-alpha.1`.
+ *  `dsh-v0.1.5-rc.2` through `dsh-v0.2.1-alpha.2`.
  *
  *  The marker sits on the wrapper, the fill on its child card:
  *  `[data-approval-key] > div`, `[data-plan-review-key] > section`,
@@ -160,9 +164,8 @@ export const PLUGIN_PAGE_FROST_RULE =
 export const MENU_FILL_TOKEN = '--dsw-specific-menu'
 
 /** Frost by filtering the element itself — the only option where the element is the
- *  thing that paints, and the shape every release up to `0.1.7-rc.1` presents. Both
- *  prefixes because Safari needs the `-webkit-` one and the cascade must not let
- *  them disagree. */
+ *  thing that paints. Both prefixes because Safari needs the `-webkit-` one and the
+ *  cascade must not let them disagree. */
 export function elementFrostDecl(value: string): string {
   return `-webkit-backdrop-filter:${value};backdrop-filter:${value}`
 }
@@ -170,24 +173,14 @@ export function elementFrostDecl(value: string): string {
 /**
  * ── Where a menu's paint lives ────────────────────────────────────────────────
  * Verified by reading the emitting source at each tag, not inferred from a changelog.
+ * The era this table now starts in (`0.2.0-rc.1`) already presents the shape below;
+ * the 0.1.5 / 0.1.6 / 0.1.7-alpha line, where the menu ELEMENT painted itself and the
+ * host frosted nothing at all before `0.1.7-alpha.1`, is recorded in
+ * `LAYERED_MENU_SURFACE`'s first bullet rather than in an adapter, because no adapter
+ * answers for it any more.
  *
- * `dsh-v0.1.5-rc.2` … `dsh-v0.1.7-rc.1`: the menu ELEMENT paints itself. Its own
- *   CSS module declares `background:var(--dsw-specific-menu)` — 11 files at
- *   0.1.5-rc.2/rc.3 and 0.1.6-alpha.1/alpha.2, 15 at 0.1.7-alpha.1/alpha.2, 16 at
- *   rc.1 (`Menu`, `MenuView`, `PopupSelectView`, `ModelSelect`, `dockkit` TabMenu,
- *   `stat-dialog`, `QueueDock`, `ContextMeter`, `TodoPanel`, `GoalBar`,
- *   `JobListAction`, `HoverCard`, `ScheduleCatalogAction`, `SubagentHeaderLineage`,
- *   `TeamAction`, `CordisPanel`). One token therefore paints every menu, and
- *   filtering the element is the arm that reaches it.
- *   Frost is a separate, later fact, and worth recording because it changes what
- *   the plugin is doing on the older tags: `--dsw-menu-backdrop-filter` has ZERO
- *   consumers before `0.1.7-alpha.1` (15 there, 16 at rc.1). On `0.1.5`/`0.1.6` the
- *   host frosts no menu at all, so the card/header blur sliders are the only reason
- *   a menu has a frost there — which is why the declaration goes on the element
- *   rather than into a host token the host does not read.
- *
- * `dsh-v0.1.7-rc.2` (npm `latest`) and `dsh-v0.2.0-rc.1`: `TabMenu`, `MenuView`,
- *   `PopupSelectView`, `ModelSelect` and `Menu` all render through the new
+ * `0.1.7-rc.2` and `dsh-v0.2.0-rc.1`: `TabMenu`, `MenuView`, `PopupSelectView`,
+ *   `ModelSelect` and `Menu` all render through the new
  *   `ui-primitives/src/MenuSurface.tsx` (byte-identical between the two tags),
  *   which leaves the element unpainted and draws on a `z-index:-1` child instead
  *   (`MenuSurface.module.css` `.material`: `background:var(--dsw-menu-surface-fill)`
@@ -205,18 +198,23 @@ export function elementFrostDecl(value: string): string {
  *       backdrop root", and the surface sets `isolation:isolate`. Filtering the
  *       element anyway installs the backdrop root the layer was written to avoid.
  *   The frost therefore rides `--dsw-menu-backdrop-filter`, whose consumer set is
- *   the same 14 stylesheets at both tags (stat dialog, queue dock, context meter,
- *   todo panel, goal bar, job list, `HoverCard`, `PickerPopover`/`TaskMenu`/
- *   `ScheduleCatalogAction`, the subagent lineage, `TeamAction`, `CordisPanel`,
- *   `MenuSurface` itself) — re-declaring the token reaches the frost whoever ends up
- *   applying it, and does not depend on any element being the painting element.
+ *   the same 14 stylesheets at every tag in the table (stat dialog, queue dock,
+ *   context meter, todo panel, goal bar, job list, `HoverCard`, `PickerPopover`/
+ *   `TaskMenu`/`ScheduleCatalogAction`, the subagent lineage, `TeamAction`,
+ *   `CordisPanel`, `MenuSurface` itself) — re-declaring the token reaches the frost
+ *   whoever ends up applying it, and does not depend on any element being the
+ *   painting element. A 15th file names the same token without consuming it:
+ *   `ui-theme/src/styles/gradient-shadow-text.css` DECLARES it on `body` —
+ *   `blur(40px) saturate(150%)`, no media query — which is exactly why writing the
+ *   token on a menu with a `none` fallback deletes a frost the host always had
+ *   (see `CARD_FROST_GATE` in `wallpaper.ts`). `MenuSurface.tsx` / `.module.css` are
+ *   byte-identical from rc.2 through `0.2.1-alpha.2`, and the consumer set moved only
+ *   in line numbers (the same 15 files at every tag in the table, checked per tag).
  *
- * `dsh-v0.2.0-rc.2` (npm `latest`) and `dsh-v0.2.1-alpha.1`: the layer and the frost
- *   are the same files — `MenuSurface.tsx` and `MenuSurface.module.css` are
- *   byte-identical to rc.1, and every `--dsw-menu-backdrop-filter` consumer is too —
- *   but the sticky GROUP HEADING inside those menus changed owner. Through rc.1 the
- *   only grouped menu was `ModelSelect`, whose own stylesheet painted that heading
- *   from the menu token (`ModelSelect.module.css` `.groupTitle{position:sticky;
+ * `dsh-v0.2.0-rc.2` … `dsh-v0.2.1-alpha.2`: the sticky GROUP HEADING inside those
+ *   menus changed owner. Through rc.1 the only grouped menu was `ModelSelect`, whose
+ *   own stylesheet painted that heading from the menu token
+ *   (`ModelSelect.module.css` `.groupTitle{position:sticky;
  *   background:var(--dsw-specific-menu)}`), so the card slider drove it and a picked
  *   wallpaper color tinted it. At rc.2 the rule is deleted and both grouped popups
  *   (`ModelSelect`, `PopupSelectView`) render the new `ui-primitives/MenuGroup.tsx`,
@@ -228,14 +226,7 @@ export function elementFrostDecl(value: string): string {
  *   is the single menu element the fade no longer reaches: an untinted, near-opaque
  *   band sitting on top of every row in the list the moment that list scrolls.
  */
-/** The answer for the releases whose menus paint themselves: `0.1.5-rc`,
- *  `0.1.6-alpha`, `0.1.7-alpha`. The unresolved bucket is its own variant below. */
-export const LEGACY_MENU_SURFACE: MenuSurfaceFacts = {
-  fillTokens: [MENU_FILL_TOKEN],
-  frostDecl: elementFrostDecl,
-}
-
-/** The answer for `0.1.7-rc` (`0.1.7-rc.2` onward) and `0.2.0-rc`. The old token
+/** The answer for `0.2.0-rc` and for `0.2.1-alpha`. The old token
  *  stays in the list on purpose: 14 surfaces in the same claim set still paint their
  *  fill from it — the lineage tree, `CordisPanel`, the stat dialog, `QueueDock`,
  *  `TodoPanel`, `ContextMeter`, `GoalBar`, `JobListAction`, `HoverCard`, `TeamAction`,

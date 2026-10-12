@@ -1,5 +1,6 @@
 /**
- * Adapter for the DSH `0.2.1-alpha` line, verified at `0.2.1-alpha.1`.
+ * Adapter for the DSH `0.2.1-alpha` line, verified at `0.2.1-alpha.1` AND
+ * `0.2.1-alpha.2`.
  *
  * A new MINOR line opened with a prerelease, and the answer is the `0.2.0-rc.2`
  * folder's — which is a statement this file has to earn, because "same as the
@@ -23,6 +24,18 @@
  *   · `TextShimmer` still marks its root `data-shimmer`, so the stroke exemption
  *     written for rc.1 stands.
  *
+ * Re-checked at `0.2.1-alpha.2`, same list: `design-platform.css` still byte-identical
+ * (`--dsw-menu-surface-fill` / `--dsw-specific-menu` / `--dsw-alias-menu-group-header-fill`
+ * on both scheme blocks); `MenuSurface.tsx`/`.module.css` byte-identical (blob hashes
+ * match); the `--dsw-specific-menu` and `--dsw-menu-backdrop-filter` file sets are the
+ * same 15 at both tags (the frost side being 14 consumers plus the `body` declaration
+ * in `gradient-shadow-text.css`);
+ * `[data-sidebar-right-panel]` and the dockkit slide unchanged; the five header slot
+ * keys unchanged; `AppFrame.tsx` / `AppFrame.module.css` untouched. The plugin-manager
+ * page gained a third `[data-plugin-scope]` group (`data-plugin-group="more"`) inside
+ * the same `[data-plugin-panel]`, which the existing rule already frames, so no new
+ * fact lands here.
+ *
  * What did move, and why none of it needs a fact from this folder:
  *
  *  1. `ui-layout/AppFrame` gains a second grid row, `div.bottomRow[data-shell-bottom]`
@@ -44,6 +57,38 @@
  *     looked for a plugin's `invariant` export. This plugin's no-op companion was
  *     therefore already dead weight here, and it goes rather than claiming a peer
  *     version for a package the host no longer ships.
+ *  5. `ui-theme/src/styles/base.css` restructured the font tokens: the built-in stacks
+ *     moved to `--dsh-font-family-text-default` / `-code-default`, and the host now
+ *     composes the tokens itself on `body` —
+ *     `--dsw-font-family: var(--dsh-font-family-text, …), …` — fed by the per-role user
+ *     font lists `ThemePresenter` publishes (`--dsh-font-family-text` / `-code` /
+ *     `-terminal`, new at this tag). That is a NEW `body`-level declaration of the very
+ *     token this plugin's custom-font feature writes, at the same specificity as its
+ *     rule — so which one wins became a question of stylesheet order. `applyFontFace`
+ *     now asserts its `--dsw-font-family` with `!important`, the way the token sheet
+ *     already does, so a host re-injecting its base styles cannot quietly drop the
+ *     picked font. Code typography (`--ds-font-family-code`, plus the new
+ *     `--dsh-code-font-size` axis) stays untouched — this plugin never owned it.
+ *  6. AT `0.2.1-alpha.2`, `ui-jobs/JobListAction` moved its background-task list out of
+ *     the header row and into a `createPortal(…, document.body)` painted
+ *     `position:fixed; z-index:100` — and the list is a bare `<ul>` with NO `role`, so
+ *     `header-tag.ts`'s `[role="menu"|"tree"|"dialog"]` probe can never claim it and the
+ *     `ul[class*="_menu"]` class shape is the only thing that still styles it.
+ *     Through `0.2.1-alpha.1` the same list is IN-PLACE — `{open ? <ul className={css.menu}
+ *     style={{left: menuShift}}/> : null}` with `.menu{position:absolute; top:calc(100% +
+ *     5px); z-index:100}` under a `.root{position:relative}` — which is the exact DOM the
+ *     reported bug was captured from (`style="left: 0px;"`, no `top`, no role). The portal
+ *     is therefore what HID the bug on the newest tag, not what fixed it: an absolutely
+ *     positioned `z-index:100` child of the header row is only buried by the page once
+ *     something makes that row a stacking context, and the thing that did was this
+ *     plugin's own 「标题栏」 frost. Nothing here is a per-release fact to route on —
+ *     `0.2.1-alpha.2` merely swapped which header component gets caught by it, because
+ *     `ui-schedule/TaskMenu` (registered into `…header.utilities` on every release in
+ *     range) is `role="menu"` + `position:absolute; z-index:100` in place whenever the
+ *     Menu primitive is not in portal mode. The compensation lives with the injury: see
+ *     the `z-index` note on `HEADER_BAR_RULE` in `wallpaper.ts`. (Checked and rejected:
+ *     `ui-conversation/ContextMeter`'s `position:fixed` panel is NOT row chrome —
+ *     `InputBar.tsx` mounts it in the composer, so the row never re-anchored it.)
  *
  * @module
  */
@@ -65,7 +110,7 @@ function panelFragments(): PanelFragments {
 
 export function createAdapter(host: HostInfo): HostAdapter {
   return {
-    id: '0.2.1-alpha.1',
+    id: '0.2.1-alpha.1/alpha.2',
     channel: '0.2.1-alpha',
     host,
     panelFragments,

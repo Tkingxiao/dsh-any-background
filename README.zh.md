@@ -4,7 +4,7 @@
   <a href="https://www.npmjs.com/package/dsh-any-background"><img alt="npm 版本" src="https://img.shields.io/npm/v/dsh-any-background?color=4d6bfe"></a>
   <a href="https://www.npmjs.com/package/dsh-any-background"><img alt="npm 月下载量" src="https://img.shields.io/npm/dm/dsh-any-background?color=4d6bfe"></a>
   <a href="https://github.com/Tkingxiao/dsh-any-background/blob/main/LICENSE"><img alt="License: MIT" src="https://img.shields.io/npm/l/dsh-any-background?color=4d6bfe"></a>
-  <a href="https://www.npmjs.com/package/@deepseek-ai/dsh?activeTab=versions"><img alt="支持的 DSH 版本：0.1.5-rc.2 ~ 0.2.1-alpha.1 及其上" src="https://img.shields.io/badge/DSH-0.1.5--rc.2%20~%200.2.1--alpha.1%2B-4d6bfe" /></a>
+  <a href="https://www.npmjs.com/package/@deepseek-ai/dsh?activeTab=versions"><img alt="支持的 DSH 版本：0.2.0-rc.1 ~ 0.2.1-alpha.2 及其上" src="https://img.shields.io/badge/DSH-0.2.0--rc.1%20~%200.2.1--alpha.2%2B-4d6bfe" /></a>
   <a href="https://github.com/topics/dsh-better-sidebar"><img alt="插件生态：GitHub topic dsh-better-sidebar" src="https://img.shields.io/badge/%E6%8F%92%E4%BB%B6%E7%94%9F%E6%80%81-topic%20dsh--better--sidebar-4d6bfe" /></a><br /><br />
   <a href="https://github.com/Tkingxiao/dsh-any-background"><img src="https://img.shields.io/github/stars/Tkingxiao/dsh-any-background?style=social" alt="GitHub stars"></a>
   <a href="https://dsh.directory/plugins/tkingxiao/dsh-any-background"><img src="https://dsh.directory/badges/listed.svg" alt="dsh.directory listed"></a>
@@ -12,7 +12,7 @@
 
 [English](README.md) | 中文
 
-一个 **DeepSeek Harness** 外观插件：自定义主题色、背景壁纸（图片 / 视频 / 算法动态生成），以及逐表面的透明度与模糊度控制。兼容 **DSH 0.1.5-rc.2 直至 `0.2.1-alpha.1`，其上所有版本一并放行**（官方右侧栏「主题」卡片等界面按宿主是否提供右侧栏注册表扩展点自动启用，缺失时静默跳过）。
+一个 **DeepSeek Harness** 外观插件：自定义主题色、背景壁纸（图片 / 视频 / 算法动态生成），以及逐表面的透明度与模糊度控制。兼容 **DSH `0.2.0-rc.1` 直至 `0.2.1-alpha.2`，其上所有版本一并放行**（官方右侧栏「主题」卡片等界面按宿主是否提供右侧栏注册表扩展点自动启用，缺失时静默跳过）。
 
 ---
 
@@ -72,11 +72,12 @@
 - **布局模式** — 适应 / 填充 / 拉伸 / 平铺 / 居中五种排布，图片与视频通用；「适应」模式下编辑器提交的构图在窗口缩放、跨屏移动后保持一致。
 - **动态生成背景** — 支持网格渐变、Shader、几何图案，可调节扩散范围、色彩强度并锁定种子。
 - **分部位界面透明度** — 主背景、侧边栏、卡片面板（含对话框周围的选项框/菜单）、输入框与控件（发送框、Cordis 插件面板）、设置面板、对话文本框、轨迹页、右方侧边栏（或 bettersidebar）、产出物/高亮内容、顶栏选项（Agent Team 面板、后台任务列表与会话头部下拉菜单），以及标题栏（会话顶部那条标题行 + 视图页签）各自独立滑块。
-- **分部位界面模糊度** — 每个界面部位可独立调整毛玻璃 `backdrop-filter` 模糊（0–60 px），并通过宿主的稳定选择器为发送框、Cordis 面板与弹出层提供真实背景模糊。
+- **分部位界面模糊度** — 每个界面部位可独立调整毛玻璃 `backdrop-filter` 模糊（0–60 px），并通过宿主的稳定选择器为发送框、Cordis 面板与弹出层提供真实背景模糊。滑块停在 0 时保留该表面**宿主自己的**磨砂，而不是把它抹掉：宿主默认就给菜单上 `--dsw-menu-backdrop-filter: blur(40px) saturate(150%)`，插件的数值只在滑块离开 0 后才接管——与发送框那条「为 0 就不抢」的规矩一致。
+- **左侧栏 + 它上方的标题条带** — 桌面壳（Windows）上，「侧栏」这对滑块现在同时驱动侧栏列，以及那条压在侧栏正上方的窗口标题条带分段。宿主把整条条带画成一个全宽的盒子（`.frame::before`），而宿主自己就把侧栏列宽发在帧元素上（`--dsh-windows-sidebar-width`）；插件就按这个宽度切开条带：`::before` 被裁到该宽度右侧（继续保留「标题栏」卡片的材质、模糊与拖拽区），新增的 `::after` 用 `--dsh-any-op-sidebar`——也就是侧栏列本身用的那份颜色——画出左侧那段，并按侧栏模糊的根级镜像上霜。于是一对滑块管住侧栏与它上方那一条，拖动或折叠侧栏时切口跟着移动（宽度 `0px` 时整条条带重新归「标题栏」）。
 - **产出物 / 高亮内容** — 对话正文里的代码块（含语言顶栏）、行内 `code` 高亮芯片与产出物 chip 共用一支滑块：透明度只**调制这些表面原本的背景色**（不会在旧背景上再叠一层新色），模糊度给同一层表面加磨砂，壁纸从内容后方透出来。
-- **右方侧边栏 / bettersidebar 表面** — 同一对滑块（`panelOpacity` / `blurs.panel`）按宿主环境自动切换目标：未安装 dsh-better-sidebar 时叫「右方侧边栏」，驱动官方右侧栏的表面令牌与毛玻璃模糊（0.1.5-rc.2 至 0.1.7 均适用）；安装了 dsh-better-sidebar 时改叫「bettersidebar」，接管其底部工作台面板（官方右侧栏同样生效）。该行现在始终显示。
+- **右方侧边栏 / bettersidebar 表面** — 同一对滑块（`panelOpacity` / `blurs.panel`）按宿主环境自动切换目标：未安装 dsh-better-sidebar 时叫「右方侧边栏」，驱动官方右侧栏的表面令牌与毛玻璃模糊（范围内每个 release 均适用）；安装了 dsh-better-sidebar 时改叫「bettersidebar」，接管其底部工作台面板（官方右侧栏同样生效）。该行现在始终显示。
 - **顶栏选项** — 会话头部的下拉浮层获得了独立的透明度 + 模糊滑块：Agent Team 面板、后台任务列表、「用其它应用打开」与「会话日志」菜单、子代理血缘树。由于这些浮层被 portal 到 `<body>`（与头部 DOM 断开），且 0.1.7 把「用其它应用打开」改成 portal、把会话行菜单改成动态槽位，插件改为在运行时监听稳定的 `conversation.session.header*` 槽位锚点来标记当前展开的浮层，不再依赖类名形状。
-- **标题栏（会话标题行）** — 会话顶部那条标题 / 操作 / 视图页签行终于有了自己的一对滑块。宿主自身不给它任何底色（中心列的底色直接透上来），所以壁纸一起来，标题与页签就直接压在图上、和周围被蒙住的表面割裂。现在它按「区块淡色」作画，配方与对话文本框那张卡一致：材质取插件主背景面的颜色、按本部件自己的透明度上色，读起来是压在列上的一条带，而不是叠上去的第二层颜色；模糊落在该行自己的 `backdrop-filter` 上——它内部没有就地弹出的浮层（头部下拉全是 portal 到 `body`），所以这个 backdrop root 没有代价，也不需要往宿主元素里插衬底层。这一行是**运行时认领**的：插件从 `conversation.session.header*` 槽位锚点向上找到最近的那个 `<header>` 再打上自己的类（与卡片、帧同款做法），不猜哈希类名、也不依赖宿主把槽位摆在哪个层级；`0.1.7-alpha.1` 之前宿主把槽位裸挂在会话根上、没有这一行元素，那种宿主上插件什么都不会认领，部件自然无效果。桌面壳（Windows）上这一对滑块同时驱动窗口标题条带：条带的底色与模糊都取本卡片这两个变量，窗口标题区与会话标题行永远一致；原生最小化/最大化/关闭那块改由取色探针报 `transparent`，让 Windows 不画自己的背景，露出的正是条带本身。空会话时宿主把该行标为 `headerBlank`（一条只留 padding 的占位），插件跳过认领。
+- **标题栏（会话标题行）** — 会话顶部那条标题 / 操作 / 视图页签行终于有了自己的一对滑块。宿主自身不给它任何底色（中心列的底色直接透上来），所以壁纸一起来，标题与页签就直接压在图上、和周围被蒙住的表面割裂。现在它按「区块淡色」作画，配方与对话文本框那张卡一致：材质取插件主背景面的颜色、按本部件自己的透明度上色，读起来是压在列上的一条带，而不是叠上去的第二层颜色；模糊落在该行自己的 `backdrop-filter` 上；而这道霜会把行变成层叠上下文，所以行同时带上补偿性的 `z-index:10`——行内挂出的浮层（直到 `0.2.1-alpha.1` 的后台任务列表、每个 release 上都可能就地的日程任务菜单）本来用 `z-index:100`，否则会被关在行里、压到对话之下。10 高于它会重叠到的列内部件（输入位 9、回到底部 8），又远低于所有页面级表面（100 / 1000 / 1100），因此打开菜单时这一条的颜色和模糊都不会变；也不写 `position`——该行本是 flex 子项，`z-index` 天然生效。详见 v0.3.7。这一行是**运行时认领**的：插件从 `conversation.session.header*` 槽位锚点向上找到最近的那个 `<header>` 再打上自己的类（与卡片、帧同款做法），不猜哈希类名、也不依赖宿主把槽位摆在哪个层级；`0.1.7-alpha.1` 之前宿主把槽位裸挂在会话根上、没有这一行元素，那种宿主上插件什么都不会认领，部件自然无效果。桌面壳（Windows）上这一对滑块同时驱动窗口标题条带——**但左侧栏正上方的那一段除外**，那一段归「侧栏」这对滑块管（见下条）；原生最小化/最大化/关闭那块改由取色探针报 `transparent`，让 Windows 不画自己的背景，露出的正是条带本身。空会话时宿主把该行标为 `headerBlank`（一条只留 padding 的占位），插件跳过认领。
 - **侧边栏「主题」页面（双模式）** — 同一套五页（色彩 / 界面 / 字体 / 背景 / 配置）注册到两处：未安装 dsh-better-sidebar 时，通过官方右侧栏的公开扩展点（`sidebarRightTabs` + `sidebar.right.pane.tab`）在**官方侧边栏**的引导页挂一张「主题」卡片，点开即五页；安装了 dsh-better-sidebar 时，改为在它的侧边栏注册同名页面，官方引导页上的卡片自动撤下，避免重复。两处（加设置面板共三处）共用同一套页面代码与同一份状态，改一处处处同步；外壳按面板宽度自适应，窄面板收紧内边距并回到单列。宿主没有右侧栏扩展点时静默不注册，不影响任何其它功能。
 - **对话视图卡片** — 消息列表自动包裹为半透明卡片，轨迹页可整页调节透明度与模糊，让壁纸从内容后方透出来。
 - **主题导出 / 导入** — 一键导出为自包含的 `dsh-any-theme.json`（配置 + 壁纸，视频以 data URL 内嵌），可随时导入还原。
@@ -92,20 +93,26 @@
 
 ## 更新日志（只保留最近两个版本）
 
+### v0.3.7（菜单在模糊为 0 时保留宿主磨砂；左侧栏接管其上方条带；版本表只讲 0.2.x）
+
+- **「后台任务列表被对话内容压住」的真正原因，是「标题栏」卡片自己给标题行加的霜；修法是补层级，不是切状态。** 会话标题行不是一条空带：宿主把头部控件挂进行内（`conversation.session.header.actions|.utilities`），而这些控件就从行内升起浮层。`ui-jobs/JobListAction` 在直到 `0.2.1-alpha.1` 的每个 release 上都是就地弹出——`.root{position:relative}` 下挂 `.menu{position:absolute; top:calc(100% + 5px); z-index:100}`；你抓的那段 DOM 里 `style="left: 0px"` 既没有 `top` 也没有 `role`，正是这个就地形状，而 `0.2.1-alpha.2` 的 portal 只是把症状在最新构建上藏住，并没有修好它。`ui-schedule/TaskMenu`（`role="menu"`，非 portal 模式时 `position:absolute; z-index:100` 就地）在范围内每个 release 都挂在同一行里。给这一行加 `backdrop-filter` 会把行变成 STACKING CONTEXT，于是那些 `z-index:100` 不再是页面级取值，只能在行内部相互排序；整行随后按自身层级绘制，落在对话正文、输入位和 `.root` 底色之下。菜单不是被宿主降级的，是被我们关起来的。现在行带上补偿性的 `z-index:10`——高于菜单会盖到的列内部件（`.seat` 9、回到底部 8、页脚 7、`.tabs` 1），又远低于所有页面级表面（portal 菜单 100、模态 1000、统计 / 上下文面板 1100）——于是磨砂、底色、拖拽区都不再切换状态，而 portal 出去的列表仍像宿主预期那样盖住标题行。不写 `position`：该行本来就是 `ConversationRoot .root{display:flex}` 的 flex 子项，`z-index` 天然生效，这样插件就不去替宿主的盒子决定定位（issue #24）。本 releases 里第一次的尝试是 `:has()` 让位门控——行内持有头部浮层时就把霜撤掉：遮挡确实解了，但每次有人打开头部菜单整条标题栏都会重新上色，看起来像那两个滑块自己在动。那个做法已删除。
+
+- **菜单的模糊滑块停在 0 时，不再删掉宿主自己的磨砂。** 宿主本来就给每个菜单上霜——`--dsw-menu-backdrop-filter: blur(40px) saturate(150%)` 声明在 `body` 上，两种绘制形状都读这份被继承的值：自己上色的列表靠自身的 `backdrop-filter`，`MenuSurface` 卡片靠它的 `.material` 层。插件把这个令牌在菜单元素上重写成带 `none` 兜底的声明，而元素自己的声明永远压过它继承来的值：于是滑块在 0 时磨砂不是「没被改动」，而是**被抹掉了**——一张淡到底、背后什么都没蒙的菜单，会让对话正文直接从它后面透出来。（另有一个独立缺陷会让同一个浮层真的被埋住，见本版第一条。）两个菜单组的磨砂现在都改走 `<html>` 上的一对 `:where()` 门控（`dab-card-frost` / `dab-header-frost`），只有滑块非 0 时才生效——发送框那颗胶囊早就是这个做法。用 `:where()` 是因为门控必须不花优先级：本插件的菜单级联是**按书写顺序**决胜的（卡片组 → 顶栏组 → 豁免组），换成带权重的类前缀会把卡片举到它本该让位的豁免之上。豁免组那句 `none` 保持不变：`applyExemptDefaults` 同时把那些表面钉在 alpha 1，它是设计上就该不透明，不是坏掉。
+
+- **后台任务列表正是让这个 bug 现形的地方。** `0.2.1-alpha.2` 把它从头部行里 portal 到了 `document.body`，`position:fixed; z-index:100`，而且是个不带 `role` 的裸 `<ul>`——于是「磨砂缺失」这个缺陷终于有了能被看见的载体——列表直面整个页面，而不是挂在列内。而和它一起被报告的遮挡，成因见本版第一条。`MenuSurface` 自己的 `data-menu-material` 标记也加进了卡片组，原因同类的：`ModelSelect` 的模型面板渲染成 `role="group"`，只按 `[role="menu"]` 匹配时，那张卡会跟着滑块变淡、却永远不跟着变模糊。
+
+- **左侧栏和它上方那条标题带现在是一整个表面。** `AppFrame` 的条带是一个全宽盒子（`.frame::before`），它的左段正压在侧栏列上方，而宿主把那一列的宽度发在帧元素自己身上（`--dsh-windows-sidebar-width`，仅 Windows 构建、内联样式）。插件就按这个宽度切开：`::before` 裁到其右侧，继续拿「标题栏」的材质、霜与拖拽区；新增的 `::after` 用 `--dsh-any-op-sidebar`——侧栏列被画成的那一份颜色——涂上左段，模糊取侧栏模糊的根级镜像。一对滑块同时驱动这一列与其上方那条带，切口跟着拖动或折叠走（`0px` 时整条条带交还给「标题栏」）。
+
+- **自定义字体不再在 `0.2.1-alpha.2` 上被宿主悄悄抢走。** 那个 tag 把用户字体列表搬进 `--dsh-font-family-text`，并让宿主在自己的 `base.css` 里合成 `body{--dsw-font-family:var(--dsh-font-family-text,…)}` —— 与本插件写的是同一个令牌、同一个 `body` 选择器、同一个优先级，于是谁生效变成了「谁的样式表排在后面」。字体规则现在带 `!important`，与令牌表的做法一致；代码字体照旧不碰。
+
+- **版本表现在只对 `0.2.x` 发言。** `0.1.5-rc`、`0.1.6-alpha`、`0.1.7-alpha`、`0.1.7-rc` 四个目录、渠道与行都删掉了：插件里已经没有任何一条事实是按它们核对的，而一张没人再核对的表比没有表更糟。`engines.dsh`、受门禁的 peer 与 `dsh.compatibility` 现在从 `0.2.0-rc.1` 起步，也就是说更旧的宿主会在 profile 组装时被**明确拒绝**，而不是被一份错的事实悄悄改版式——DSHA 里包的 `0.1.5-rc.2` 也一样。`0.2.1-alpha.2` 是按 tag 逐包比对核实的（`design-platform.css`、`MenuSurface`、`MenuGroup`、`--dsw-menu-backdrop-filter` 的消费者集合、`AppFrame`、头部槽位键与右侧栏面板——全部未变），它并入那个仍然成立的事实目录 `v0-2-1-alpha-1-2`，于是它的判定是 `exact`。
+
 ### v0.3.6（「标题栏」卡片接管 Windows 标题条带与原生按钮区，修 issue #23）
 
 - **「标题栏」卡片现在也驱动桌面壳的标题条带**：那条条带是 `AppFrame.module.css` 的 `.frame::before`，全宽、高度正好等于 `--dsh-windows-titlebar-height`，此前它按宿主的侧栏令牌上色、完全不归插件管——于是「侧栏」滑杆一动，窗口标题区就跟着变透明，标题与「应用 / 编辑」菜单栏直接压在裸壁纸上（issue #23 现象一）。现在条带的底色就是本卡片的材质在该卡片透明度下的取值，模糊取同一份模糊变量：一对滑块同时驱动会话标题行与窗口标题条带，两处不可能再对不上。
 - **原生最小化 / 最大化 / 关闭那块不再是自己一块**：那块由 Windows 绘制，颜色来自桌面 preload 从一个隐藏探针量到的 `--dsw-specific-sidebar-fill`（经 `dsh-desktop:windows-appearance` 交给主进程 `setTitleBarOverlay`）。v0.3.5 把探针钉回材质实色，于是它和已经会跟随滑杆变淡的条带对不上——浅色模式下是一块偏白的方块。这里换了更彻底的做法：探针直接报 `transparent`，让 Windows **不画**这块背景。条带本来就严丝合缝地覆盖这 40 px，于是按钮区露出来的就是条带本身，一整块连续，任何透明度下都自动一致。（中途试过把卡片材质连同 alpha 喂给探针：Windows 会改成给**每个按钮各画一块自己的背景**，三块半透明叠在条带上，反而变成三块更亮的小方块。）字形颜色仍单独取 `--dsw-alias-label-primary`，保持不透明可读。
 - **内容列左上角改成直角**：`AppFrame` 给 `.centerCol` 左上角 16 px 圆角并裁掉溢出，帧一旦被清成透明让壁纸透出来，那个缺口就在会话标题行的头几个像素下露出壁纸。插件现在把该角归零（`dab-center-flat`）。
 - **空白会话不再被误认领**：无会话 / 空会话时宿主把这一行标成 `headerBlank`（`min-height:0`、去掉下边框），只留 padding 与右侧那个角落控件——本意就是一条什么都不画的占位行。插件此前照样认领并给它上底色，于是「本该没有标题栏」的时候凭空冒出一个框。现在认领前先排除该标记，并且认领改为「只有一个持有者」：切到空白态或宿主换掉这一行时，旧类会被摘掉。
-
-### v0.3.5（接管卡磨砂不再与宿主抢卡片的定位，修 issue #24）
-
-- **插件不再替宿主的卡片决定 `position`**：审批、计划回顾、问题卡这三张接管卡，宿主在所有受支持版本里都没有给它们定位（逐 tag 核对：三份样式表里 `position:` 零命中），所以 v0.3.4 那条 `.dab-input-frost [data-approval-key]>div{position:relative;isolation:isolate}` 实际上是拿选择器权重替宿主决定卡片的定位。宿主自己的样式一旦也定位这张卡（issue #24 的桌面壳用 `position:absolute` + 百分比 `max-height` 把它封在视口内），这份决定权就变成一场按优先级分胜负的竞争：同为 `.dab-takeover` 量级时插件靠书写顺序取胜，把宿主那张绝对定位的卡变成在流内的卡——座位高度、卡片盒子连同报告里的塌陷症状全跟着变，而这本来就不是插件该决定的东西（两种结果都在本地按同样权重实测过）。磨砂现在改由运行时逐张挂类（`dab-takeover-frost`）：只在模糊值非零时挂，且**只对计算样式为 `static` 的卡片**内联写 `position:relative`（`setBlur` 同款守卫，`data-dab-pos-patched` 标记谁写谁清）；宿主自己定位过的卡片一律不动——它自己的定位就是那层衬底的包含块，磨砂照样成立。宿主盒子的定位从此不是本插件参与的比赛。
-- **样式表里不再出现接管卡的选择器**：配方只剩 `.dab-takeover-frost{isolation:isolate}` 与它的 `::before`，挂类/卸类由 `applyTakeoverFrost` 负责，并搭 `watchParts` 已有的节流 pass 认领宿主后挂上来的卡片（值签名之外补一个卡片身份，否则审批出现的那一趟会被跳过、卡片一直裸着）。`role="dialog"` 阀沿用 `PART_BLUR_RULE` 的老规矩：卡片里真开了对话框就先让出 `isolation`。
-- **三张卡上的改动仍全部停留在绘制层**：`--dsw-specific-input-major` 的全局改写保留——宿主里这个令牌只被用作 `background`（逐 tag 核对过，牵动不了任何尺寸）——输入透明度滑块依旧负责淡出，模糊滑块经新路径依旧负责磨砂。
-- **新增「标题栏」卡片**：会话顶部那条标题 / 操作 / 视图页签行此前没有任何滑块——宿主不给它底色，中心列的底色直接透上来，壁纸一起来这条行就直接压在图上。现在它有自己的透明度 + 模糊：按插件主背景面在该部件透明度下的「区块淡色」作画（与对话文本框那张卡同配方），模糊落在该行自己的 `backdrop-filter` 上；锚点用 CSS 表达（该行是 `conversation.session.header` 槽位的直接父节点），宿主在 `0.1.7-alpha.1` 之前把该槽位裸挂在根上、规则匹配不到、部件无效果。它是第十一个部件，`字体` 页的描边分组同步新增。
-- **桌面端右上角原生窗口按钮区不再被插件的透明度带偏**：那块按钮由 Windows 绘制、颜色来自桌面 preload 从 `--dsw-specific-sidebar-fill` 量到的单色，而插件会把该令牌改写成「侧栏」滑杆的 alpha，于是按钮区看起来半透明、发灰（issue #23 现象二）。现在插件只把宿主那个取色探针钉回材质的实色：页面照旧跟随滑杆，按钮区保持宿主自己的不透明颜色。
 
 ## 安装
 
@@ -149,11 +156,9 @@ pnpm dsh web
 
 ## 兼容性
 
-- **[`dsh web`](https://github.com/deepseek-ai/deepseek-harness) 0.1.5-rc.2 ~ `0.2.1-alpha.1`，其上所有版本一并放行** — `engines.dsh`、六个受门禁的 `@deepseek-ai/dsh-*` 的 `peerDependencies` 与 `dsh.compatibility.dsh` 先逐一列出本插件核对过的 `0.1.5-rc` 与 `0.1.6-alpha` 各构建——总括从它们之上开始，所以这些必须写全——继续点名此后逐个 diff 过的版本（`0.1.7-rc.1`、`0.1.7-rc.2`、`0.2.0-rc.1`、`0.2.0-rc.2`、`0.2.1-alpha.1`）作为记录，最后以不设上界的 `>=0.1.7-alpha.1` 收尾，让 0.1.7、0.2 及其后的每一个 release 都能加载。不设上界是有意选的：从 `0.1.7-rc.1` 起宿主强制的正是这份 peer 列表——范围没写到的版本会在导入任何模块之前被整行禁用——一条写到头的范围等于在一款还能正常工作的插件前面砌墙。没见过的 release 会取最近的一份事实，并在日志里写清它离 `exact` 有多远；一份过期事实最坏的代价是某个滑块不再淡出宿主已经搬走的那个表面，而一道失败关闭的版本检查代价是整个插件。`dsh.compatibility.dshReleases` 记录哪些构建核对过、怎么核对的：`0.1.7-rc.1` / `0.1.7-rc.2`、`0.2.0-rc.1` / `0.2.0-rc.2` 与 `0.2.1-alpha.1` 以逐包比对 tag 核对，它们之前的构建是实测过的。这道门禁也意味着安装或更新插件后仍需重启 `dsh web`——检查发生在 profile 组装时，而不是插件更新时——但不设上界的总括，正让已经升到更新宿主的机器不再需要先等插件发版（或手工授予精确版本豁免 `dsh plugin allow-version`）。宿主版本在运行时由 Node 半侧解析，依赖特定宿主版本渠道的功能（右侧栏面板模糊、官方侧栏「主题」卡片）只在对应宿主结构存在时启用，其余功能在整个范围内表现一致。
-- **版本适配隔离**：release 由 Node 半侧从进程自身那份 `@deepseek-ai/dsh/package.json` 读出（客户端上下文不暴露版本；`ctx.profileContext.installAnchor` 指不到时退回启动器的磁盘布局），经 `read` RPC 下发后只由前置适配层路由——`src/host-compat/` 负责探测与渠道归类，`src/client/host-compat/versions/` 下**每个事实集合一个目录**（`v0-1-5-rc-2-3` / `v0-1-6-alpha-1-2` / `v0-1-7-alpha-1-2-rc-1` / `v0-1-7-rc-2` / `v0-2-0-rc-1` / `v0-2-0-rc-2` / `v0-2-1-alpha-1` / `unknown`），各自描述该版本的面板力学、头部槽位键、插件页形状，以及菜单的底色与磨砂落在哪一层。目录按它覆盖的事实命名，不按版本号的形状：`0.2.0-rc.1` 与 `0.2.0-rc.2` 同属一个预发布渠道，但 rc.2 改了吸顶菜单分组标题取色的令牌，于是这条补丁行上并着两个目录，较新的那个按开启它的那个构建命名。底码只向适配层提问（引导页表面归谁、模糊挂在哪一层、菜单该重写哪些令牌），不比较版本字符串。同一补丁行内的其它构建（`0.1.6-alpha.4` 之于核对基准 `0.1.6-alpha.2`）用该行的档位；整条补丁行都不在已核对范围内才收边取最近的一档并写日志——`0.2.1-alpha.1` 之上的每一个 release 如今就是靠这一档加载的。只有解析不到 release 时归入 `unknown`，回退到按 DOM 形状探测（`:has()` 双臂）而不是猜一个版本；适配新宿主 = 新增一个版本目录并在注册表登记。
-- **[DSHA](https://github.com/DSH-APP/DSHA)** — DeepSeek Harness 安卓启动器（免 ROOT、免 Termux）。其包内 dsh 为 `0.1.5-rc.2`，落在兼容范围内；移动端界面由 `dsh-web-mobile` 提供。
-- **[deepseek-harness-desktop](https://github.com/anywhere-labs/deepseek-harness-desktop)** — 支持
-
+- **[`dsh web`](https://github.com/deepseek-ai/deepseek-harness) `0.2.0-rc.1` ~ `0.2.1-alpha.2`，其上所有版本一并放行** — `engines.dsh`、受门禁的 `@deepseek-ai/dsh-*` `peerDependencies` 与 `dsh.compatibility.dsh` 先逐一列出本插件核对过的构建（`0.2.0-rc.1`、`0.2.0-rc.2`、`0.2.1-alpha.1`、`0.2.1-alpha.2`），再以不设上界的 `>=0.2.0-rc.1` 收尾，让其后每一个 release 都能加载。不设上界是有意选的：宿主强制的正是这份 peer 列表——范围没写到的版本会在导入任何模块之前被整行禁用——一条写到头的范围等于在一款还能正常工作的插件前面砌墙。没见过的 release 会取最近的一份事实，并在日志里写清它离 `exact` 有多远；一份过期事实最坏的代价是某个滑块不再淡出宿主已经搬走的那个表面，而一道失败关闭的版本检查代价是整个插件。`dsh.compatibility.dshReleases` 记录哪些构建被核对过、怎么核对的：列表里的每个 release 都是按 tag 逐包比对其事实目录核实的。这道门禁也意味着安装或更新插件后仍需重启 `dsh web`——检查发生在 profile 组装时，而不是插件更新时——但不设上界的总括，正让已经升到更新宿主的机器不再需要先等插件发版（或手工授予精确版本豁免 `dsh plugin allow-version`）。宿主版本在运行时由 Node 半侧解析，依赖特定宿主版本渠道的功能（右侧栏面板模糊、官方侧栏「主题」卡片）只在对应宿主结构存在时启用，其余功能在整个范围内表现一致。**`0.1.5` / `0.1.6` / `0.1.7` 这一档已移出兼容范围**：那些事实目录断言的东西已经没有再被核对，而一张没人核对的表比没有表更糟；范围从 `0.2.0-rc.1` 起步，意味着更旧的宿主会在组装期被明确拒绝，而不是被一份错的适配事实悄悄改版式。
+- **版本适配隔离**：release 由 Node 半侧从进程自身那份 `@deepseek-ai/dsh/package.json` 读出（客户端上下文不暴露版本；`ctx.profileContext.installAnchor` 指不到时退回启动器的磁盘布局），经 `read` RPC 下发后只由前置适配层路由——`src/host-compat/` 负责探测与渠道归类，`src/client/host-compat/versions/` 下**每个事实集合一个目录**（`v0-2-0-rc-1` / `v0-2-0-rc-2` / `v0-2-1-alpha-1-2` / `unknown`），各自描述该版本的面板力学、头部槽位键、插件页形状，以及菜单的底色与磨砂落在哪一层。目录按它覆盖的事实命名，不按版本号的形状：`0.2.0-rc.1` 与 `0.2.0-rc.2` 同属一个预发布渠道，但 rc.2 改了吸顶菜单分组标题取色的令牌，于是这条补丁行上并着两个目录，较新的那个按开启它的那个构建命名。**事实没变的更新版本不新开目录，而是并入那份仍然成立的事实目录**——`0.2.1-alpha.2` 正因如此坐在 `v0-2-1-alpha-1-2` 里，并新增一条 `SUPPORTED_RELEASES` 行，让它的判定是 `exact` 而不是 `line`。底码只向适配层提问（引导页表面归谁、模糊挂在哪一层、菜单该重写哪些令牌），不比较版本字符串。同一补丁行内的其它构建（`0.2.1-alpha.3` 之于核对基准 `alpha.2`）用该行的档位；整条补丁行都不在已核对范围内才收边取最近的一档并写日志——`0.2.1-alpha.2` 之上的每一个 release 如今就是靠这一档加载的。只有解析不到 release 时归入 `unknown`，回退到按 DOM 形状探测（`:has()` 双臂）而不是猜一个版本；适配新宿主 = 新增一个版本目录并在注册表登记。
+- **[DSHA](https://github.com/DSH-APP/DSHA)** — DeepSeek Harness 安卓启动器（免 ROOT、免 Termux）。其包内 dsh 为 `0.1.5-rc.2`，自 v0.3.7 起**低于本插件的兼容下界**：peer 门禁会在组装期拒绝它，所以插件在那上面根本不加载，而不是拿 0.2.x 的事实去改版那个壳。
 ## 权限、副作用与边界
 
 - **接入形态**：官方 Profile Bundle——`package.json` 声明 `dsh.bundle.patch: ./cordis.patch.yml`（loader 插入层），仓库提交可直接使用的预构建运行时制品（`lib/index.js`、`lib/client.js`），无安装脚本、无 postinstall、无 native 二进制、安装时不执行任何构建。

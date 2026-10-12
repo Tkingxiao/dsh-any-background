@@ -2,9 +2,8 @@
  * The contract every per-version adapter folder implements.
  *
  * Business code reads THESE, never a release string. That is the isolation rule:
- * `0.1.5-rc` / `0.1.6-alpha` / `0.1.7-alpha` / `0.1.7-rc` / `0.2.0-rc` may appear
- * inside `versions/` and in the front-door detector, and nowhere else in the
- * plugin. Adding a new DSH line
+ * `0.2.0-rc` / `0.2.0-rc.2` / `0.2.1-alpha` may appear inside `versions/` and in the
+ * front-door detector, and nowhere else in the plugin. Adding a new DSH line
  * then means adding one folder and one registry row — no `if` scattered through
  * the styling code.
  *
@@ -96,8 +95,8 @@ export interface HostAdapter {
   readonly id: string
   /** The channel the adapter was chosen by. */
   readonly channel: HostChannel
-  /** The full resolved release facts, kept for adapters that need finer grain
-   *  than a channel (see `prereleaseOf`). */
+  /** The full resolved release facts, kept for diagnostics and for an adapter that
+   *  would need finer grain than a channel. */
   readonly host: HostInfo
   readonly surface: SurfaceAdapter
   /** Resolve the panel CSS for this host. A function, not a string, because the

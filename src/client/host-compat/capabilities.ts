@@ -3,7 +3,7 @@
  *
  * Everything downstream asks a QUESTION ("who owns the guide surface?", "which CSS
  * arm applies?") and gets an answer from the current adapter. No consumer names a
- * release. That is what keeps the per-version folders honest: when 0.1.8 needs a
+ * release. That is what keeps the per-version folders honest: when a newer line needs a
  * new behaviour, a consumer changes by reading a new adapter field, not by growing
  * another version comparison.
  *

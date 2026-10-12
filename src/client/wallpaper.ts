@@ -391,6 +391,14 @@ export const SETTINGS_STYLE_RULE =
 // inside it, which is how the slider behaved at 0.1.7-rc.1 too.
 const CARD_BLUR_VAR = '--dsh-any-blur-card-panels'
 const POPOVER_MENU_SEL = `[role="menu"]:not([data-dockkit-tab-menu])`
+/** The `MenuSurface` root's own marker (`ui-primitives/MenuSurface.tsx`), present on
+ *  every release whose menus paint through that layer. It joins the card group because
+ *  the role set cannot reach all of them: `ModelSelect` renders its model pane as
+ *  `role="group"` (ModelSelect.tsx:486), so keyed on `[role="menu"]` alone that card
+ *  fades with the slider — its fill comes off `body` — and never frosts with it.
+ *  The dockkit exclusion has to be spelled again here: a tab menu IS a `MenuSurface`
+ *  now, and it stays owned by its own layer token, not by the menu one. */
+const MENU_MATERIAL_SEL = `[data-menu-material]:not([data-dockkit-tab-menu])`
 const POPOVER_OTHER_SEL =
   `[role="listbox"],` +
   `body > [role="tree"],` +
@@ -401,6 +409,36 @@ const POPOVER_OTHER_SEL =
  *  group and the exemptions can never disagree about which layer to paint. */
 function menuFrost(blurVar: string): string {
   return hostAdapter().menus.frostDecl(`var(${blurVar},none)`)
+}
+
+/** The `<html>` classes that let the two menu groups write their frost token at all.
+ *
+ *  WHY A GATE IS NEEDED AND `:where()` IS ENOUGH: the host declares its own menu frost
+ *  on `body` (`ui-theme/src/styles/gradient-shadow-text.css` —
+ *  `--dsw-menu-backdrop-filter: blur(40px) saturate(150%)`, no media query), and every
+ *  menu frosts from that INHERITED value, whether it filters itself (the background-job
+ *  `<ul>`) or hands the value to a `MenuSurface` `.material` child. An element's own
+ *  declaration always beats what it inherits, so writing the token with a `none`
+ *  fallback does not "add no blur" at slider 0 — it DELETES the host's frost. The
+ *  result is a faded menu with nothing behind it: the page shows through it crisp and
+ *  bright, so the popup stops reading as a raised surface at all. (This is a DIFFERENT
+ *  defect from the reported "the background-job list is under the conversation" one,
+ *  which is a stacking-context injury the row takes with its own frost — see the
+ *  `z-index` note on `HEADER_BAR_RULE`. Both were live at once on `0.2.0-rc.1`.)
+ *  `none` stays correct for the exempt group: `applyExemptDefaults` pins those
+ *  surfaces at alpha 1 alongside the cleared frost, so they are opaque by design.
+ *
+ *  `:where()` keeps the gate free: this plugin's menu cascade is ORDERED (card group →
+ *  header group → exemptions) at equal specificity, and a class prefix with real
+ *  specificity would have lifted the card group over the exemption it must lose to. */
+const CARD_FROST_GATE = 'dab-card-frost'
+const HEADER_FROST_GATE = 'dab-header-frost'
+
+/** Prefix every arm of a selector list with a `:where()` gate. A joined list is one
+ *  selector per entry, so prefixing the string once would gate only the first arm and
+ *  leave the rest always on. */
+function gated(gate: string, selectors: string): string {
+  return selectors.split(',').map(sel => `:where(.${gate}) ${sel}`).join(',')
 }
 
 /** Declare EVERY token this release's menus can paint their fill from with the same
@@ -417,7 +455,7 @@ function menuFillDecls(value: string): string {
 }
 
 export function popoverBlurRule(): string {
-  return `${POPOVER_MENU_SEL}{${menuFrost(CARD_BLUR_VAR)}}` +
+  return `${gated(CARD_FROST_GATE, `${POPOVER_MENU_SEL},${MENU_MATERIAL_SEL}`)}{${menuFrost(CARD_BLUR_VAR)}}` +
     `${POPOVER_OTHER_SEL}{${elementFrostDecl(`var(${CARD_BLUR_VAR},none)`)}}`
 }
 
@@ -635,12 +673,53 @@ function claimHeaderBar(bar: HTMLElement | null): void {
 
 /** The bar's paint. The variables are written by `applyHeaderBar`; the class is
  *  only ever added when they are, so a host the plugin is not theming keeps its
- *  own header untouched. */
+ *  own header untouched.
+ *
+ *  WHY THE ROW NEEDS A `z-index`: the 「标题栏」 card frosts the row, and a
+ *  `backdrop-filter` other than `none` makes the element a STACKING CONTEXT — which the
+ *  row cannot avoid wanting, since the frost is the feature. The row is not an empty
+ *  strip: the host mounts its header chrome INTO it (`conversation.session.header
+ *  .actions|.utilities|.corner`), and that chrome raises its overlays from inside the
+ *  row:
+ *    · `ui-jobs/JobListAction.module.css` — `.root{position:relative}` +
+ *      `.menu{position:absolute; top:calc(100% + 5px); z-index:100}` on every release
+ *      through `0.2.1-alpha.1` (the `{open ? <ul style={{left: menuShift}}/> : null}`
+ *      the bug was captured from; `0.2.1-alpha.2` portaled it to `body`, which is why
+ *      that build hid the symptom rather than fixed it);
+ *    · `ui-schedule/TaskMenu.module.css` — the list root carries `role="menu"` and is
+ *      `position:absolute; top:calc(100% + 4px); z-index:100` whenever the primitive is
+ *      NOT in portal mode, and it sits in `…header.utilities` on every release in range.
+ *  Once the row is a stacking context those `z-index:100`s stop being page-level values:
+ *  they only order the overlays WITHIN the row, and the row itself then paints at its
+ *  own level — under the conversation body, the composer seat and `.root`'s background,
+ *  all of which follow it in the column. The menu was not demoted by the host; it was
+ *  confined by us, and confining it is what "the list is behind the chat" meant.
+ *
+ *  THE COMPENSATION IS THE ROW'S OWN `z-index`, not a release of the frost: a `:has()`
+ *  valve dropping the blur while an overlay is open was the first attempt, and it
+ *  visibly re-tints the whole title bar every time anyone opens a header menu — the
+ *  part's two sliders appear to change state on their own. Raising the row instead keeps
+ *  the frost steady and restores the order the host assumed. The value has to clear the
+ *  in-column chrome the row hangs over — `.seat` 9 (composer), the back-to-bottom control
+ *  8, the footer 7, `.tabs` 1 (all measured from `ConversationRoot.module.css`) — while
+ *  staying UNDER every page-level surface, because the centre column is not itself a
+ *  stacking context unless the background blur is on: portaled menus/tooltips are 100,
+ *  modal overlays 1000, stat and context panels 1100 (`Menu.module.css`, `Modal.module.css`,
+ *  `ContextMeter.module.css` — the last lives in `InputBar`, NOT in this row, so the row's
+ *  filter never had to be blamed for its anchoring). 10 sits in that gap: above 9, far
+ *  below 100, so a portaled list still covers the title row exactly as the host intends.
+ *
+ *  `z-index` needs no `position` here and none is written: the row is a flex ITEM of
+ *  `ConversationRoot .root{display:flex;flex-direction:column}` on every release in range,
+ *  and z-index applies to flex items as they are. Writing `position:relative` would also
+ *  make the row a containing block — and deciding a host box's positioning is the exact
+ *  race this plugin lost once already (issue #24). */
 export const HEADER_BAR_RULE =
   `.${HEADER_BAR_CLASS}{` +
   'background:var(--dsh-any-op-header-bar,transparent)!important;' +
   'backdrop-filter:var(--dsh-any-blur-header-bar,none);' +
-  '-webkit-backdrop-filter:var(--dsh-any-blur-header-bar,none)}'
+  '-webkit-backdrop-filter:var(--dsh-any-blur-header-bar,none);' +
+  'z-index:10}'
 
 /** The 「标题栏」card's paint: the card's material at the card's opacity, empty
  *  where the plugin is not theming. The conversation header row, the Windows
@@ -698,10 +777,10 @@ export function applyHeaderBar(surfaces?: Record<string, string> | null): void {
 //     `setTitleBarOverlay` and its guard accepts an `rgba()` value. There is no
 //     page-callable IPC and the `dshDesktop` bridge exposes none, so those
 //     measured tokens ARE the plugin's entire lever on that block.
-// The band is BOUND to the 「标题栏」card: its paint is the card's material at the
-// card's opacity, and its frost reads the card's blur variable
-// (`--dsh-any-blur-header-bar`), so the one opacity/blur pair drives the caption
-// band and the conversation header row together.
+// The band is TWO OWNERS, split at the sidebar's width: the segment above the left
+// sidebar belongs to the 「侧栏」 pair (same material, same frost), and everything right
+// of it belongs to the 「标题栏」 card (its material at its opacity, its blur variable).
+// See `applyNativeCaption` for how the cut is made and why the drag region survives it.
 // The probe is handed `transparent`, so Windows paints the block with NO
 // background of its own. The band already spans the full caption width at exactly
 // the overlay's height (`.frame::before` is `inset: 0 0 auto` at
@@ -751,17 +830,49 @@ function captionFill(src: Record<string, string> | null): string {
  *  plugin's own discovery (`discoverParts`), not a guessed hashed class name. The
  *  probe selector is a verified shape: an inline style that mentions the sidebar
  *  token on a body-level span is the desktop preload's caption probe and nothing
- *  else, so no match means no desktop caption and the rule is inert. */
+ *  else, so no match means no desktop caption and the rule is inert.
+ *
+ *  THE BAND IS TWO REGIONS, NOT ONE. `AppFrame.module.css` paints the whole caption
+ *  with one box (`.frame::before`, `inset: 0 0 auto` at `--dsh-windows-titlebar-height`)
+ *  in `--dsw-specific-sidebar-fill` — the SIDEBAR's token — while the sidebar column
+ *  below it (`AppFrame.tsx`'s first grid track, `${cols.sidebar}px`) is the surface
+ *  that slider actually owns. The 标题栏 card took the band over in 0.3.6, which made
+ *  the strip above the sidebar follow the session title row instead of the sidebar. So
+ *  the band is now cut at the sidebar's own width:
+ *    · `::before` keeps the host's box (and its `-webkit-app-region: drag`) and is
+ *      CLIPPED to everything right of that width — `clip-path:inset(0 0 0 …)` clips
+ *      the paint AND the backdrop-filter's effect, so the region under the cut is
+ *      genuinely untouched rather than frosted twice.
+ *    · `::after` (a box `.frame` does not use on any release in range) paints exactly
+ *      that left segment from `--dsh-any-op-sidebar` — the same literal the sidebar
+ *      column is painted with — and frosts from the sidebar blur's root mirror, so the
+ *      column and the strip above it are one surface under one opacity + blur pair.
+ *  `--dsh-windows-sidebar-width` is published INLINE ON THE FRAME by the host
+ *  (`AppFrame.tsx`, Windows builds only, `${cols.sidebar}px`) and both pseudo-elements
+ *  inherit it, so the split tracks a dragged or collapsed sidebar with no observer of
+ *  our own. Collapsed is `0px`: the `::after` box vanishes and `::before` un-clips, so
+ *  the band goes back to being entirely the 标题栏 card's.
+ *  The native button block still reads the probe as `transparent`, and it sits at the
+ *  window's right edge — inside the region that stays 标题栏-owned. */
 function applyNativeCaption(surfaces?: Record<string, string> | null): void {
   if (!document.documentElement.hasAttribute('data-windows-titlebar')) return
   const src = surfaces === undefined ? (paletteTokens() ?? readHostOpacityTokens()) : surfaces
   const fill = captionFill(src)
   const paint = headerBarPaint(src) || fill
+  const width = 'var(--dsh-windows-sidebar-width,0px)'
   const css = fill === '' ? '' : `${WCO_PROBE_SEL}{--dsw-specific-sidebar-fill:transparent}` +
     `[data-windows-titlebar] .${CAPTION_FRAME_CLASS}::before{` +
     `background:var(--dsh-any-op-header-bar,${paint})!important;` +
     `backdrop-filter:var(--dsh-any-blur-header-bar,none);` +
-    `-webkit-backdrop-filter:var(--dsh-any-blur-header-bar,none)}` +
+    `-webkit-backdrop-filter:var(--dsh-any-blur-header-bar,none);` +
+    `clip-path:inset(0 0 0 ${width});-webkit-clip-path:inset(0 0 0 ${width})}` +
+    `[data-windows-titlebar] .${CAPTION_FRAME_CLASS}::after{` +
+    `content:"";position:absolute;top:0;left:0;` +
+    `width:${width};height:var(--dsh-windows-titlebar-height,40px);` +
+    `background:var(--dsh-any-op-sidebar,${fill});` +
+    `backdrop-filter:var(--dsh-any-blur-sidebar-band,none);` +
+    `-webkit-backdrop-filter:var(--dsh-any-blur-sidebar-band,none);` +
+    `-webkit-app-region:drag}` +
     `[data-windows-titlebar] .${FLAT_CENTER_CLASS}{border-top-left-radius:0!important}`
   const el = ensureWcoStyle()
   if (el.textContent !== css) el.textContent = css
@@ -774,6 +885,14 @@ function applyNativeCaption(surfaces?: Record<string, string> | null): void {
     frameEl.classList.add(CAPTION_FRAME_CLASS)
     centerEl?.classList.add(FLAT_CENTER_CLASS)
   }
+}
+
+/** Mirror of the sidebar-part blur on `:root`, for the caption segment above the
+ *  sidebar column. `--dsh-any-part-blur` is written INLINE on the column and the band
+ *  is a pseudo-element of the FRAME, one level up, so it can never inherit it. */
+function applySidebarBandBlur(px: number): void {
+  if (px > 0) document.documentElement.style.setProperty('--dsh-any-blur-sidebar-band', `blur(${px}px)`)
+  else document.documentElement.style.removeProperty('--dsh-any-blur-sidebar-band')
 }
 
 /** Mirror of the bg-part blur on :root. --dsh-any-part-blur is element-scoped
@@ -922,7 +1041,7 @@ const HEADER_SURFACES_PADDED = [`${HEADER_TAG_SELECTOR}[role]`, ...HEADER_SURFAC
 const HEADER_BLUR_VAR = '--dsh-any-blur-header'
 
 export function headerPopoverRule(): string {
-  return `${HEADER_SURFACES_PADDED.join(',')}{${menuFrost(HEADER_BLUR_VAR)}}`
+  return `${gated(HEADER_FROST_GATE, HEADER_SURFACES_PADDED.join(','))}{${menuFrost(HEADER_BLUR_VAR)}}`
 }
 
 // ── Surfaces pinned against the sliders (theme color kept) ────────────────────
@@ -982,8 +1101,13 @@ const HEADER_TOKEN_SELECTOR = HEADER_SURFACES_PADDED.join(',')
 export function applyHeaderPopovers(): void {
   const root = document.documentElement
   const px = rBlurs().header
-  if (px > 0) root.style.setProperty('--dsh-any-blur-header', `blur(${px}px)`)
-  else root.style.removeProperty('--dsh-any-blur-header')
+  if (px > 0) {
+    root.style.setProperty(HEADER_BLUR_VAR, `blur(${px}px)`)
+    root.classList.add(HEADER_FROST_GATE)
+  } else {
+    root.style.removeProperty(HEADER_BLUR_VAR)
+    root.classList.remove(HEADER_FROST_GATE)
+  }
   // Alpha: re-emit the live menu token's own color with the header opacity so
   // the popover keeps the host palette (and follows a picked color) while fading
   // independently of the card slider. EVERY fill token the release paints menus
@@ -1353,8 +1477,9 @@ export const PRODUCED_RULE =
 export const STROKE_RULE = [
   // settings
   `${SETTINGS_PANEL_SEL}{-webkit-text-stroke:var(--dsh-any-stroke-settings-w,0px) var(--dsh-any-stroke-settings-c,transparent);paint-order:stroke fill}`,
-  // card / popovers — selector set mirrors popoverBlurRule
-  `[role="menu"]:not([data-dockkit-tab-menu]),[role="listbox"],body>[role="tree"],body>[role="dialog"]:not([aria-modal="true"])` +
+  // card / popovers — selector set mirrors popoverBlurRule, `[data-menu-material]`
+  // included so the `role="group"` model pane is stroked like the menus beside it
+  `[role="menu"]:not([data-dockkit-tab-menu]),[data-menu-material]:not([data-dockkit-tab-menu]),[role="listbox"],body>[role="tree"],body>[role="dialog"]:not([aria-modal="true"])` +
   `{-webkit-text-stroke:var(--dsh-any-stroke-card-w,0px) var(--dsh-any-stroke-card-c,transparent);paint-order:stroke fill}`,
   // input / controls — native editors need their own declaration
   `[data-composer-card],[data-cordis-panel],` +
@@ -1592,7 +1717,16 @@ export function applyFontFace(url: string | null, enabled: boolean, mime: string
     `@font-face{font-family:'${FONT_FAMILY}';src:url('${url}') format('${fmt}');font-display:swap}` +
     // Inheritable consumers only: form controls with UA default fonts keep
     // their own look unless the host already opted them into the token.
-    `body{--dsw-font-family:'${FONT_FAMILY}',${stack}}` +
+    //
+    // `!important` is load-bearing since `0.2.1-alpha.2`, not decoration: that tag
+    // moved the user font list into `--dsh-font-family-text` and made the host itself
+    // compose the token — `base.css` now declares
+    // `body{--dsw-font-family:var(--dsh-font-family-text,…),…}`. Same element selector
+    // as the rule below, so without a flag the winner is whoever's stylesheet lands
+    // last, and a host that re-injects its base sheet (a theme change, a presenter
+    // rebuild) silently drops the picked font. The plugin's token sheet already asserts
+    // its `body` declarations this way for exactly this reason.
+    `body{--dsw-font-family:'${FONT_FAMILY}',${stack}!important}` +
     `input,textarea,select,button{font-family:var(--dsw-font-family)}`
 }
 
@@ -2056,10 +2190,17 @@ function applyPartOpacities(ops: PartOpacities): void {
 /** Blur of the option panels inside the settings dialog (.dab-card), owned by
  *  the "dialog option panel" (card) blur slider. Written as a plugin-owned
  *  variable consumed by SETTINGS_STYLE_RULE — deliberately NOT applied to the
- *  homepage center column, which this slider must never touch. */
+ *  homepage center column, which this slider must never touch. The gate class is
+ *  what hands the menu frost token over at all (see `CARD_FROST_GATE`). */
 function applyCardPanelsBlur(px: number): void {
-  if (px > 0) document.documentElement.style.setProperty('--dsh-any-blur-card-panels', `blur(${px}px)`)
-  else document.documentElement.style.removeProperty('--dsh-any-blur-card-panels')
+  const root = document.documentElement
+  if (px > 0) {
+    root.style.setProperty(CARD_BLUR_VAR, `blur(${px}px)`)
+    root.classList.add(CARD_FROST_GATE)
+  } else {
+    root.style.removeProperty(CARD_BLUR_VAR)
+    root.classList.remove(CARD_FROST_GATE)
+  }
 }
 
 /** Apply per-part interface blur to the AppFrame columns + settings panel. */
@@ -2076,6 +2217,7 @@ export function applyPartBlurs(blurs: PartBlurs): void {
   setBlur(centerEl, blurs.bg)
   setBlur(rightEl, 0)
   applyBgBlurGlobal(blurs.bg)
+  applySidebarBandBlur(blurs.sidebar)
   applyCardPanelsBlur(blurs.card)
   applySettingsBlur(blurs.settings)
   applyInputBlur(blurs.input)
@@ -2125,8 +2267,11 @@ export function setPartBlur(part: keyof PartBlurs, v: number): void {
   if (part === 'headerBar') { applyHeaderBar(); return }
   if (part === 'chat' || part === 'trajectory') { applyViewCards(); return }
   discoverParts()
-  if (part === 'bg') { setBlur(centerEl, v); applyBgBlurGlobal(v) }
-  else setBlur(sidebarEl, v)
+  if (part === 'bg') { setBlur(centerEl, v); applyBgBlurGlobal(v); return }
+  // The caption segment above the sidebar frosts from the same value, mirrored on
+  // :root — the live-drag path has to move both or the band lags the column.
+  setBlur(sidebarEl, v)
+  applySidebarBandBlur(v)
 }
 
 // ── Conversation view treatments ────────────────────────────────────
@@ -2890,7 +3035,10 @@ export function teardownWp(): void {
       if (name) document.documentElement.style.removeProperty(name)
     }
   }
-  document.documentElement.classList.remove(INPUT_FROST_CLASS)
+  // The two menu frost gates are `<html>` classes that switch a TOKEN re-declaration
+  // on and off; left behind, they would keep the host's own menu frost overridden
+  // with no slider driving it.
+  document.documentElement.classList.remove(INPUT_FROST_CLASS, CARD_FROST_GATE, HEADER_FROST_GATE)
   // Hand the seat takeover cards back untouched — the inline `position` this
   // pass may have written included (typed teardown, so no observer will).
   applyTakeoverFrost(0)
@@ -2899,6 +3047,7 @@ export function teardownWp(): void {
   // and the rules are dropped.
   document.documentElement.style.removeProperty('--dsh-any-op-header-bar')
   document.documentElement.style.removeProperty('--dsh-any-blur-header-bar')
+  document.documentElement.style.removeProperty('--dsh-any-blur-sidebar-band')
   document.querySelectorAll(`.${HEADER_BAR_CLASS}`).forEach(el => el.classList.remove(HEADER_BAR_CLASS))
   headerBarEl = null
   frameEl?.classList.remove(CAPTION_FRAME_CLASS)
