@@ -43,6 +43,18 @@
  * dropdowns are transient (opening one closes the others), so this is a guard
  * rather than the common path.
  *
+ * THE SURFACE MARKER IS PART OF THE CANDIDATE SET (`0.2.1-alpha.3` and up).
+ * That release moved the background-job list onto the shared `MenuSurface`, whose
+ * root carries NO role — the `<ul>` inside it is now a paint-free `.menuBody`
+ * (`JobListAction.module.css` dropped its own `background`/`backdrop-filter`), and
+ * the fill plus the frost live on the surface's `.material` child. Keyed on roles
+ * alone the tagger went blind exactly when the paint moved one level up, and the
+ * job list kept the stock look. `data-menu-material` is the surface's own semantic
+ * marker (`MenuSurface.tsx`), so the tag rides it: the tokens land on the surface
+ * root, which is the nearest ancestor of `.material`, and inherit down into it.
+ * The pre-migration shape (a self-painting `<ul class*="_menu">`) stays matched by
+ * the header group's class-shape arm, so both eras are styled by one rule set.
+ *
  * @module
  */
 
@@ -52,7 +64,7 @@ import { hostAdapter } from './host-compat/capabilities'
 export const HEADER_POPOVER_ATTR = 'data-dsh-any-header-popover'
 
 /** Portaled popovers a header trigger can own. */
-const POPOVER_SELECTOR = '[role="menu"], [role="tree"], [role="dialog"]'
+const POPOVER_SELECTOR = '[role="menu"], [role="tree"], [role="dialog"], [data-menu-material]'
 
 /** Which session-header slot anchors to watch — supplied by the host adapter,
  *  because the set is not the same on every release: 0.1.6-alpha.2 registers a

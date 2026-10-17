@@ -5,14 +5,14 @@
  * line is a three-step change with no existing file to touch:
  *   1. `KnownChannel` (and `channelOf`) in `src/host-compat/channel.ts`,
  *   2. a folder here, mirroring the others, NAMED FOR THE EXACT TAGS ITS FACTS
- *      WERE CHECKED AGAINST (`v0-2-0-rc-1`, `v0-2-1-alpha-1-2`) so the precision
+ *      WERE CHECKED AGAINST (`v0-2-0-rc-1`, `v0-2-0-rc-2`, `v0-2-1`) so the precision
  *      of the table is readable from the tree, and the folder states inside it
  *      which prerelease gates it carries,
  *   3. the row below.
  * A newer build that turns out to need NO change does not get its own folder: it
- * joins the name of the folder whose facts held (`v0-2-1-alpha-1-2`, checked at
- * both) and gains a `SUPPORTED_RELEASES` row, which is what moves that host's
- * verdict from `line` to `exact`.
+ * joins the name of the folder whose facts held (`v0-2-1`, checked from `alpha.1`
+ * through `rc.2`) and gains a `SUPPORTED_RELEASES` row, which is what moves that
+ * host's verdict from `line` to `exact`.
  * Anything that reads an adapter then picks it up without an edit — which is the
  * point: version branching must not be reachable from the styling code.
  *
@@ -36,13 +36,13 @@
 import type { HostAdapter, HostChannel, HostInfo } from './types'
 import { createAdapter as adapterFor020rc } from './v0-2-0-rc-1/adapter'
 import { createAdapter as adapterFor020rc2 } from './v0-2-0-rc-2/adapter'
-import { createAdapter as adapterFor021alpha } from './v0-2-1-alpha-1-2/adapter'
+import { createAdapter as adapterFor021 } from './v0-2-1/adapter'
 import { createAdapter as adapterForUnknown } from './unknown/adapter'
 
 const ADAPTERS: Record<HostChannel, (host: HostInfo) => HostAdapter> = {
   '0.2.0-rc': adapterFor020rc,
   '0.2.0-rc.2': adapterFor020rc2,
-  '0.2.1-alpha': adapterFor021alpha,
+  '0.2.1': adapterFor021,
   unknown: adapterForUnknown,
 }
 

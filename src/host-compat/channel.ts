@@ -26,13 +26,20 @@
  *  row at or below the host" hands every later `0.2.0-rc` (and `0.2.0` stable) to
  *  it.
  *
+ *  `0.2.1` IS KEYED TO THE PATCH LINE, not to a prerelease name, because the line's
+ *  alpha builds and its rc builds answer with the same facts: checked per tag from
+ *  `0.2.1-alpha.1` through `0.2.1-rc.2`, no file the adapter speaks for moved (the
+ *  one shape change, the job list moving onto `MenuSurface` at `alpha.3`, is
+ *  absorbed by DOM-shape selectors rather than by a per-release answer). A channel
+ *  name that splits alpha from rc would be two folders asserting identical facts.
+ *
  *  The 0.1.5 / 0.1.6 / 0.1.7 channels are GONE: their folders went with them, and a
  *  channel with no folder is a compile error, not a fallback. A host still sitting
  *  on that era clamps to the oldest row here and says so (`nearest`). */
 export type HostChannel =
   | '0.2.0-rc'
   | '0.2.0-rc.2'
-  | '0.2.1-alpha'
+  | '0.2.1'
   | 'unknown'
 
 /** A known channel — one that has a real adapter. */
@@ -59,8 +66,13 @@ export interface SupportedRelease {
 export const SUPPORTED_RELEASES: readonly SupportedRelease[] = [
   { channel: '0.2.0-rc', release: '0.2.0-rc.1' },
   { channel: '0.2.0-rc.2', release: '0.2.0-rc.2' },
-  { channel: '0.2.1-alpha', release: '0.2.1-alpha.1' },
-  { channel: '0.2.1-alpha', release: '0.2.1-alpha.2' },
+  { channel: '0.2.1', release: '0.2.1-alpha.1' },
+  { channel: '0.2.1', release: '0.2.1-alpha.2' },
+  { channel: '0.2.1', release: '0.2.1-alpha.3' },
+  { channel: '0.2.1', release: '0.2.1-alpha.4' },
+  { channel: '0.2.1', release: '0.2.1-alpha.5' },
+  { channel: '0.2.1', release: '0.2.1-rc.1' },
+  { channel: '0.2.1', release: '0.2.1-rc.2' },
 ]
 
 /** How the chosen adapter relates to the release that was detected. Reported so a
@@ -151,7 +163,7 @@ function cmp(a: Parsed, b: Parsed): number {
  *  release is outside everything this plugin has seen.
  *
  *  A release is matched by PATCH LINE before anything else: `0.2.1-alpha.3` and a
- *  future `0.2.1` stable both belong to the line verified at `0.2.1-alpha.1/2`, and
+ *  future `0.2.1` stable both belong to the line verified at `0.2.1-alpha.1…rc.2`, and
  *  handing them that adapter beats giving up — the DOM probes only cover panel
  *  mechanics, not the surface decisions the line is known for.
  *

@@ -29,6 +29,7 @@ import {
   PLACEHOLDER_RULE,
   PRODUCED_RULE,
   SETTINGS_STYLE_RULE,
+  SIDEBAR_ONE_LAYER_RULE,
   STROKE_RULE,
   TRAJECTORY_STYLE_RULE,
   exemptDefaultRule,
@@ -72,6 +73,10 @@ export function buildStaticStyles(): string {
     // First, not because anything competes with it, but because every surface
     // group below assumes the frame behind them is clear.
     + FRAME_CLEAR_RULE
+    // Same job one row down: the sidebar's fill is declared by three nested elements,
+    // and a translucent token stacked three times is not one surface. See
+    // `SIDEBAR_ONE_LAYER_RULE` for why the column is the one that keeps it.
+    + SIDEBAR_ONE_LAYER_RULE
     + SETTINGS_STYLE_RULE
     + popoverBlurRule() // ← adapter: a menu's frost + fill token
     + TRAJECTORY_STYLE_RULE

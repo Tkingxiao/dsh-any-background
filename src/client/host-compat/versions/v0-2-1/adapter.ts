@@ -1,6 +1,6 @@
 /**
- * Adapter for the DSH `0.2.1-alpha` line, verified at `0.2.1-alpha.1` AND
- * `0.2.1-alpha.2`.
+ * Adapter for the DSH `0.2.1` patch line, verified at `0.2.1-alpha.1`,
+ * `alpha.2`, `alpha.3`, `alpha.4`, `alpha.5`, `rc.1` and `rc.2`.
  *
  * A new MINOR line opened with a prerelease, and the answer is the `0.2.0-rc.2`
  * folder's — which is a statement this file has to earn, because "same as the
@@ -23,6 +23,21 @@
  *   · `PluginManagerPage.tsx` still emits the three anchors of the card list.
  *   · `TextShimmer` still marks its root `data-shimmer`, so the stroke exemption
  *     written for rc.1 stands.
+ *
+ * Re-checked again across the rest of the line (`alpha.3` … `rc.2`, `git diff
+ * <tag> rc.2` on every file above): the menu token contract, both menu stylesheets
+ * (`MenuSurface`, `MenuGroup`), `gradient-shadow-text.css` / `base.css`,
+ * `AppFrame.*`, `ConversationRoot`, `TaskMenu`, `preload-windows` and the five
+ * header slot keys are unchanged through `rc.2`. Two deltas, neither a fact here:
+ *   · `ui-sidebar-right/SidebarRight.module.css` gained `overflow:clip` on the
+ *     panel wrapper (hidden docked items no longer widen the frame's scrollable
+ *     overflow; fixed floating children still escape). The slide owner and the
+ *     element the frost rides are untouched, and the plugin never promotes the
+ *     wrapper on this line.
+ *   · `PluginManagerPage.tsx` was refactored and now emits `data-plugin-scope`
+ *     groups for `global`, `preset` and `more`. The anchors this plugin frames
+ *     (`[data-plugin-panel]`, `[data-plugin-scope] > ul`, `[data-plugin-loading] >
+ *     ul`) are still all there, and the rule is scope-value agnostic.
  *
  * Re-checked at `0.2.1-alpha.2`, same list: `design-platform.css` still byte-identical
  * (`--dsw-menu-surface-fill` / `--dsw-specific-menu` / `--dsw-alias-menu-group-header-fill`
@@ -110,8 +125,8 @@ function panelFragments(): PanelFragments {
 
 export function createAdapter(host: HostInfo): HostAdapter {
   return {
-    id: '0.2.1-alpha.1/alpha.2',
-    channel: '0.2.1-alpha',
+    id: '0.2.1-alpha.1…rc.2',
+    channel: '0.2.1',
     host,
     panelFragments,
     pluginPageRule: PLUGIN_PAGE_FROST_RULE,

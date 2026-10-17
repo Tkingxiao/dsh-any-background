@@ -1,6 +1,6 @@
 {
   "name": "dsh-any-background",
-  "version": "0.3.7",
+  "version": "0.3.8",
   "description": "Appearance plugin for DeepSeek Harness: custom theme color (PS-style color wheel), background wallpaper with opacity/blur controls, and separate main/settings interface opacity.",
   "keywords": [
     "deepseek-harness",
@@ -23,7 +23,7 @@
   "author": "Tkingxiao",
   "type": "module",
   "engines": {
-    "dsh": "0.2.0-rc.1 || 0.2.0-rc.2 || 0.2.1-alpha.1 || 0.2.1-alpha.2 || >=0.2.0-rc.1"
+    "dsh": "0.2.0-rc.1 || 0.2.0-rc.2 || 0.2.1-alpha.1 || 0.2.1-alpha.2 || 0.2.1-alpha.3 || 0.2.1-alpha.4 || 0.2.1-alpha.5 || 0.2.1-rc.1 || 0.2.1-rc.2 || >=0.2.0-rc.1"
   },
   "exports": {
     ".": {
@@ -46,6 +46,7 @@
   ],
   "scripts": {
     "bundle": "tsdown",
+    "test": "npm run bundle && node scripts/smoke.mjs",
     "watch": "tsdown --watch",
     "typecheck": "tsc -p tsconfig.json"
   },
@@ -63,12 +64,12 @@
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.2",
-    "@deepseek-ai/dsh-client-locale": "0.2.0-rc.1 || 0.2.0-rc.2 || 0.2.1-alpha.1 || 0.2.1-alpha.2 || >=0.2.0-rc.1",
-    "@deepseek-ai/dsh-client-store": "0.2.0-rc.1 || 0.2.0-rc.2 || 0.2.1-alpha.1 || 0.2.1-alpha.2 || >=0.2.0-rc.1",
-    "@deepseek-ai/dsh-client-connection": "0.2.0-rc.1 || 0.2.0-rc.2 || 0.2.1-alpha.1 || 0.2.1-alpha.2 || >=0.2.0-rc.1",
-    "@deepseek-ai/dsh-client-ui-settings": "0.2.0-rc.1 || 0.2.0-rc.2 || 0.2.1-alpha.1 || 0.2.1-alpha.2 || >=0.2.0-rc.1",
-    "@deepseek-ai/dsh-client-ui-sidebar-right": "0.2.0-rc.1 || 0.2.0-rc.2 || 0.2.1-alpha.1 || 0.2.1-alpha.2 || >=0.2.0-rc.1",
-    "@deepseek-ai/dsh-client-ui-theme": "0.2.0-rc.1 || 0.2.0-rc.2 || 0.2.1-alpha.1 || 0.2.1-alpha.2 || >=0.2.0-rc.1",
+    "@deepseek-ai/dsh-client-locale": "0.2.0-rc.1 || 0.2.0-rc.2 || 0.2.1-alpha.1 || 0.2.1-alpha.2 || 0.2.1-alpha.3 || 0.2.1-alpha.4 || 0.2.1-alpha.5 || 0.2.1-rc.1 || 0.2.1-rc.2 || >=0.2.0-rc.1",
+    "@deepseek-ai/dsh-client-store": "0.2.0-rc.1 || 0.2.0-rc.2 || 0.2.1-alpha.1 || 0.2.1-alpha.2 || 0.2.1-alpha.3 || 0.2.1-alpha.4 || 0.2.1-alpha.5 || 0.2.1-rc.1 || 0.2.1-rc.2 || >=0.2.0-rc.1",
+    "@deepseek-ai/dsh-client-connection": "0.2.0-rc.1 || 0.2.0-rc.2 || 0.2.1-alpha.1 || 0.2.1-alpha.2 || 0.2.1-alpha.3 || 0.2.1-alpha.4 || 0.2.1-alpha.5 || 0.2.1-rc.1 || 0.2.1-rc.2 || >=0.2.0-rc.1",
+    "@deepseek-ai/dsh-client-ui-settings": "0.2.0-rc.1 || 0.2.0-rc.2 || 0.2.1-alpha.1 || 0.2.1-alpha.2 || 0.2.1-alpha.3 || 0.2.1-alpha.4 || 0.2.1-alpha.5 || 0.2.1-rc.1 || 0.2.1-rc.2 || >=0.2.0-rc.1",
+    "@deepseek-ai/dsh-client-ui-sidebar-right": "0.2.0-rc.1 || 0.2.0-rc.2 || 0.2.1-alpha.1 || 0.2.1-alpha.2 || 0.2.1-alpha.3 || 0.2.1-alpha.4 || 0.2.1-alpha.5 || 0.2.1-rc.1 || 0.2.1-rc.2 || >=0.2.0-rc.1",
+    "@deepseek-ai/dsh-client-ui-theme": "0.2.0-rc.1 || 0.2.0-rc.2 || 0.2.1-alpha.1 || 0.2.1-alpha.2 || 0.2.1-alpha.3 || 0.2.1-alpha.4 || 0.2.1-alpha.5 || 0.2.1-rc.1 || 0.2.1-rc.2 || >=0.2.0-rc.1",
     "react": "^18.2.0",
     "dsh-better-sidebar": ">=0.4.0"
   },
@@ -103,12 +104,17 @@
   },
   "dsh": {
     "compatibility": {
-      "dsh": "0.2.0-rc.1 || 0.2.0-rc.2 || 0.2.1-alpha.1 || 0.2.1-alpha.2 || >=0.2.0-rc.1",
+      "dsh": "0.2.0-rc.1 || 0.2.0-rc.2 || 0.2.1-alpha.1 || 0.2.1-alpha.2 || 0.2.1-alpha.3 || 0.2.1-alpha.4 || 0.2.1-alpha.5 || 0.2.1-rc.1 || 0.2.1-rc.2 || >=0.2.0-rc.1",
       "dshReleases": {
         "0.2.0-rc.1": "compatible",
         "0.2.0-rc.2": "compatible",
         "0.2.1-alpha.1": "compatible",
-        "0.2.1-alpha.2": "compatible"
+        "0.2.1-alpha.2": "compatible",
+        "0.2.1-alpha.3": "compatible",
+        "0.2.1-alpha.4": "compatible",
+        "0.2.1-alpha.5": "compatible",
+        "0.2.1-rc.1": "compatible",
+        "0.2.1-rc.2": "compatible"
       }
     },
     "bundle": {

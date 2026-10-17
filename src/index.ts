@@ -93,7 +93,7 @@ interface PartOpacities {
   bg: number; sidebar: number; card: number; input: number
 }
 interface PartBlurs {
-  bg: number; sidebar: number; card: number; settings: number; chat: number; trajectory: number; input: number; panel: number; produced: number; header: number
+  bg: number; sidebar: number; card: number; settings: number; chat: number; trajectory: number; input: number; panel: number; produced: number; header: number; headerBar: number
 }
 /** Text-stroke color of one surface group; a preset key plus the free color
  *  used only when the key is 'custom'. */
@@ -126,6 +126,7 @@ interface ProfileAppearance {
   panelOpacity: number
   producedOpacity: number
   headerOpacity: number
+  headerBarOpacity: number
 }
 interface ProfileEntry { id: string; name: string; createdAt: string; config: ProfileAppearance }
 interface RotationItem { file: string; thumb: string }
@@ -174,6 +175,8 @@ interface ThemeConfig {
   producedOpacity: number
   /** Opacity of the header popovers (Agent Team panel + job list). */
   headerOpacity: number
+  /** Opacity of the session header bar (the「标题栏」part). */
+  headerBarOpacity: number
   /** Saved appearance profiles (name + appearance snapshot). */
   profiles: ProfileEntry[]
   /** Wallpaper rotation pool + cadence. */
@@ -197,7 +200,7 @@ export const DEFAULT_CONFIG: ThemeConfig = {
   // like it "saved" and then lost the value.
   color: null,
   opacities: { bg: 0, sidebar: 0.5, card: 0.5, input: 0.5 },
-  blurs: { bg: 0, sidebar: 30, card: 30, settings: 30, chat: 30, trajectory: 30, input: 30, panel: 30, produced: 30, header: 30 },
+  blurs: { bg: 0, sidebar: 30, card: 30, settings: 30, chat: 30, trajectory: 30, input: 30, panel: 30, produced: 30, header: 30, headerBar: 30 },
   strokes: {
     bg: { width: 0, color: 'auto', customColor: '#808080' },
     sidebar: { width: 0, color: 'auto', customColor: '#808080' },
@@ -209,6 +212,7 @@ export const DEFAULT_CONFIG: ThemeConfig = {
     panel: { width: 0, color: 'auto', customColor: '#808080' },
     produced: { width: 0, color: 'auto', customColor: '#808080' },
     header: { width: 0, color: 'auto', customColor: '#808080' },
+    headerBar: { width: 0, color: 'auto', customColor: '#808080' },
   },
   settingsOpacity: 0.5,
   wallpaperOpacity: 1,
@@ -227,6 +231,7 @@ export const DEFAULT_CONFIG: ThemeConfig = {
   panelOpacity: 0.5,
   producedOpacity: 0.5,
   headerOpacity: 0.5,
+  headerBarOpacity: 0.5,
   profiles: [],
   rotation: { enabled: false, mode: 'shuffle', interval: 'daily', current: 0, items: [], lastRotate: null },
   schedule: { enabled: false, mode: 'time', dayProfile: null, nightProfile: null, dayStart: '07:00', nightStart: '19:00' },
@@ -311,7 +316,7 @@ function normalizeBgState(s: Partial<BgState>): BgState {
 }
 
 /** Coerce an unknown persisted value into a valid ThemeConfig, falling back per-field. */
-const STROKE_GROUPS = ['bg', 'sidebar', 'card', 'settings', 'chat', 'trajectory', 'input', 'panel', 'produced', 'header'] as const
+const STROKE_GROUPS = ['bg', 'sidebar', 'card', 'settings', 'chat', 'trajectory', 'input', 'panel', 'produced', 'header', 'headerBar'] as const
 const STROKE_COLOR_KEYS = ['auto', 'gray', 'black', 'white', 'theme', 'custom'] as const
 const HEX_RE = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/
 
@@ -356,7 +361,7 @@ function normalizeConfig(raw: unknown): ThemeConfig {
   const ops = (r.opacities ?? {}) as Partial<PartOpacities>
   const bl = (r.blurs ?? {}) as Partial<PartBlurs>
   const blurs = {} as PartBlurs
-  for (const k of ['bg', 'sidebar', 'card', 'settings', 'chat', 'trajectory', 'input', 'panel', 'produced', 'header'] as const) {
+  for (const k of ['bg', 'sidebar', 'card', 'settings', 'chat', 'trajectory', 'input', 'panel', 'produced', 'header', 'headerBar'] as const) {
     blurs[k] = clamp(bl[k], 0, 60, DEFAULT_CONFIG.blurs[k])
   }
   return {
@@ -386,6 +391,7 @@ function normalizeConfig(raw: unknown): ThemeConfig {
     panelOpacity: clamp(r.panelOpacity, 0, 1, DEFAULT_CONFIG.panelOpacity),
     producedOpacity: clamp(r.producedOpacity, 0, 1, DEFAULT_CONFIG.producedOpacity),
     headerOpacity: clamp(r.headerOpacity, 0, 1, DEFAULT_CONFIG.headerOpacity),
+    headerBarOpacity: clamp(r.headerBarOpacity, 0, 1, DEFAULT_CONFIG.headerBarOpacity),
     profiles: normalizeProfiles(r.profiles),
     rotation: normalizeRotation(r.rotation),
     schedule: normalizeSchedule(r.schedule),
@@ -437,7 +443,7 @@ function normalizeProfileAppearance(raw: unknown): ProfileAppearance {
   const ops = (a.opacities ?? {}) as Partial<PartOpacities>
   const bl = (a.blurs ?? {}) as Partial<PartBlurs>
   const blurs = {} as PartBlurs
-  for (const k of ['bg', 'sidebar', 'card', 'settings', 'chat', 'trajectory', 'input', 'panel', 'produced'] as const) {
+  for (const k of ['bg', 'sidebar', 'card', 'settings', 'chat', 'trajectory', 'input', 'panel', 'produced', 'header', 'headerBar'] as const) {
     blurs[k] = clamp(bl[k], 0, 60, DEFAULT_CONFIG.blurs[k])
   }
   return {
@@ -460,6 +466,7 @@ function normalizeProfileAppearance(raw: unknown): ProfileAppearance {
     panelOpacity: clamp(a.panelOpacity, 0, 1, DEFAULT_CONFIG.panelOpacity),
     producedOpacity: clamp(a.producedOpacity, 0, 1, DEFAULT_CONFIG.producedOpacity),
     headerOpacity: clamp(a.headerOpacity, 0, 1, DEFAULT_CONFIG.headerOpacity),
+    headerBarOpacity: clamp(a.headerBarOpacity, 0, 1, DEFAULT_CONFIG.headerBarOpacity),
   }
 }
 

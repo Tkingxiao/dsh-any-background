@@ -803,6 +803,74 @@ const CAPTION_FRAME_CLASS = 'dab-frame-caption'
 const FLAT_CENTER_CLASS = 'dab-center-flat'
 const WCO_PROBE_SEL = 'body > span[style*="--dsw-specific-sidebar-fill"]'
 
+/** Marks the sidebar's own caption controls — the toggle and, while collapsed,
+ *  the new-session button. Both are `position:fixed` and float over the band, so
+ *  they inherit the band's ink instead of the sidebar's. */
+const CAPTION_INK_ATTR = 'data-dab-caption-ink'
+
+/** The strip's chrome ink, and its collapsed-state variant.
+ *
+ *  WHY THIS IS NOT THE LABEL INK: the plugin flips the label tokens against the
+ *  PICKED PALETTE (white on a dark pick), but the caption band is that palette at
+ *  the sidebar/header-bar opacity OVER the wallpaper. At a low opacity the strip
+ *  is mostly wallpaper, so white ink lands on a light band and the toggle
+ *  disappears (reported on the desktop build, on a 22%-opacity sidebar over a bright
+ *  wallpaper). The strip therefore derives its own ink from what it is actually
+ *  painted on: past ~85% opacity the surface dominates and the palette direction
+ *  is the truth; below it the wallpaper's brightness verdict decides.
+ *
+ *  Returned as `{ ink, collapsedInk }` because the strip's material changes with
+ *  the sidebar: expanded it is the sidebar segment, collapsed it is the 「标题栏」
+ *  card's band. `null` means "no verdict and no palette direction" — leave the
+ *  host's ink alone. */
+function captionInkPair(): { ink: string; collapsedInk: string } | null {
+  const verdict = rBgDark()
+  const override = rSchemeOverride()
+  const inkIsWhite = override === 'auto'
+    ? (rHasColor() ? rColorScheme() === 'dark' : verdict)
+    : rScheme() === 'dark'
+  if (inkIsWhite === null || inkIsWhite === undefined) return null
+  const stripInk = (alpha: number): string => {
+    const dark = verdict === null || verdict === undefined || alpha >= 0.85 ? inkIsWhite : verdict
+    return dark ? '#fff' : '#000'
+  }
+  return { ink: stripInk(rOps().sidebar), collapsedInk: stripInk(rHeaderBarOpacity()) }
+}
+
+/** The fixed caption controls of the sidebar root, re-inked (and released) as the
+ *  strip's material changes. Throttled: this runs on every caption re-apply, and
+ *  the header-bar slider drags through that path frame by frame. */
+let captionInkEls: HTMLElement[] = []
+let captionInkSidebar: HTMLElement | null = null
+let captionScanAt = 0
+
+function releaseCaptionInk(): void {
+  for (const el of captionInkEls) {
+    el.style.removeProperty('--dsw-alias-label-secondary')
+    el.removeAttribute(CAPTION_INK_ATTR)
+  }
+  captionInkEls = []
+}
+
+function applyCaptionInk(enabled: boolean): void {
+  if (!enabled || sidebarEl === null) { releaseCaptionInk(); return }
+  const now = typeof performance === 'undefined' ? Date.now() : performance.now()
+  const stale = captionInkEls.some(el => !el.isConnected)
+  if (stale || sidebarEl !== captionInkSidebar || now - captionScanAt > 250) {
+    captionScanAt = now
+    captionInkSidebar = sidebarEl
+    releaseCaptionInk()
+    for (const btn of sidebarEl.querySelectorAll<HTMLElement>('button')) {
+      if (getComputedStyle(btn).position !== 'fixed') continue
+      captionInkEls.push(btn)
+    }
+  }
+  for (const el of captionInkEls) {
+    el.style.setProperty('--dsw-alias-label-secondary', 'var(--dsh-any-caption-ink, #fff)')
+    el.setAttribute(CAPTION_INK_ATTR, '')
+  }
+}
+
 let wcoStyleEl: HTMLStyleElement | null = null
 
 function ensureWcoStyle(): HTMLStyleElement {
@@ -847,6 +915,13 @@ function captionFill(src: Record<string, string> | null): string {
  *      that left segment from `--dsh-any-op-sidebar` — the same literal the sidebar
  *      column is painted with — and frosts from the sidebar blur's root mirror, so the
  *      column and the strip above it are one surface under one opacity + blur pair.
+ *      It is PAINT ONLY: `pointer-events:none`, and deliberately NO
+ *      `-webkit-app-region: drag`. Chromium collects app-region items in paint order,
+ *      and a drag annotation on a generated layer overrides the `no-drag` holes the
+ *      native caption menubar punched for itself (`preload-menu.ts` marks its host
+ *      `no-drag`), which left the top-left controls unclickable while the window still
+ *      dragged (issue #29). The host's own `.frame::before` keeps its drag region, so
+ *      the band remains movable.
  *  `--dsh-windows-sidebar-width` is published INLINE ON THE FRAME by the host
  *  (`AppFrame.tsx`, Windows builds only, `${cols.sidebar}px`) and both pseudo-elements
  *  inherit it, so the split tracks a dragged or collapsed sidebar with no observer of
@@ -867,16 +942,40 @@ function applyNativeCaption(surfaces?: Record<string, string> | null): void {
     `-webkit-backdrop-filter:var(--dsh-any-blur-header-bar,none);` +
     `clip-path:inset(0 0 0 ${width});-webkit-clip-path:inset(0 0 0 ${width})}` +
     `[data-windows-titlebar] .${CAPTION_FRAME_CLASS}::after{` +
-    `content:"";position:absolute;top:0;left:0;` +
+    `content:"";position:absolute;top:0;left:0;pointer-events:none;z-index:-1;` +
     `width:${width};height:var(--dsh-windows-titlebar-height,40px);` +
     `background:var(--dsh-any-op-sidebar,${fill});` +
     `backdrop-filter:var(--dsh-any-blur-sidebar-band,none);` +
-    `-webkit-backdrop-filter:var(--dsh-any-blur-sidebar-band,none);` +
-    `-webkit-app-region:drag}` +
+    `-webkit-backdrop-filter:var(--dsh-any-blur-sidebar-band,none)}` +
+    // A modal's mask deliberately starts BELOW the caption (`--dsh-frame-chrome-top`
+    // = the titlebar height, ui-layout) so the native drag strip keeps working. That
+    // leaves the 40px band bright above a dimmed page once the wallpaper is showing —
+    // our band is our own paint, so it dims itself here, with the host's own mask
+    // color. Paint only: no pointer or drag behavior is touched.
+    `[data-windows-titlebar]:has([role="dialog"][aria-modal="true"]) .${CAPTION_FRAME_CLASS}::before,` +
+    `[data-windows-titlebar]:has([role="dialog"][aria-modal="true"]) .${CAPTION_FRAME_CLASS}::after{` +
+    `box-shadow:inset 0 0 0 9999px var(--dsw-alias-bg-mask-1,rgba(0,0,0,.24))}` +
+    // The strip's chrome reads the caption ink (see `captionInkPair`), and while
+    // the sidebar is collapsed the whole strip is the 标题栏 card's band, so the
+    // switch to that variant rides the host's own collapsed marker.
+    `:root:has([data-sidebar-collapsed="true"]){--dsh-any-caption-ink:var(--dsh-any-caption-ink-collapsed,#fff)!important}` +
+    `[data-windows-titlebar] [data-windows-menu]{` +
+    `--dsw-alias-label-secondary:var(--dsh-any-caption-ink,#fff);` +
+    `--dsw-alias-label-primary:var(--dsh-any-caption-ink,#fff)}` +
     `[data-windows-titlebar] .${FLAT_CENTER_CLASS}{border-top-left-radius:0!important}`
   const el = ensureWcoStyle()
   if (el.textContent !== css) el.textContent = css
+  const ink = css === '' ? null : captionInkPair()
+  const root = document.documentElement
+  if (ink === null) {
+    root.style.removeProperty('--dsh-any-caption-ink')
+    root.style.removeProperty('--dsh-any-caption-ink-collapsed')
+  } else {
+    root.style.setProperty('--dsh-any-caption-ink', ink.ink)
+    root.style.setProperty('--dsh-any-caption-ink-collapsed', ink.collapsedInk)
+  }
   discoverParts()
+  applyCaptionInk(ink !== null)
   if (frameEl === null) return
   if (css === '') {
     frameEl.classList.remove(CAPTION_FRAME_CLASS)
@@ -1029,7 +1128,16 @@ const HEADER_SURFACES = [
  *  appears in the sheet. That is exactly how the tagged open-in-app menu kept
  *  taking the card blur. `[role]` is a no-op presence test that raises only the
  *  tagged arm to (0,2,0); the other three already qualify at (0,2,0)+. */
-const HEADER_SURFACES_PADDED = [`${HEADER_TAG_SELECTOR}[role]`, ...HEADER_SURFACES.slice(1)]
+const HEADER_SURFACES_PADDED = [
+  `${HEADER_TAG_SELECTOR}[role]`,
+  // `0.2.1-alpha.3`+: the background-job list moved onto `MenuSurface`, whose root
+  // has no role — the tagger claims it by `data-menu-material`, and the padded
+  // selector has to follow (`[role]` would never match it). (0,2,0), same as the
+  // card group's `[data-menu-material]` arm; this group is written later, so the
+  // header answer wins for a tagged surface.
+  `${HEADER_TAG_SELECTOR}[data-menu-material]`,
+  ...HEADER_SURFACES.slice(1),
+]
 
 /** The header blur variable, and the rule that frosts the header's dropdown set.
  *  The declaration comes from the same adapter answer as the card group's menu arm:
@@ -1184,10 +1292,23 @@ export function applyExemptDefaults(): void {
     return
   }
   const dialog = '[role="dialog"][aria-modal="true"]:not([aria-labelledby])'
+  // The plugin-install dialog's npm-registry chooser (`PluginManagerPage.tsx:1231`,
+  // `<fieldset data-install-registry>`). It is `createPortal`ed to `document.body` as
+  // a `position:fixed; z-index:1100` panel, so no dialog-scoped rule reaches it, and it
+  // fills from the layer tokens the CARD slider owns: `--dsw-alias-bg-layer-2` for the
+  // panel and its toggle, `--dsw-alias-bg-layer-3` for the expanded toggle and the
+  // custom-registry `<input>`. The host's own comment on that rule states why it is
+  // opaque — "an opaque layer keeps the registry form controls readable over the dialog"
+  // — and the panel faded with the card slider on the desktop build anyway. Pinning the
+  // tokens for the fieldset AND its subtree is also what keeps the pin from being a
+  // one-element fix: the custom property travels down, so without ` *` the options and
+  // the typed address would still inherit the card alpha and fade anyway.
+  const registry = '[data-install-registry]'
   const body = decls.join(';')
   const css =
     `${dialog},${dialog} *{${body}}` +
-    `[role="menu"]:has([class*="_danger"]){${body}}`
+    `[role="menu"]:has([class*="_danger"]){${body}}` +
+    `${registry},${registry} *{${body}}`
   if (el.textContent !== css) el.textContent = css
 }
 
@@ -2057,6 +2178,44 @@ const PART_UNDERLAY_CLASS = 'dab-part-underlay'
  * clear cannot be re-clobbered and there is nothing to re-apply. */
 export const PART_FRAME_CLASS = 'dab-frame-clear'
 export const FRAME_CLEAR_RULE = `.${PART_FRAME_CLASS}{background:transparent!important}`
+
+/** The sidebar column paints its fill ONCE, no matter how many nested elements
+ *  ask for it.
+ *
+ *  WHY THIS IS NOT COSMETICS: `--dsw-specific-sidebar-fill` is a theme token the
+ *  host ships OPAQUE (`design-platform.css`: light `--dsw-static-neutral-bluish-50`,
+ *  dark `-900`), and three elements stacked in the sidebar's region each declare
+ *  `background:var(--dsw-specific-sidebar-fill)` on top of one another —
+ *  `AppFrame.module.css` `.sidebarCol` (the grid track), `ui-sidebar/SidebarRoot.module.css:16`
+ *  `.root` (the shell it fills) and `ui-workspace/WorkspaceBrowser.module.css:335`
+ *  `.fade` (the tree's 24px bottom gradient). Over an opaque color that layering is
+ *  invisible; the moment this plugin's 「侧栏」 slider makes the token translucent
+ *  every copy adds its alpha again, so the region stops reading as one surface. On
+ *  the desktop build it is outright visible: the caption strip above the sidebar is
+ *  the plugin's own `::after`, painted with the SAME variable at the SAME alpha but
+ *  exactly once (`applyNativeCaption`), so the strip and the column under it come out
+ *  at two different densities and the sidebar looks split horizontally.
+ *
+ *  The column is the one that keeps the paint — it is the outermost box, it is the
+ *  box whose width the caption strip is cut to, and the host already treats it as the
+ *  owner on macOS, where `SidebarRoot.module.css:27` sets `.root{background:transparent}`
+ *  for exactly this reason ("the AppFrame column owns the translucent sidebar tint").
+ *  The host retires the gradient the same way for the same reason:
+ *  `WorkspaceBrowser.module.css:341` hides `.fade` on darwin because "the opaque fill
+ *  gradient would paint a solid smear instead of a fade" once the sidebar is
+ *  translucent over the window — which is the state this slider puts the sidebar in on
+ *  every platform. So the token is re-declared `transparent` for the column's
+ *  DESCENDANTS only: an element's own declaration beats what it inherits, and `body`'s
+ *  `!important` re-scope reaches these elements by inheritance only, so no `!important`
+ *  is needed here and none of the three consumers can win it back. The column itself
+ *  still resolves the faded value it inherits, which is why `*` is a descendant
+ *  combinator and not part of the column's own selector.
+ *
+ *  Bound by the CSS-Module class shape, same as `[class*="_ioCard"]`: the built
+ *  bundle names these `pI_x6G_sidebarCol` — prefix first, local name last, and the
+ *  pair is identical across `0.2.0-rc.1`, `0.2.1-alpha.3` and `0.2.1-rc.2`. A build
+ *  that renames the track simply stops matching, which is the untouched host look. */
+export const SIDEBAR_ONE_LAYER_RULE = '[class*="_sidebarCol"] *{--dsw-specific-sidebar-fill:transparent}'
 
 const PART_BLUR_RULE =
   // The dot is load-bearing: without `isolation` the host does not create a
@@ -3048,6 +3207,9 @@ export function teardownWp(): void {
   document.documentElement.style.removeProperty('--dsh-any-op-header-bar')
   document.documentElement.style.removeProperty('--dsh-any-blur-header-bar')
   document.documentElement.style.removeProperty('--dsh-any-blur-sidebar-band')
+  document.documentElement.style.removeProperty('--dsh-any-caption-ink')
+  document.documentElement.style.removeProperty('--dsh-any-caption-ink-collapsed')
+  releaseCaptionInk()
   document.querySelectorAll(`.${HEADER_BAR_CLASS}`).forEach(el => el.classList.remove(HEADER_BAR_CLASS))
   headerBarEl = null
   frameEl?.classList.remove(CAPTION_FRAME_CLASS)
