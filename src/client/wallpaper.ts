@@ -810,14 +810,17 @@ const CAPTION_INK_ATTR = 'data-dab-caption-ink'
 
 /** The strip's chrome ink, and its collapsed-state variant.
  *
- *  WHY THIS IS NOT THE LABEL INK: the plugin flips the label tokens against the
- *  PICKED PALETTE (white on a dark pick), but the caption band is that palette at
- *  the sidebar/header-bar opacity OVER the wallpaper. At a low opacity the strip
- *  is mostly wallpaper, so white ink lands on a light band and the toggle
- *  disappears (reported on the desktop build, on a 22%-opacity sidebar over a bright
- *  wallpaper). The strip therefore derives its own ink from what it is actually
- *  painted on: past ~85% opacity the surface dominates and the palette direction
- *  is the truth; below it the wallpaper's brightness verdict decides.
+ *  WHY THIS FOLLOWS THE LABEL INK: the strip used to derive its own ink below
+ *  ~85% opacity from the wallpaper's brightness verdict, because a translucent
+ *  strip over a bright wallpaper made white ink disappear. That made the caption
+ *  the only text on screen that ignored an explicit 界面明暗 choice — the whole
+ *  UI flipped with the setting while the strip stayed wallpaper-driven — and on
+ *  mixed bright/dark wallpapers the whole-image verdict misjudges the band
+ *  anyway (reported in #29). The strip now follows the same ink direction as
+ *  every other label. With 'auto' and no picked color `inkIsWhite` falls back
+ *  to the wallpaper verdict itself, so pure-wallpaper installs keep the old
+ *  behavior; for the dark-theme-over-bright-wallpaper case, adjust the band's
+ *  own surface (opacity/card) rather than flipping the ink independently.
  *
  *  Returned as `{ ink, collapsedInk }` because the strip's material changes with
  *  the sidebar: expanded it is the sidebar segment, collapsed it is the 「标题栏」
@@ -830,11 +833,12 @@ function captionInkPair(): { ink: string; collapsedInk: string } | null {
     ? (rHasColor() ? rColorScheme() === 'dark' : verdict)
     : rScheme() === 'dark'
   if (inkIsWhite === null || inkIsWhite === undefined) return null
-  const stripInk = (alpha: number): string => {
-    const dark = verdict === null || verdict === undefined || alpha >= 0.85 ? inkIsWhite : verdict
-    return dark ? '#fff' : '#000'
-  }
-  return { ink: stripInk(rOps().sidebar), collapsedInk: stripInk(rHeaderBarOpacity()) }
+  // The strip's ink is the UI-wide ink direction, unconditionally: with 'auto'
+  // and no picked color inkIsWhite IS the wallpaper verdict, so that path is
+  // byte-identical to the old gate; every other case now honors the direction
+  // the rest of the interface already uses (see #29).
+  const ink = inkIsWhite ? '#fff' : '#000'
+  return { ink, collapsedInk: ink }
 }
 
 /** The fixed caption controls of the sidebar root, re-inked (and released) as the
