@@ -177,6 +177,11 @@ interface ThemeConfig {
   headerOpacity: number
   /** Opacity of the session header bar (the「标题栏」part). */
   headerBarOpacity: number
+  /** Who owns the desktop caption strip's chrome ink: 'auto' | 'theme' | 'white' |
+   *  'black'. The host half only stores and whitelists it (an unlisted key is dropped
+   *  at write time, which is exactly how「标题栏」lost its settings in 0.3.7); the
+   *  browser half reads it through `rCaptionInk`. */
+  captionInk: string
   /** Saved appearance profiles (name + appearance snapshot). */
   profiles: ProfileEntry[]
   /** Wallpaper rotation pool + cadence. */
@@ -232,6 +237,7 @@ export const DEFAULT_CONFIG: ThemeConfig = {
   producedOpacity: 0.5,
   headerOpacity: 0.5,
   headerBarOpacity: 0.5,
+  captionInk: 'auto',
   profiles: [],
   rotation: { enabled: false, mode: 'shuffle', interval: 'daily', current: 0, items: [], lastRotate: null },
   schedule: { enabled: false, mode: 'time', dayProfile: null, nightProfile: null, dayStart: '07:00', nightStart: '19:00' },
@@ -392,6 +398,7 @@ function normalizeConfig(raw: unknown): ThemeConfig {
     producedOpacity: clamp(r.producedOpacity, 0, 1, DEFAULT_CONFIG.producedOpacity),
     headerOpacity: clamp(r.headerOpacity, 0, 1, DEFAULT_CONFIG.headerOpacity),
     headerBarOpacity: clamp(r.headerBarOpacity, 0, 1, DEFAULT_CONFIG.headerBarOpacity),
+    captionInk: r.captionInk === 'theme' || r.captionInk === 'white' || r.captionInk === 'black' ? r.captionInk : 'auto',
     profiles: normalizeProfiles(r.profiles),
     rotation: normalizeRotation(r.rotation),
     schedule: normalizeSchedule(r.schedule),

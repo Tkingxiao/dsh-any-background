@@ -1,6 +1,6 @@
 import type { CSSProperties, ComponentType } from 'react'
-import type { ThemeSectionProps, ThemeStoreState, PartOpacities, PartBlurs } from '../../types'
-import { cfg, rOps, rSop, rBlurs, rChatTextOpacity, rTrajectoryOpacity, rPanelOpacity, rProducedOpacity, rHeaderOpacity, rHeaderBarOpacity } from '../../state'
+import type { ThemeSectionProps, ThemeStoreState, PartOpacities, PartBlurs, CaptionInkMode } from '../../types'
+import { cfg, rOps, rSop, rBlurs, rChatTextOpacity, rTrajectoryOpacity, rPanelOpacity, rProducedOpacity, rHeaderOpacity, rHeaderBarOpacity, rCaptionInk } from '../../state'
 import { saveConfig } from '../../rpc'
 import { applyCustomTokens, applySettingsOverrides, setPartBlur, applyViewCards, applyTrajectoryOverrides, applyPanelOverrides, applyProduced, applyHeaderPopovers, applyHeaderBar } from '../../wallpaper'
 import { LiveSlider } from '../LiveSlider'
@@ -170,6 +170,35 @@ export function InterfacePage({ p }: { p: ThemeSectionProps }) {
                   blurs[blurKey] = v
                   setBlurs(blurs)
                 }} />
+
+              {/* The caption strip's ink belongs to the header card: the strip IS the
+                  header bar's material once the sidebar is collapsed, and its chrome —
+                  the native menubar plus the sidebar's fixed toggle — is the only text
+                  that sits on it. Issue #30: following the strip's own brightness fixes
+                  an invisible white toggle but turns 「应用 / 编辑」 black under a dark
+                  theme, and the two reports wanted opposite winners, so this picks. */}
+              {isHeaderBar && (
+                <div className="dab-slider-block" title={t('captionInkHint')}>
+                  <span className="dab-slider-label">{t('captionInkLabel')}</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <select
+                      className="dab-select"
+                      value={rCaptionInk()}
+                      onChange={e => {
+                        cfg.captionInk = e.target.value as CaptionInkMode
+                        // Re-emits the caption rule (which carries the ink bindings) and
+                        // re-applies or releases the ink on the sidebar's fixed controls.
+                        applyHeaderBar()
+                        saveConfig()
+                      }}>
+                      <option value="auto">{t('captionInkAuto')}</option>
+                      <option value="theme">{t('captionInkTheme')}</option>
+                      <option value="white">{t('captionInkWhite')}</option>
+                      <option value="black">{t('captionInkBlack')}</option>
+                    </select>
+                  </div>
+                </div>
+              )}
             </section>
           )
         })}

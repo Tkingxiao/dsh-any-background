@@ -206,8 +206,9 @@ export function elementFrostDecl(value: string): string {
  *   painting element. A 15th file names the same token without consuming it:
  *   `ui-theme/src/styles/gradient-shadow-text.css` DECLARES it on `body` —
  *   `blur(40px) saturate(150%)`, no media query — which is exactly why writing the
- *   token on a menu with a `none` fallback deletes a frost the host always had
- *   (see `CARD_FROST_GATE` in `wallpaper.ts`). `MenuSurface.tsx` / `.module.css` are
+ *   token on a menu with a `none` fallback deletes a frost the host always had.
+ *   That is now the intended reading of a 0 on the menu blur sliders — see the note
+ *   above `popoverBlurRule` in `wallpaper.ts`. `MenuSurface.tsx` / `.module.css` are
  *   byte-identical from rc.2 through `0.2.1-alpha.2`, and the consumer set moved only
  *   in line numbers (the same 15 files at every tag in the table, checked per tag).
  *

@@ -113,6 +113,18 @@ export type BgMode = 'fit' | 'fill' | 'stretch' | 'tile' | 'center'
 /** Forced interface scheme: 'auto' derives light/dark from the color's lightness. */
 export type SchemeOverride = 'auto' | 'light' | 'dark'
 
+/** Who owns the ink of the desktop caption strip's chrome — the native menubar
+ *  (「应用 / 编辑」) and the sidebar's fixed caption controls.
+ *   · `auto`   — the strip's own composite: the picked palette past ~85% opacity, the
+ *                wallpaper's brightness below it (0.3.8 behaviour, what made an
+ *                invisible white toggle visible again).
+ *   · `theme`  — the interface's own label tokens, i.e. nothing is overridden
+ *                (0.3.7 behaviour, what issue #30 asked for).
+ *   · `white` / `black` — pinned, whatever the strip or the theme says.
+ *  The two reports of the same situation (dark theme, bright wallpaper, low sidebar
+ *  opacity) wanted opposite answers, so the conflict is the user's to settle. */
+export type CaptionInkMode = 'auto' | 'theme' | 'white' | 'black'
+
 /** Appearance-only snapshot a saved profile (or built-in preset) restores.
  *  Wallpaper files are machine-local and deliberately excluded. */
 export interface ProfileAppearance {
@@ -260,6 +272,9 @@ export interface ThemeConfig {
   headerOpacity: number
   /** Opacity of the session header bar (inert on hosts that render the slot bare). */
   headerBarOpacity: number
+  /** Who wins on the desktop caption strip when the theme's direction and the strip's
+   *  actual brightness disagree — see `CaptionInkMode`. */
+  captionInk: CaptionInkMode
   /** Saved appearance profiles. */
   profiles: ProfileEntry[]
   /** Wallpaper rotation pool + cadence. */

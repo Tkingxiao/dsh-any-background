@@ -1,7 +1,7 @@
 import { MENU_FILL_TOKEN, PANEL_SURFACES, BETTER_SIDEBAR_PANEL, COMPOSER_TAKEOVER_CARD, COMPOSER_TAKEOVER_EDITOR, elementFrostDecl } from './host-compat/versions/shared'
 import { hostAdapter } from './host-compat/capabilities'
 import { HEADER_POPOVER_ATTR } from './header-tag'
-import { rWp, rWpImage, rWpVideo, rBgState, rVideoBgState, rBl, rWop, rOps, rSop, rStrokes, rColor, rHasColor, rBlurs, rBgMode, rChatTextOpacity, rTrajectoryOpacity, rPanelOpacity, rProducedOpacity, rHeaderOpacity, rHeaderBarOpacity, rScheme, rColorScheme, rSchemeOverride, cfg, setWpUrl, rBgDark, setBgDark, disposeVideoObjectUrl } from './state'
+import { rWp, rWpImage, rWpVideo, rBgState, rVideoBgState, rBl, rWop, rOps, rSop, rStrokes, rColor, rHasColor, rBlurs, rBgMode, rChatTextOpacity, rTrajectoryOpacity, rPanelOpacity, rProducedOpacity, rHeaderOpacity, rHeaderBarOpacity, rCaptionInk, rScheme, rColorScheme, rSchemeOverride, cfg, setWpUrl, rBgDark, setBgDark, disposeVideoObjectUrl } from './state'
 import type { BackgroundType, GeneratedBgParams, PartOpacities, PartBlurs, StrokeConfig } from './types'
 import { genTokens, toRgba, extractWallpaperColor, analyzeFrameDark } from './utils/color'
 import { loadImage } from './utils/image'
@@ -151,16 +151,41 @@ function paletteTokens(): Record<string, string> | null {
   return null
 }
 
-/** Surface colors the opacity sliders fade when the plugin has NO palette of
- *  its own (no picked color, no forced scheme), read live from the host's
- *  resolved tokens on `:root` — the same trick applyPanelOverrides uses for the
- *  workbench panel. Without this source the per-part alpha is never emitted at
- *  all and every opacity slider looks inert until the user drags it once.
- *  The sliders only ever supply the alpha: the host still decides the colors,
- *  so a custom host skin survives. Returns null when the host exposes none. */
+/** Surface colors the opacity sliders fade when the plugin has NO palette of its own
+ *  (no picked color, no forced scheme), read live from the host's own resolved tokens —
+ *  the same trick applyPanelOverrides uses for the workbench panel. The sliders only
+ *  ever supply the alpha: the host still decides the colors, so a custom host skin
+ *  survives. Returns null when the host exposes none.
+ *
+ *  SAMPLED ON `<body>`, NOT `:root`: `design-platform.css` declares this whole token set
+ *  inside a `body { … }` block (light at :166, dark at :284), and a custom property is
+ *  inherited DOWNWARD only — read off the root element every one of them is the empty
+ *  string, this function answers null, `applyCustomTokensNow` takes its `surfaces ===
+ *  null` exit, and on an install with no picked color every interface-opacity slider does
+ *  nothing at all (the frame never gets cleared either, so the wallpaper stays hidden).
+ *  Measured against the host's own declarations: `:root` → all five tokens empty,
+ *  `body` → all five resolve.
+ *
+ *  …AND CACHED PER HOST GENERATION, with our own sheet switched off while reading: the
+ *  plugin re-scopes these same names on `body`
+ *  (`body{--dsw-specific-menu:var(--dsh-any-op-menu)!important}`), so a second read after
+ *  the first write returns the plugin's OWN substituted literal — the surfaces would
+ *  freeze at whatever color they first sampled instead of following the host. The
+ *  generation key is what can flip the host's palette without anything in this plugin
+ *  moving: its dark-mode marker, and the platform attribute (`[data-platform='darwin']`
+ *  re-declares `--dsw-specific-menu`). */
+let hostSurfaceSample: { key: string; map: Record<string, string> | null } | null = null
+
 function readHostOpacityTokens(): Record<string, string> | null {
-  if (typeof getComputedStyle === 'undefined') return null
-  const cs = getComputedStyle(document.documentElement)
+  if (typeof getComputedStyle === 'undefined' || typeof document === 'undefined') return null
+  const body = document.body
+  if (body === null) return null
+  const key = `${body.getAttribute('data-ds-dark-theme') ?? ''}|${document.documentElement.getAttribute('data-platform') ?? ''}`
+  if (hostSurfaceSample !== null && hostSurfaceSample.key === key) return hostSurfaceSample.map
+  const sheet = tokenStyleEl
+  const wasDisabled = sheet === null ? false : sheet.disabled
+  if (sheet !== null) sheet.disabled = true
+  const cs = getComputedStyle(body)
   const out: Record<string, string> = {}
   let found = false
   for (const g of OPACITY_TOKEN_GROUPS) {
@@ -171,7 +196,9 @@ function readHostOpacityTokens(): Record<string, string> | null {
       found = true
     }
   }
-  return found ? out : null
+  if (sheet !== null) sheet.disabled = wasDisabled
+  hostSurfaceSample = { key, map: found ? out : null }
+  return hostSurfaceSample.map
 }
 
 function applyCustomTokensNow(ops: PartOpacities): void {
@@ -411,35 +438,30 @@ function menuFrost(blurVar: string): string {
   return hostAdapter().menus.frostDecl(`var(${blurVar},none)`)
 }
 
-/** The `<html>` classes that let the two menu groups write their frost token at all.
+/** The frost token, asserted ALWAYS — and what that means for the slider's bottom end.
  *
- *  WHY A GATE IS NEEDED AND `:where()` IS ENOUGH: the host declares its own menu frost
- *  on `body` (`ui-theme/src/styles/gradient-shadow-text.css` —
- *  `--dsw-menu-backdrop-filter: blur(40px) saturate(150%)`, no media query), and every
- *  menu frosts from that INHERITED value, whether it filters itself (the background-job
- *  `<ul>`) or hands the value to a `MenuSurface` `.material` child. An element's own
- *  declaration always beats what it inherits, so writing the token with a `none`
- *  fallback does not "add no blur" at slider 0 — it DELETES the host's frost. The
- *  result is a faded menu with nothing behind it: the page shows through it crisp and
- *  bright, so the popup stops reading as a raised surface at all. (This is a DIFFERENT
- *  defect from the reported "the background-job list is under the conversation" one,
- *  which is a stacking-context injury the row takes with its own frost — see the
- *  `z-index` note on `HEADER_BAR_RULE`. Both were live at once on `0.2.0-rc.1`.)
- *  `none` stays correct for the exempt group: `applyExemptDefaults` pins those
- *  surfaces at alpha 1 alongside the cleared frost, so they are opaque by design.
+ *  The host declares its own menu frost on `body` (`ui-theme/src/styles/gradient-shadow-text.css`
+ *  — `--dsw-menu-backdrop-filter: blur(40px) saturate(150%)`, no media query), and every menu
+ *  frosts from that INHERITED value, whether it filters itself (the background-job `<ul>`) or
+ *  hands the value to a `MenuSurface` `.material` child. An element's own declaration always
+ *  beats what it inherits, so writing the token with a `none` fallback does not "add no blur"
+ *  at slider 0 — it DELETES the host's frost.
  *
- *  `:where()` keeps the gate free: this plugin's menu cascade is ORDERED (card group →
- *  header group → exemptions) at equal specificity, and a class prefix with real
- *  specificity would have lifted the card group over the exemption it must lose to. */
-const CARD_FROST_GATE = 'dab-card-frost'
-const HEADER_FROST_GATE = 'dab-header-frost'
-
-/** Prefix every arm of a selector list with a `:where()` gate. A joined list is one
- *  selector per entry, so prefixing the string once would gate only the first arm and
- *  leave the rest always on. */
-function gated(gate: string, selectors: string): string {
-  return selectors.split(',').map(sel => `:where(.${gate}) ${sel}`).join(',')
-}
+ *  0.3.7 answered that with a `<html>` class gate (`dab-card-frost` / `dab-header-frost`) that
+ *  only let the declaration through while the slider was non-zero, so 0 meant "leave the host
+ *  alone". That was the wrong trade and this is the report that says so: with the gate on, the
+ *  slider's LOW end is its HIGH end — 0 renders the host's 40 px frost and 1 renders 1 px — so
+ *  the control reads as dead in both directions, and 「把模糊关掉」 is simply not reachable
+ *  (measured in `dsh web` with 顶栏选项 at 0/0: the open-in-app panel still came out a soft,
+ *  opaque-looking card, because what it was showing was the host's blur, not the plugin's).
+ *  The token is therefore asserted at every value, `none` included: **0 means no frost**.
+ *  Nothing loses the host look by accident, because the part DEFAULTS are 30 px — a stock
+ *  install is frosted like the host's and only an explicit drag to 0 clears it. The same is
+ *  already true of every other blur slider in this plugin (0 = off), which is the interface
+ *  consistency the gate broke.
+ *
+ *  `none` stays correct for the exempt group as well: `applyExemptDefaults` pins those surfaces
+ *  at alpha 1 alongside the cleared frost, so they are opaque by design. */
 
 /** Declare EVERY token this release's menus can paint their fill from with the same
  *  value. One slider, one value, every layer reached — and a token the host does not
@@ -455,7 +477,7 @@ function menuFillDecls(value: string): string {
 }
 
 export function popoverBlurRule(): string {
-  return `${gated(CARD_FROST_GATE, `${POPOVER_MENU_SEL},${MENU_MATERIAL_SEL}`)}{${menuFrost(CARD_BLUR_VAR)}}` +
+  return `${POPOVER_MENU_SEL},${MENU_MATERIAL_SEL}{${menuFrost(CARD_BLUR_VAR)}}` +
     `${POPOVER_OTHER_SEL}{${elementFrostDecl(`var(${CARD_BLUR_VAR},none)`)}}`
 }
 
@@ -643,6 +665,8 @@ export const MOBILE_HEADER_RULE =
 // idiom the view cards and the frame use, and the one that cannot be broken by a
 // host that re-wraps or renames the element around the slots.
 const HEADER_BAR_CLASS = 'dab-header-bar'
+/** Added to the same row only while its blur is non-zero — see `HEADER_BAR_RULE`. */
+const HEADER_BAR_FROST_CLASS = 'dab-header-bar-frost'
 const HEADER_BAR_ANCHOR = '[data-slot^="conversation.session.header"]'
 
 /** The session header bar, or null where this host has no such element.
@@ -662,13 +686,30 @@ function discoverHeaderBar(): HTMLElement | null {
   return bar
 }
 
-/** Exactly one owner: the row the current conversation mounted. A row that went
- *  blank, or one the host replaced, must not keep a class from an earlier pass. */
 let headerBarEl: HTMLElement | null = null
-function claimHeaderBar(bar: HTMLElement | null): void {
-  if (headerBarEl !== null && headerBarEl !== bar) headerBarEl.classList.remove(HEADER_BAR_CLASS)
+/** Exactly one owner: the row the current conversation mounted. A row that went
+ *  blank, or one the host replaced, must not keep a class — or a `position` — from an
+ *  earlier pass. `frost` decides whether the row also carries the underlay arm, and the
+ *  underlay's containing block is written inline only while it is needed. */
+function releaseHeaderBar(bar: HTMLElement): void {
+  bar.classList.remove(HEADER_BAR_CLASS, HEADER_BAR_FROST_CLASS)
+  if (bar.getAttribute(TAKEOVER_POS_ATTR) === '1') {
+    bar.style.removeProperty('position')
+    bar.removeAttribute(TAKEOVER_POS_ATTR)
+  }
+}
+
+function claimHeaderBar(bar: HTMLElement | null, frost: boolean): void {
+  if (headerBarEl !== null && headerBarEl !== bar) releaseHeaderBar(headerBarEl)
+  if (bar === null) { headerBarEl = null; return }
   headerBarEl = bar
-  if (bar !== null) bar.classList.add(HEADER_BAR_CLASS)
+  bar.classList.add(HEADER_BAR_CLASS)
+  if (!frost) { bar.classList.remove(HEADER_BAR_FROST_CLASS); return }
+  if (getComputedStyle(bar).position === 'static') {
+    bar.style.position = 'relative'
+    bar.setAttribute(TAKEOVER_POS_ATTR, '1')
+  }
+  bar.classList.add(HEADER_BAR_FROST_CLASS)
 }
 
 /** The bar's paint. The variables are written by `applyHeaderBar`; the class is
@@ -709,17 +750,35 @@ function claimHeaderBar(bar: HTMLElement | null): void {
  *  filter never had to be blamed for its anchoring). 10 sits in that gap: above 9, far
  *  below 100, so a portaled list still covers the title row exactly as the host intends.
  *
- *  `z-index` needs no `position` here and none is written: the row is a flex ITEM of
- *  `ConversationRoot .root{display:flex;flex-direction:column}` on every release in range,
- *  and z-index applies to flex items as they are. Writing `position:relative` would also
- *  make the row a containing block — and deciding a host box's positioning is the exact
- *  race this plugin lost once already (issue #24). */
+ *  `z-index` needs no `position` here and none is written by the BASE rule: the row is
+ *  a flex ITEM of `ConversationRoot .root{display:flex;flex-direction:column}` on every
+ *  release in range, and z-index applies to flex items as they are. Writing
+ *  `position:relative` would also make the row a containing block — and deciding a host
+ *  box's positioning is the exact race this plugin lost once already (issue #24).
+ *
+ *  THE FROST DOES NOT SIT ON THE ROW. That was the first version of this rule, and it
+ *  cost the row's own children their backdrop: `backdrop-filter` makes an element a
+ *  BACKDROP ROOT as well as a stacking context, so an in-place header popover (the
+ *  session-log `…` menu, which `HeaderAction.tsx` renders without `portal`) could only
+ *  ever blur what the row itself paints — a flat tint — and the 「标题栏」 blur slider
+ *  read as dead on exactly the panel that hangs off the row. `isolation:isolate` is a
+ *  stacking context WITHOUT being a backdrop root, so the frost now rides a `::before`
+ *  underlay like it does on every other host part this plugin filters (`PART_BLUR_RULE`,
+ *  `inputBlurRule`), and the row's children sample the wallpaper again. The underlay
+ *  needs the row to be its containing block, which is why the frost arm adds
+ *  `position:relative` — INLINE, only when the host left the row `static`, and marked
+ *  `data-dab-pos-patched` so only this writer takes it back: the same guard
+ *  `setBlur` uses, for the same reason (a stylesheet `position` would cascade against
+ *  whatever the host or another plugin decides that box's position is). */
 export const HEADER_BAR_RULE =
   `.${HEADER_BAR_CLASS}{` +
   'background:var(--dsh-any-op-header-bar,transparent)!important;' +
-  'backdrop-filter:var(--dsh-any-blur-header-bar,none);' +
+  'z-index:10}' +
+  `.${HEADER_BAR_FROST_CLASS}{isolation:isolate}` +
+  `.${HEADER_BAR_FROST_CLASS}::before{` +
+  'content:"";position:absolute;inset:0;z-index:-1;pointer-events:none;border-radius:inherit;' +
   '-webkit-backdrop-filter:var(--dsh-any-blur-header-bar,none);' +
-  'z-index:10}'
+  'backdrop-filter:var(--dsh-any-blur-header-bar,none)}'
 
 /** The 「标题栏」card's paint: the card's material at the card's opacity, empty
  *  where the plugin is not theming. The conversation header row, the Windows
@@ -742,7 +801,7 @@ export function applyHeaderBar(surfaces?: Record<string, string> | null): void {
   const paint = headerBarPaint(src)
   if (paint === '') {
     // Not theming (no picked color, no wallpaper verdict): not our row.
-    claimHeaderBar(null)
+    claimHeaderBar(null, false)
     root.style.removeProperty('--dsh-any-op-header-bar')
     root.style.removeProperty('--dsh-any-blur-header-bar')
     applyNativeCaption(surfaces)
@@ -752,7 +811,7 @@ export function applyHeaderBar(surfaces?: Record<string, string> | null): void {
   const px = rBlurs().headerBar
   if (px > 0) root.style.setProperty('--dsh-any-blur-header-bar', `blur(${px}px)`)
   else root.style.removeProperty('--dsh-any-blur-header-bar')
-  claimHeaderBar(bar)
+  claimHeaderBar(bar, px > 0)
   // The native button block is painted from the color the desktop preload measures
   // off its probe, and the probe carries this paint as a literal, so a slider move
   // has to rewrite the band's rule text for the preload to re-measure it.
@@ -810,7 +869,7 @@ const CAPTION_INK_ATTR = 'data-dab-caption-ink'
 
 /** The strip's chrome ink, and its collapsed-state variant.
  *
- *  WHY THIS IS NOT THE LABEL INK: the plugin flips the label tokens against the
+ *  WHY THIS IS NOT SIMPLY THE LABEL INK: the plugin flips the label tokens against the
  *  PICKED PALETTE (white on a dark pick), but the caption band is that palette at
  *  the sidebar/header-bar opacity OVER the wallpaper. At a low opacity the strip
  *  is mostly wallpaper, so white ink lands on a light band and the toggle
@@ -819,11 +878,25 @@ const CAPTION_INK_ATTR = 'data-dab-caption-ink'
  *  painted on: past ~85% opacity the surface dominates and the palette direction
  *  is the truth; below it the wallpaper's brightness verdict decides.
  *
+ *  WHY THAT DERIVATION IS NOT THE WHOLE ANSWER (issue #30): the same derivation makes
+ *  the native caption menubar (「应用 / 编辑」) black on a dark theme whose sidebar is
+ *  translucent over a bright wallpaper — the strip really is light there, so the strip
+ *  is right and the rest of the window is wrong, and the two reports of this same
+ *  situation asked for opposite outcomes. So the policy is the user's: 「标题栏文字」
+ *  picks the winner, and `auto` keeps the strip-following behaviour that fixed the
+ *  invisible toggle. `theme` returns null, which removes every ink declaration this
+ *  function feeds — the menubar and the sidebar's fixed controls then read the host's
+ *  own label tokens, exactly as they did before 0.3.8.
+ *
  *  Returned as `{ ink, collapsedInk }` because the strip's material changes with
  *  the sidebar: expanded it is the sidebar segment, collapsed it is the 「标题栏」
- *  card's band. `null` means "no verdict and no palette direction" — leave the
- *  host's ink alone. */
+ *  card's band. `null` means "no override" — either no verdict and no palette
+ *  direction, or the user asked for the theme's own ink. */
 function captionInkPair(): { ink: string; collapsedInk: string } | null {
+  const mode = rCaptionInk()
+  if (mode === 'theme') return null
+  if (mode === 'white') return { ink: '#fff', collapsedInk: '#fff' }
+  if (mode === 'black') return { ink: '#000', collapsedInk: '#000' }
   const verdict = rBgDark()
   const override = rSchemeOverride()
   const inkIsWhite = override === 'auto'
@@ -957,11 +1030,15 @@ function applyNativeCaption(surfaces?: Record<string, string> | null): void {
     `box-shadow:inset 0 0 0 9999px var(--dsw-alias-bg-mask-1,rgba(0,0,0,.24))}` +
     // The strip's chrome reads the caption ink (see `captionInkPair`), and while
     // the sidebar is collapsed the whole strip is the 标题栏 card's band, so the
-    // switch to that variant rides the host's own collapsed marker.
-    `:root:has([data-sidebar-collapsed="true"]){--dsh-any-caption-ink:var(--dsh-any-caption-ink-collapsed,#fff)!important}` +
-    `[data-windows-titlebar] [data-windows-menu]{` +
-    `--dsw-alias-label-secondary:var(--dsh-any-caption-ink,#fff);` +
-    `--dsw-alias-label-primary:var(--dsh-any-caption-ink,#fff)}` +
+    // switch to that variant rides the host's own collapsed marker. Under
+    // 「标题栏文字」= 跟随主题 this block is emitted NOT AT ALL: the menubar and the
+    // sidebar's fixed controls keep the host's label tokens, which is the only way
+    // "the theme's own ink" can mean anything for an element the plugin does not paint.
+    (rCaptionInk() === 'theme' ? '' :
+      `:root:has([data-sidebar-collapsed="true"]){--dsh-any-caption-ink:var(--dsh-any-caption-ink-collapsed,#fff)!important}` +
+      `[data-windows-titlebar] [data-windows-menu]{` +
+      `--dsw-alias-label-secondary:var(--dsh-any-caption-ink,#fff);` +
+      `--dsw-alias-label-primary:var(--dsh-any-caption-ink,#fff)}`) +
     `[data-windows-titlebar] .${FLAT_CENTER_CLASS}{border-top-left-radius:0!important}`
   const el = ensureWcoStyle()
   if (el.textContent !== css) el.textContent = css
@@ -1149,7 +1226,7 @@ const HEADER_SURFACES_PADDED = [
 const HEADER_BLUR_VAR = '--dsh-any-blur-header'
 
 export function headerPopoverRule(): string {
-  return `${gated(HEADER_FROST_GATE, HEADER_SURFACES_PADDED.join(','))}{${menuFrost(HEADER_BLUR_VAR)}}`
+  return `${HEADER_SURFACES_PADDED.join(',')}{${menuFrost(HEADER_BLUR_VAR)}}`
 }
 
 // ── Surfaces pinned against the sliders (theme color kept) ────────────────────
@@ -1209,13 +1286,13 @@ const HEADER_TOKEN_SELECTOR = HEADER_SURFACES_PADDED.join(',')
 export function applyHeaderPopovers(): void {
   const root = document.documentElement
   const px = rBlurs().header
-  if (px > 0) {
-    root.style.setProperty(HEADER_BLUR_VAR, `blur(${px}px)`)
-    root.classList.add(HEADER_FROST_GATE)
-  } else {
-    root.style.removeProperty(HEADER_BLUR_VAR)
-    root.classList.remove(HEADER_FROST_GATE)
-  }
+  // At 0 the variable is REMOVED, which is not "leave it alone": the static rule
+  // declares `var(--dsh-any-blur-header, none)` on the surfaces themselves, so the
+  // fallback wins over the host's inherited frost and the panel stops froasting.
+  // That is the intended reading of a 0 on this slider (see the note above
+  // `popoverBlurRule`).
+  if (px > 0) root.style.setProperty(HEADER_BLUR_VAR, `blur(${px}px)`)
+  else root.style.removeProperty(HEADER_BLUR_VAR)
   // Alpha: re-emit the live menu token's own color with the header opacity so
   // the popover keeps the host palette (and follows a picked color) while fading
   // independently of the card slider. EVERY fill token the release paints menus
@@ -2349,17 +2426,13 @@ function applyPartOpacities(ops: PartOpacities): void {
 /** Blur of the option panels inside the settings dialog (.dab-card), owned by
  *  the "dialog option panel" (card) blur slider. Written as a plugin-owned
  *  variable consumed by SETTINGS_STYLE_RULE — deliberately NOT applied to the
- *  homepage center column, which this slider must never touch. The gate class is
- *  what hands the menu frost token over at all (see `CARD_FROST_GATE`). */
+ *  homepage center column, which this slider must never touch. At 0 the variable is
+ *  removed and the menu rule's `none` fallback wins, which is what "no frost" means
+ *  on this slider (see the note above `popoverBlurRule`). */
 function applyCardPanelsBlur(px: number): void {
   const root = document.documentElement
-  if (px > 0) {
-    root.style.setProperty(CARD_BLUR_VAR, `blur(${px}px)`)
-    root.classList.add(CARD_FROST_GATE)
-  } else {
-    root.style.removeProperty(CARD_BLUR_VAR)
-    root.classList.remove(CARD_FROST_GATE)
-  }
+  if (px > 0) root.style.setProperty(CARD_BLUR_VAR, `blur(${px}px)`)
+  else root.style.removeProperty(CARD_BLUR_VAR)
 }
 
 /** Apply per-part interface blur to the AppFrame columns + settings panel. */
@@ -3197,7 +3270,7 @@ export function teardownWp(): void {
   // The two menu frost gates are `<html>` classes that switch a TOKEN re-declaration
   // on and off; left behind, they would keep the host's own menu frost overridden
   // with no slider driving it.
-  document.documentElement.classList.remove(INPUT_FROST_CLASS, CARD_FROST_GATE, HEADER_FROST_GATE)
+  document.documentElement.classList.remove(INPUT_FROST_CLASS)
   // Hand the seat takeover cards back untouched — the inline `position` this
   // pass may have written included (typed teardown, so no observer will).
   applyTakeoverFrost(0)
@@ -3210,7 +3283,7 @@ export function teardownWp(): void {
   document.documentElement.style.removeProperty('--dsh-any-caption-ink')
   document.documentElement.style.removeProperty('--dsh-any-caption-ink-collapsed')
   releaseCaptionInk()
-  document.querySelectorAll(`.${HEADER_BAR_CLASS}`).forEach(el => el.classList.remove(HEADER_BAR_CLASS))
+  document.querySelectorAll(`.${HEADER_BAR_CLASS}`).forEach(el => releaseHeaderBar(el as HTMLElement))
   headerBarEl = null
   frameEl?.classList.remove(CAPTION_FRAME_CLASS)
   document.querySelectorAll(`.${FLAT_CENTER_CLASS}`).forEach(el => el.classList.remove(FLAT_CENTER_CLASS))

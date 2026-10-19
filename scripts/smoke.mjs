@@ -82,6 +82,7 @@ try {
   assert.equal(first.config.blurs.headerBar, 30, 'default blurs.headerBar')
   assert.equal(first.config.headerBarOpacity, 0.5, 'default headerBarOpacity')
   assert.equal(first.config.strokes.headerBar.width, 0, 'default strokes.headerBar')
+  assert.equal(first.config.captionInk, 'auto', 'default captionInk')
 
   // 2. Values written through the RPC survive the sanitizer, on disk and on read.
   await rpc('writeConfig', {
@@ -89,6 +90,7 @@ try {
       blurs: { headerBar: 42, header: 44 },
       headerBarOpacity: 0.77,
       headerOpacity: 0.33,
+      captionInk: 'theme',
       strokes: { headerBar: { width: 2, color: 'theme', customColor: '#123456' } },
       profiles: [{
         id: 'smoke-profile',
@@ -111,6 +113,7 @@ try {
   assert.equal(disk.strokes.headerBar.color, 'theme', 'disk: strokes.headerBar.color')
   assert.equal(disk.blurs.header, 44, 'disk: existing blurs.header untouched')
   assert.equal(disk.headerOpacity, 0.33, 'disk: existing headerOpacity untouched')
+  assert.equal(disk.captionInk, 'theme', 'disk: captionInk')
   assert.equal(disk.profiles.length, 1, 'disk: profile kept')
   assert.equal(disk.profiles[0].config.blurs.headerBar, 33, 'disk: profile blurs.headerBar')
   assert.equal(disk.profiles[0].config.blurs.header, 22, 'disk: profile blurs.header')
@@ -125,13 +128,19 @@ try {
   assert.equal(reloaded.config.headerBarOpacity, 0.77, 'read: headerBarOpacity')
   assert.equal(reloaded.config.strokes.headerBar.width, 2, 'read: strokes.headerBar.width')
   assert.equal(reloaded.config.profiles[0].config.blurs.headerBar, 33, 'read: profile headerBar')
+  assert.equal(reloaded.config.captionInk, 'theme', 'read: captionInk')
 
-  // 4. The sanitizer must not call any of these keys unknown — that warning is
+  // 4. A value the host half does not know collapses to the default rather than
+  //    reaching the browser half, where `rCaptionInk` would have to guess again.
+  await rpc('writeConfig', { config: { captionInk: 'hot-pink' } })
+  assert.equal(onDisk().captionInk, 'auto', 'disk: an unknown captionInk falls back to auto')
+
+  // 5. The sanitizer must not call any of these keys unknown — that warning is
   //    exactly what the bug report captured.
   const drift = warnings.filter(w => w.includes('ignoring unknown config field'))
   assert.deepEqual(drift, [], `unexpected config drift warnings: ${drift.join(' | ')}`)
 
-  originalWarn('smoke: PASS — headerBar settings and profiles round-trip through disk')
+  originalWarn('smoke: PASS — headerBar + captionInk settings and profiles round-trip through disk')
 } finally {
   console.warn = originalWarn
   await new Promise(resolve => server.close(resolve))

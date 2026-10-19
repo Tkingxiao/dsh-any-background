@@ -1,4 +1,4 @@
-import type { BgState, ThemeConfig, PartOpacities, PartBlurs, PartStrokes, StrokeConfig, BgMode, ProfileEntry, RotationConfig, RotationItem, ScheduleConfig, SchemeOverride, ProfileAppearance } from './types'
+import type { BgState, ThemeConfig, PartOpacities, PartBlurs, PartStrokes, StrokeConfig, BgMode, ProfileEntry, RotationConfig, RotationItem, ScheduleConfig, SchemeOverride, ProfileAppearance, CaptionInkMode } from './types'
 
 export const DEFAULT_CONFIG: ThemeConfig = {
   color: null,
@@ -51,6 +51,7 @@ export const DEFAULT_CONFIG: ThemeConfig = {
   producedOpacity: 0.5,
   headerOpacity: 0.5,
   headerBarOpacity: 0.5,
+  captionInk: 'auto',
   profiles: [],
   rotation: { enabled: false, mode: 'shuffle', interval: 'daily', current: 0, items: [], lastRotate: null },
   schedule: { enabled: false, mode: 'time', dayProfile: null, nightProfile: null, dayStart: '07:00', nightStart: '19:00' },
@@ -60,6 +61,13 @@ export const DEFAULT_CONFIG: ThemeConfig = {
 
 const clamp01 = (n: unknown, def: number): number =>
   typeof n === 'number' ? Math.min(1, Math.max(0, n)) : def
+
+/** One place decides what a stored / adopted 「标题栏文字」 value means: anything the
+ *  host half or an older config file did not name is `auto`, which is 0.3.8's behaviour. */
+const CAPTION_INK_MODES: readonly CaptionInkMode[] = ['auto', 'theme', 'white', 'black']
+export function adoptCaptionInk (v: unknown): CaptionInkMode {
+  return CAPTION_INK_MODES.includes(v as CaptionInkMode) ? (v as CaptionInkMode) : DEFAULT_CONFIG.captionInk
+}
 
 // In-memory mirror of the file-backed store; the UI reads and mutates this,
 // and it is synced to disk via the RPC layer.
@@ -194,6 +202,8 @@ export function rPanelOpacity(): number { return clamp01(cfg.panelOpacity, DEFAU
 export function rProducedOpacity(): number { return clamp01(cfg.producedOpacity, DEFAULT_CONFIG.producedOpacity) }
 export function rHeaderOpacity(): number { return clamp01(cfg.headerOpacity, DEFAULT_CONFIG.headerOpacity) }
 export function rHeaderBarOpacity(): number { return clamp01(cfg.headerBarOpacity, DEFAULT_CONFIG.headerBarOpacity) }
+/** Who owns the desktop caption strip's chrome ink — see `CaptionInkMode`. */
+export function rCaptionInk(): CaptionInkMode { return adoptCaptionInk(cfg.captionInk) }
 export function rBgState(): BgState { return cfg.bgState }
 export function rVideoBgState(): BgState { return cfg.videoBgState }
 
@@ -405,6 +415,7 @@ export function adoptConfig(raw: unknown): void {
     producedOpacity: clamp01(c.producedOpacity, DEFAULT_CONFIG.producedOpacity),
     headerOpacity: clamp01(c.headerOpacity, DEFAULT_CONFIG.headerOpacity),
     headerBarOpacity: clamp01(c.headerBarOpacity, DEFAULT_CONFIG.headerBarOpacity),
+    captionInk: adoptCaptionInk(c.captionInk),
     profiles: adoptProfiles(c.profiles),
     rotation: adoptRotation(c.rotation),
     schedule: adoptSchedule(c.schedule),

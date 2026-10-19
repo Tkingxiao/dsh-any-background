@@ -32,16 +32,18 @@
  * A header dropdown can only be open while its trigger reports
  * `aria-expanded="true"`, and opening one is what mounts the popover. So a
  * popover tag is maintained as: "there is at least one expanded header trigger,
- * AND this popover is not owned by another group". Popovers are only ever
+ * AND this popover is a header candidate" — see `isHeaderSurface` for the two
+ * shapes that qualify (portaled to `<body>`, or mounted inside one of the
+ * header's own slot anchors) and for what stays foreign. Popovers are only ever
  * tagged/released on a change of that combined state, which makes the tag
  * self-consistent and idempotent.
  *
  * The one hazard is a popover that is open for an unrelated reason (a composer
- * menu, a hover card) *while* a header trigger stays expanded. Such a popover
- * is not a candidate: it is excluded by `ownsForeignSurface`, which skips any
- * popover carrying markers of a different slider group. In practice header
- * dropdowns are transient (opening one closes the others), so this is a guard
- * rather than the common path.
+ * menu, a hover card) *while* a header trigger stays expanded. Such a popover is
+ * not a candidate: it is neither portaled nor a descendant of a header anchor,
+ * and the composer's in-place lists keep belonging to the card group. In practice
+ * header dropdowns are transient (opening one closes the others), so this is a
+ * guard rather than the common path.
  *
  * THE SURFACE MARKER IS PART OF THE CANDIDATE SET (`0.2.1-alpha.3` and up).
  * That release moved the background-job list onto the shared `MenuSurface`, whose
@@ -88,24 +90,58 @@ function headerTriggerOpen(): boolean {
   return false
 }
 
-/** Surfaces that belong to a different slider group and must never be claimed.
- *  `_denseList` without `_portal` is the in-place card-side dense menu, an
- *  `_ioCard`/`_menu`-classed body-level list belongs elsewhere, and a modal is
- *  its own surface. */
-function ownsForeignSurface(el: Element): boolean {
-  if (el.getAttribute('aria-modal') === 'true') return true
-  // A list that is not directly under <body> is an in-place popover owned by
-  // whatever subtree it lives in (composer menus), never the header.
-  return el.parentElement !== document.body
+/** Whether this popover can belong to the header.
+ *
+ *  Two shapes, and the second one is the reason this is not just "portaled to body":
+ *  `session-log-export/HeaderAction.tsx` renders its `Menu` WITHOUT the `portal` prop,
+ *  so the card is mounted in place, inside `[data-slot="conversation.session.header
+ *  .utilities"]` — a DOM descendant of the row, exactly where a header trigger's own
+ *  popover belongs. Keyed on `parentElement === body` alone it was never claimable, and
+ *  the only thing that styled it at all was the header group's
+ *  `[role="menu"][class*="_denseList"]:not([class*="_portal"])` arm — which dies the
+ *  moment the host drops `dense` (or adds a header popover that is not a dense menu),
+ *  and leaves the surface following the card slider while it sits in the title row.
+ *
+ *  A popover that is neither portaled nor inside a header anchor stays foreign: that is
+ *  the composer's in-place lists (permission / command / model), which the card group
+ *  owns and this group must never reach. */
+function isHeaderSurface(el: Element): boolean {
+  // A modal is its own surface whatever it is nested in.
+  if (el.getAttribute('aria-modal') === 'true') return false
+  return el.parentElement === document.body || el.closest(headerSlotAnchors()) !== null
 }
 
 let observer: MutationObserver | null = null
-let raf: number | null = null
+let pending: Promise<void> | null = null
+/** False once the effect is torn down, so a pass already queued on the microtask queue
+ *  cannot re-mark a popover after the teardown cleared it. */
+let active = false
+
+/** Coalesce the observer's batches into ONE pass, but flush it on the microtask queue
+ *  rather than a animation frame.
+ *
+ *  The frame version was the bug, not the batching: `requestAnimationFrame` callbacks
+ *  do not run while a window is not rendering — a hidden tab, an occluded or minimized
+ *  desktop window, a background Electron surface — and a queued frame never fires, so
+ *  the tag never lands and the 「顶栏选项」 pair silently keeps whatever the card group
+ *  gave the panel. Observed live: with the page not painting, an open header menu stayed
+ *  `data-dsh-any-header-popover`-less indefinitely, and the same menu was tagged the
+ *  moment rAF was made to run. A `MutationObserver` callback is already delivered once
+ *  per batch at microtask time, so a microtask flush coalesces exactly as well and has no
+ *  dependency on the compositor at all — and it lands in the SAME frame the popover
+ *  mounts, which also removes the one-frame flash of card styling on open. */
+function schedule(): void {
+  if (pending !== null || !active) return
+  pending = Promise.resolve().then(() => {
+    pending = null
+    if (active) refreshHeaderPopovers()
+  })
+}
 
 /** Recompute tags from the current open state. */
 function refreshHeaderPopovers(): void {
   const open = headerTriggerOpen()
-  const candidates = [...document.querySelectorAll(POPOVER_SELECTOR)].filter(el => !ownsForeignSurface(el))
+  const candidates = [...document.querySelectorAll(POPOVER_SELECTOR)].filter(isHeaderSurface)
   if (!open) {
     for (const el of document.querySelectorAll(`[${HEADER_POPOVER_ATTR}]`)) {
       el.removeAttribute(HEADER_POPOVER_ATTR)
@@ -120,17 +156,10 @@ function refreshHeaderPopovers(): void {
   }
 }
 
-function schedule(): void {
-  if (raf !== null) return
-  raf = window.requestAnimationFrame(() => {
-    raf = null
-    refreshHeaderPopovers()
-  })
-}
-
 /** Start tagging. Returns a teardown that stops observing and clears markings. */
 export function startHeaderPopoverTagging(): () => void {
   if (typeof MutationObserver === 'undefined' || typeof document === 'undefined') return () => {}
+  active = true
   refreshHeaderPopovers()
   observer = new MutationObserver(schedule)
   // Attribute + childList across the body subtree: a popover mounting and an
@@ -142,9 +171,9 @@ export function startHeaderPopoverTagging(): () => void {
     attributeFilter: ['aria-expanded'],
   })
   return () => {
+    active = false
     observer?.disconnect()
     observer = null
-    if (raf !== null) { window.cancelAnimationFrame(raf); raf = null }
     for (const el of document.querySelectorAll(`[${HEADER_POPOVER_ATTR}]`)) {
       el.removeAttribute(HEADER_POPOVER_ATTR)
     }
