@@ -11,7 +11,7 @@
  *   3. the row below.
  * A newer build that turns out to need NO change does not get its own folder: it
  * joins the name of the folder whose facts held (`v0-2-1`, checked from `alpha.1`
- * through `rc.2`) and gains a `SUPPORTED_RELEASES` row, which is what moves that
+ * through `rc.3`) and gains a `SUPPORTED_RELEASES` row, which is what moves that
  * host's verdict from `line` to `exact`.
  * Anything that reads an adapter then picks it up without an edit — which is the
  * point: version branching must not be reachable from the styling code.

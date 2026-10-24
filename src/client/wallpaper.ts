@@ -2290,7 +2290,8 @@ export const FRAME_CLEAR_RULE = `.${PART_FRAME_CLASS}{background:transparent!imp
  *
  *  Bound by the CSS-Module class shape, same as `[class*="_ioCard"]`: the built
  *  bundle names these `pI_x6G_sidebarCol` — prefix first, local name last, and the
- *  pair is identical across `0.2.0-rc.1`, `0.2.1-alpha.3` and `0.2.1-rc.2`. A build
+ *  pair is identical across `0.2.0-rc.1`, `0.2.1-alpha.3`, `0.2.1-rc.2` and
+ *  `0.2.1-rc.3` (`AppFrame.module.css` byte-identical rc.2→rc.3). A build
  *  that renames the track simply stops matching, which is the untouched host look. */
 export const SIDEBAR_ONE_LAYER_RULE = '[class*="_sidebarCol"] *{--dsw-specific-sidebar-fill:transparent}'
 

@@ -28,10 +28,15 @@
  *
  *  `0.2.1` IS KEYED TO THE PATCH LINE, not to a prerelease name, because the line's
  *  alpha builds and its rc builds answer with the same facts: checked per tag from
- *  `0.2.1-alpha.1` through `0.2.1-rc.2`, no file the adapter speaks for moved (the
+ *  `0.2.1-alpha.1` through `0.2.1-rc.3`, no file the adapter speaks for moved (the
  *  one shape change, the job list moving onto `MenuSurface` at `alpha.3`, is
  *  absorbed by DOM-shape selectors rather than by a per-release answer). A channel
  *  name that splits alpha from rc would be two folders asserting identical facts.
+ *  `rc.3`'s deltas are additive on top of that: `Menu.tsx` gains a `current` prop
+ *  and a `minWidthFromAnchor` switch (no stylesheet move), the guide and the
+ *  sidebar panel list grow pin state around the existing registrations, and the
+ *  session header's View row grows a More menu that portals to `body` — already a
+ *  header candidate through the tagger's portaled arm.
  *
  *  The 0.1.5 / 0.1.6 / 0.1.7 channels are GONE: their folders went with them, and a
  *  channel with no folder is a compile error, not a fallback. A host still sitting
@@ -73,6 +78,7 @@ export const SUPPORTED_RELEASES: readonly SupportedRelease[] = [
   { channel: '0.2.1', release: '0.2.1-alpha.5' },
   { channel: '0.2.1', release: '0.2.1-rc.1' },
   { channel: '0.2.1', release: '0.2.1-rc.2' },
+  { channel: '0.2.1', release: '0.2.1-rc.3' },
 ]
 
 /** How the chosen adapter relates to the release that was detected. Reported so a

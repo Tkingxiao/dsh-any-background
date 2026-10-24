@@ -1,6 +1,6 @@
 /**
  * Adapter for the DSH `0.2.1` patch line, verified at `0.2.1-alpha.1`,
- * `alpha.2`, `alpha.3`, `alpha.4`, `alpha.5`, `rc.1` and `rc.2`.
+ * `alpha.2`, `alpha.3`, `alpha.4`, `alpha.5`, `rc.1`, `rc.2` and `rc.3`.
  *
  * A new MINOR line opened with a prerelease, and the answer is the `0.2.0-rc.2`
  * folder's — which is a statement this file has to earn, because "same as the
@@ -23,6 +23,34 @@
  *   · `PluginManagerPage.tsx` still emits the three anchors of the card list.
  *   · `TextShimmer` still marks its root `data-shimmer`, so the stroke exemption
  *     written for rc.1 stands.
+ *
+ * Re-checked at `0.2.1-rc.3` (`git diff rc.2 rc.3` on every file above), the
+ * facts hold untouched: `design-platform.css`, both menu stylesheets and
+ * `MenuGroup.tsx` byte-identical; `SidebarRight.module.css`, `TabLayout.tsx`,
+ * `base.css`, `gradient-shadow-text.css`, `AppFrame.*`, `InlineEditor.module.css`,
+ * `TextShimmer`, `JobListAction`, `TaskMenu`, `scoped-slots` and
+ * `PluginManagerPage.tsx` all unchanged, and the five header slot keys stand.
+ * What rc.3 did move, and why none of it needs a fact from this folder:
+ *   · `ui-primitives/Menu.tsx` is ADDITIVE — a `current` prop that renders
+ *     `aria-current="page"` and a `minWidthFromAnchor` switch that sets a
+ *     `min-width` style in portal mode. No stylesheet moved with it
+ *     (`MenuSurface.module.css` is byte-identical), so the menu paint and the
+ *     frost stay exactly where the facts say.
+ *   · the guide (`GuideBody.tsx`) and the sidebar panel list (`SidebarRoot.tsx`)
+ *     grow pin state and a More menu AROUND the existing registrations — guide
+ *     entries still arrive through `useGuideEntries`, panels through
+ *     `selectPanel`, and the new menus mount empty until something registers
+ *     into their `*.actions` slots, which this plugin does not. The tab
+ *     registry itself (`shell/`), which `native-tab.tsx` speaks to, is untouched.
+ *   · the session header's View tab row gained its own More menu
+ *     (`conversation.session.header.views.actions` slot). It mounts through
+ *     `<Menu … portal>` to `document.body`, so `header-tag.ts` already claims
+ *     it through the portaled arm — the trigger sits in the header and reports
+ *     `aria-expanded`, which is all that arm asks. The five in-place header
+ *     slot anchors are unchanged.
+ *   · `ConversationRoot.module.css` re-laid the View tab row (wrap, gaps, the
+ *     More launcher's classes). Layout inside the header, not a surface the
+ *     plugin styles by these class names.
  *
  * Re-checked again across the rest of the line (`alpha.3` … `rc.2`, `git diff
  * <tag> rc.2` on every file above): the menu token contract, both menu stylesheets
@@ -125,7 +153,7 @@ function panelFragments(): PanelFragments {
 
 export function createAdapter(host: HostInfo): HostAdapter {
   return {
-    id: '0.2.1-alpha.1…rc.2',
+    id: '0.2.1-alpha.1…rc.3',
     channel: '0.2.1',
     host,
     panelFragments,
