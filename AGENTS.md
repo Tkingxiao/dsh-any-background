@@ -159,6 +159,12 @@ npm test                            # 真起宿主半侧，跑「写盘 → 重�
 被遮挡/最小化的桌面窗口、后台 Electron 表面）时排下去的帧根本不跑。`MutationObserver` 回调本就按批
 在微任务时点投递，用微任务合批同样省，且不依赖合成器（v0.3.9 的 `header-tag.ts: schedule()`）。
 teardown 之后要有 `active` 闸门，防止已排队的回调把标记再写回去。
+**把任何逻辑接进周期性 tick 前，先问它对"恒为真"的输入会怎样**：v0.4.0 把 `maybeRotate()` 挂进
+30 秒的 `scheduleTick`（注释还写着"数学门控，没到期是空操作"），但 `rotationDue` 对 `reload`
+档位**无条件返回 true**——那是"每次 read 换一张"的实现方式，接进 tick 就成了壁纸每 30 秒自动切换
+（v0.4.1 修：`shared/rotation.ts: rotationAdvancesLive()` 划定只有时间档位参与活推进，`reload`
+只在 read / 手动按钮 / boot 回退里推进）。tick 的其他触发源（系统明暗变化、开启昼夜定时）同理会被
+放大，修这类问题要连调用图一起看，不止 setInterval 那一处。
 
 ### I. 一个表面只涂一次 alpha
 
@@ -270,6 +276,7 @@ release 标题与提交主题一致；issue 回复要带根因 + 验证数字 + 
 | 版本事实（新宿主） | §C 四处 + §D 三处 + `dshReleases` + README 兼容性段 |
 | 滑块 / 选择器 UI | `onInput` 与 `onChange` 两条路径都落值；`metaRev` 订阅；禁用态与越界值；双语标签 |
 | 取色 / 明暗 | 强制方向 × 主题色明度 × 壁纸 verdict 的 2×2×3 组合；无主题色分支；皮肤注册（§N） |
+| 轮换档位 / 池语义 | 数学只改 `src/shared/rotation.ts`（§0）；给轮换接**新调用点**时逐个数一遍推进者——服务端 `read`、客户端 tick / boot 回退 / 启用开关 / 手动按钮——`reload` 档 `rotationDue` 恒为 true，多接一个就多一处"每次都切"（§2-H v0.4.1） |
 | 上传 / URL 拉取 | 上限与错误回传、MIME 落盘、`revokeObjectURL`、失败不留半个槽位 |
 | 新增运行时文件 | `package.json` 的 `files` + `exports`（§0） |
 | `lib/` | 一定要 `npm run bundle`，产物和源码同批提交 |

@@ -93,6 +93,11 @@
 
 ## 更新日志（只保留最近两个版本）
 
+### v0.4.1（修复：「每次刷新」档位壁纸每 30 秒自动切换）
+
+- **发生了什么。** v0.4.0 让 30 秒一次的定时检查顺带推进到期的轮换，好让「每小时」档在页面长驻时也能换图。但到期数学对「每次刷新」档位是**恒为到期**——这正是页面加载能拿到新图的原因（服务端在 `read` RPC 里推进它）。把它接进定时器后就成了：轮换开启 + 选了「每次刷新」→ 壁纸每 30 秒自己换一张；系统明暗翻转、开启昼夜定时时也会跟着再切一次（这两处同样驱动该定时器）。
+- **怎么修的。** 「哪些档位参与活推进」现在是共享数学的一部分：`src/shared/rotation.ts` 新增 `rotationAdvancesLive()`（与其余到期数学一样构建时内联进两个 bundle），只有时间档位——每小时 / 每天 / 每周——参与活推进。「每次刷新」回到它原本的语义：每次页面加载换一张，外加手动「换一张」按钮。boot 回退与开启开关时的立即换图行为不变。
+
 ### v0.4.0（持久化正确性批次 + 轮换 / 导出 / 档案功能）
 
 - **主题导出现在带上整个轮换池（v3）。** 旧导出只带配置与主壁纸：轮换池的元数据（文件名 + 缩略图）随配置走了，图片字节却留在原机器上，换机导入后每次切换都报 `file missing`。v3 导出把池内每张图的字节（从新路由 `/dsh-any-background/rotation/file` 取回，名称走与配置清洗相同的防穿越围栏）内嵌为 `pool`；导入走新的 `rotationRestore` RPC 整体重建——字节按导出时的原文件名落盘、清掉未被引用的旧文件、游标夹取进新范围。v2 旧文件里的死条目会在导入时清空，而不是留着每次激活都失败。
@@ -101,10 +106,6 @@
 - **持久化正确性修复——每条都对应一个已发生过的故障模式。** 首启或读盘瞬时失败时 `readConfig` 返回的浅拷贝会被轮换增删原地污染，模块级默认配置从此带上幽灵池项（改 `structuredClone`）；配置写失败后按 mtime 的内存缓存与磁盘分叉（改为写前丢缓存）；字体槽收养杂散文件时按文件名错标 MIME，woff2 字节被当 ttf 服务（改为嗅探真实魔数并回写配置）；壁纸裸字节上传不验内容（补上与 URL 下载、字体上传相同的魔数围栏）；轮换池文件名毫秒碰撞（加随机后缀）；手动激活轮换后游标不落盘、刷新回跳旧图（服务端按「合并进最新配置」回写，与自动推进同一套语义）。
 - **结构与性能。** 浏览器半侧四个 body 级 MutationObserver 合并为单一总线（`src/client/dom-watch.ts`，最后一个退订自动断开）；parts 观察的合批从 rAF 挪到微任务——对齐 v0.3.9 的教训（不绘制的窗口里排队的帧根本不跑），后台挂载的视图与 takeover 卡现在立即补上样式；`applyWp` 扇出去重（产出物 / 顶栏浮层等 pass 从每次两遍降为一遍）；配置写失败先重试一次（Windows 上杀软扫描文件造成的瞬时 EBUSY）再明确告警，不再静默吞掉；`read` 的三个槽位并行探测；首启只写一次配置；启动时清扫崩溃残留的 tmp 文件、超额的 `.corrupt-*` 归档（保留最近 3 份）与轮换池孤儿文件（10 分钟宽限期）；轮换推进 / 激活改用 `copyFile`，多 MB 壁纸不再整块过内存。
 - **i18n 清理。** 删除四个无引用死键，英文文案里内嵌的中文引号改为英文写法；中英 197/197 键位对齐。
-
-### v0.3.10（0.2.1-rc.3 过检：SUPPORTED_RELEASES 多一行，事实零新增）
-
-- **`0.2.1-rc.3` 从「收边夹取的猜测」变成「逐项核对过的构建」。** 对 `0.2.1` 适配层发言的每一个文件跑 `git diff rc.2 rc.3`：`design-platform.css`、两份菜单样式表、`MenuGroup.tsx` 逐字节一致，`SidebarRight.module.css`、`TabLayout.tsx`、`base.css`、`gradient-shadow-text.css`、`AppFrame.*`、`InlineEditor.module.css`、`TextShimmer`、`JobListAction`、`TaskMenu`、`scoped-slots`、`PluginManagerPage.tsx` 也全部未动，五个头部槽位键原样成立。事实不变，所以 rc.3 并入 `v0-2-1`、只添一条 `SUPPORTED_RELEASES` 行——判定从 `line` 升为 `exact`——该 tag 真正动了的东西记在目录头注释里：`Menu.tsx` 是纯增量（渲染 `aria-current`、portal 模式下写一个 `min-width`，没有任何样式表随行迁移）；guide 与侧栏面板列表在**既有注册的外围**长出 pin 状态和 More 菜单，而 `native-tab.tsx` 对话的那个 tab 注册表（`shell/`）原封未动；会话头部新增的 View 行 More 菜单经 `<Menu … portal>` 挂到 `document.body`，标记器的 portal 分支本来就会认领它；`ConversationRoot.module.css` 只重排了 View 标签行。`engines.dsh`、六个受门禁的 `@deepseek-ai/dsh-*` peer、`dsh.compatibility.dsh` 与 `dsh.compatibility.dshReleases` 均已点名 `0.2.1-rc.3`。
 
 ## 安装
 

@@ -23,7 +23,7 @@ import { SUN_PATHS } from './components/icons'
 import { startBetterSidebarWatch } from './env'
 import { startHeaderPopoverTagging } from './header-tag'
 import { watchDom } from './dom-watch'
-import { rotationDue as sharedRotationDue, pickNextRotationIndex as sharedPickNext } from '../shared/rotation'
+import { rotationDue as sharedRotationDue, pickNextRotationIndex as sharedPickNext, rotationAdvancesLive as sharedRotationAdvancesLive } from '../shared/rotation'
 
 export const name = 'dsh-any-background'
 export const inject = ['slots', 'locale', 'theme', 'connection']
@@ -351,9 +351,11 @@ export function apply(ctx: Ctx): void {
 
   const scheduleTick = (): void => {
     // Rotation re-checks on every tick, not only on reload: an 'hourly'
-    // cadence now actually advances while the page stays open (maybeRotate is
-    // math-gated, so this is a no-op whenever nothing is due).
-    void maybeRotate()
+    // cadence now actually advances while the page stays open. Time-based
+    // cadences only — 'reload' advances exactly once per read (the server
+    // does it inside `read`; rotationDue is always true for it), so the
+    // tick must not drive it or the wallpaper flips every 30 s.
+    if (sharedRotationAdvancesLive(rRotation())) void maybeRotate()
     const sc = rSchedule()
     if (!sc.enabled) return
     // Both steps are optional: `matchMedia?.(…)` alone still throws on the

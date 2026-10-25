@@ -44,6 +44,15 @@ export function rotationDue(rot: RotationCadence, now: Date = new Date()): boole
  *  on-the-hour tick). */
 const hourKey = (d: Date): number => Math.floor(d.getTime() / 3_600_000)
 
+/** Whether an OPEN page should keep advancing this cadence on its timer.
+ *  Only the time-based cadences tick live; 'reload' is a once-per-READ pick
+ *  (the server advances it inside the `read` itself), so a live tick driving
+ *  it would flip the wallpaper every 30 s — exactly the v0.4.0 regression
+ *  (rotationDue is unconditionally true for 'reload'). */
+export function rotationAdvancesLive(rot: Pick<RotationCadence, 'interval'>): boolean {
+  return rot.interval !== 'reload'
+}
+
 /** Pick the next pool index under the configured mode. */
 export function pickNextRotationIndex(rot: RotationCadence): number {
   const n = rot.items.length
