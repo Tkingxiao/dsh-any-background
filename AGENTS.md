@@ -1,12 +1,25 @@
 # AGENTS.md — dsh-any-background 检查与测试手册
 
-本文件由 46 个提交（v0.1 → v0.3.9）里每一次**真实发生过的回归**反推而来，目的是让任何一次改动
-在提交前把该踩的坑踩完。每条都带出处，不是通用建议。
+本文件的每一条规则都来自本仓库**真实发生过的回归**，逐条带出处（commit 或 issue 号）。
+它只收录可执行的检查，不保留与排错无关的历史叙述。
 
 - 修 bug：先在 §2 找到对应缺陷类别，按它的"检查路径"逐项过。
 - 加功能：先看 §3 的"改动 → 必查"表，再动手。
 - 不确定怎么验：§4 说明四条测试路径各自能证明什么、**不能**证明什么。
 - 改完必须回来补条目（§6）。
+
+**排错总纲**（v0.4.0 – v0.4.2 三次修复的共同形态）：出错的几乎从不是"写错的那一行"本身，
+而是该行所依赖、却写在别处的不变量——
+
+- v0.4.2：`isolation:isolate` 只对"垫层关在列里"负责，但它同时改写了宿主就地浮层的绘制槽位
+  （§2-F、§2-T）。
+- v0.4.1：`rotationDue` 对 `reload` 档恒为真，是"每次 read 换一张"的实现细节；复用到 tick 调用点
+  后该前提失效（§2-H）。
+- v0.4.0：写失败后的缓存、浅拷贝里的嵌套数组、按文件名认领的 MIME——各自的"真相"都在别的
+  所有权里（§2-K、§2-U）。
+
+修复时先问：**这行代码假定了谁为真？**把假定变成显式判定或断言（`rotationAdvancesLive()`、
+`structuredClone`、魔数嗅探、提层后的阶梯核对），并把该假定归档进 §2 的对应类别。
 
 ---
 
@@ -17,14 +30,14 @@
 | 两半结构：Node 宿主半 + 浏览器客户端半 | `src/index.ts` → `lib/index.js`；`src/client/**` → `lib/client.js` | 同一份配置形状存在两处，任一侧不认识键就会静默丢（§2-A） |
 | **构建产物入库** | `lib/` 是提交内容，`tsdown` 生成（`tsdown.config.ts` 两套 config） | 改了 `src/` 不重新 bundle 就提交 = 发出去的是旧代码（用户装到的就是它） |
 | 客户端产物是 CJS 包壳 | banner：`window.__ModuleLoader__.load({id, factory})` | 宿主运行时按 id 取模块；`react` / `@deepseek-ai/dsh-*` 是 external，不能自己引 |
-| **发布物白名单很短** | `package.json` 的 `files`：`lib/index.js`、`lib/client.js`、`lib/client.js.map`、`cordis.patch.yml` | 新增任何运行时文件必须同时进 `files` 与 `exports`；`e58e9a4` 就是 `types` 指向了根本没生成的 `lib/types` |
+| **发布物白名单很短** | `package.json` 的 `files`：`lib/index.js`、`lib/client.js`、`lib/client.js.map`、`cordis.patch.yml` | 新增任何运行时文件必须同时进 `files` 与 `exports`；曾因 `types` 指向未生成的 `lib/types` 而出错（`e58e9a4`） |
 | 装载入口靠 bundle patch | `dsh.bundle.patch = ./cordis.patch.yml`（根目录的 `cordis.yml` 是给 `dsh web --patch ./cordis.yml` 用的开发插层，**不在** `files` 里） | 改了 patch 层却没进 `files` = 装出来的插件没有插层 |
 | 配置落盘在真实磁盘 | `<DSH_HOME>/.dsh-any-background-data/theme-config.json` | **在 generation restore 之外**：回滚主题不会还原插件设置，删目录 = 整体重置 |
 | 版本事实按 release 隔离 | `src/host-compat/channel.ts`、`src/client/host-compat/versions/<目录>/` | 样式/逻辑代码里出现版本号比较 = 架构违规（§2-D） |
 | 静态样式表只有一张，顺序即语义 | `src/client/host-compat/styles.ts: buildStaticStyles()` | 挪动拼接顺序会改变胜负（§2-E） |
 | 动态写盘的另一半 | `style[data-plugin="…-tokens" / "-header" / "-exempt" / "-wco" / "-parts" / "-table-fix"]` | 现场调试先看这几张表（§4.3），比读代码快 |
 | body 级 MutationObserver 只有一个 | `src/client/dom-watch.ts`（统一 bus：childList+subtree+`aria-expanded`） | 新的 DOM 观察订阅 bus，不要自建 observer（parts / header-tag / env / navIcon 四个原来各自一个）；最后一个退订自动断开 |
-| 轮换到期/选图数学双端共享 | `src/shared/rotation.ts`（tsdown 内联进两个 bundle） | 改日/周/随机语义只改这一处；在任一半侧重写 = 两端推进会打架 |
+| 轮换到期/选图数学双端共享 | `src/shared/rotation.ts`（tsdown 内联进两个 bundle） | 改日/周/随机语义只改这一处；在任一半侧重写 = 两端推进失去一致性 |
 
 ---
 
@@ -36,8 +49,8 @@ npm run bundle                      # 必须跑：lib/ 是发布物
 npm test                            # 真起宿主半侧，跑「写盘 → 重读 → Profile」往返
 ```
 
-视觉/CSS 类改动**再加一步真机冒烟**（§4.3）：mock 证明不了"拖了滑块那块真的变"，本仓库已经
-两次在 mock 全绿后被用户告知"还是失效"（v0.3.9 的 rAF 饿死、0 语义反向）。
+视觉/CSS 类改动**再加一步真机冒烟**（§4.3）：mock 无法证明"拖动滑块后目标表面真的变化"——
+本仓库已有两次在 mock 全绿后被用户告知实际无效（v0.3.9 的 rAF 饿死、0 语义反向）。
 
 最后四条人工核对：
 
@@ -79,7 +92,7 @@ npm test                            # 真起宿主半侧，跑「写盘 → 重�
 鉴权（`d30370e`）。
 
 **测试注意**：端点格式是 `dshAnyBackground/<method>`，**URL 尾段和 envelope 的 `method` 两处都要**，
-写成裸方法名会得到 `unknown endpoint`（写 smoke test 时踩过）。
+写成裸方法名会得到 `unknown endpoint`（曾实际触发）。
 
 ### C. 宿主版本门禁
 
@@ -88,9 +101,9 @@ npm test                            # 真起宿主半侧，跑「写盘 → 重�
 **检查路径**：`engines.dsh`、六条 `@deepseek-ai/dsh-*` `peerDependencies`、`dsh.compatibility.dsh`、
 `dsh.compatibility.dshReleases` 四处一起改。宿主**只对前缀是 `@deepseek-ai/dsh` / `dsh-*` 的 peer**
 做门禁（`packages/boot/app-boot/src/plugin-compatibility.ts`，`semver.satisfies(…, {includePrerelease:true})`）
-—— `@deepseek-ai/cordis`、`react`、`dsh-better-sidebar` 不参与，别误算。
+—— `@deepseek-ai/cordis`、`react`、`dsh-better-sidebar` 不参与，不要计入。
 
-**红线**：**不要 fail closed**，门禁收窄 = 一堵墙。策略是"逐点名列举已验证构建 + 一个不封顶的 `>=`"。
+**红线**：**不要 fail closed**，收窄门禁 = 插件整包不可用。策略是"逐点名列举已验证构建 + 一个不封顶的 `>=`"。
 装/更新插件后必须重启宿主（门禁在**组装 profile 时**跑，不在更新时跑）—— 这条要写进 issue 回复。
 
 ### D. 版本事实隔离
@@ -102,13 +115,13 @@ npm test                            # 真起宿主半侧，跑「写盘 → 重�
 - 消费方只问问题（`hostAdapter().menus.frostDecl`、`surface.headerSlotKeys`），不比对字符串。
 - 客户端**探测不到**宿主版本：版本由 Node 半解析（`ctx.profileContext.installAnchor`）随 `read`
   RPC 载荷下发，`release.ts: adoptHostInfo` 采纳 —— 所以 RPC 失败时跑的是 `unknown` 适配层，
-  第一张静态表是 DOM 仲裁版，这是设计不是 bug。
+  第一张静态表是 DOM 仲裁版，此为设计行为。
 - 未验证的新构建：夹到最近的行并在日志里说明（`detect.ts` 的 `exact` / `line` / `nearest`）。
-  猜错最坏只错一个滑块；门禁失败会整个插件不见。
+  猜错至多影响一个滑块；门禁失败则整个插件不加载。
 - **删旧目录要连根删**：`SUPPORTED_RELEASES` 行、渠道键、失去引用者的常量（`LEGACY_MENU_SURFACE`、
   `prereleaseOf` 都是这么清掉的）。
 
-### E. CSS 层叠与自定义属性陷阱（本仓库最贵的坑）
+### E. CSS 层叠与自定义属性陷阱（出现频率与代价最高的类别）
 
 | 陷阱 | 规则 | 实例 |
 |---|---|---|
@@ -120,8 +133,8 @@ npm test                            # 真起宿主半侧，跑「写盘 → 重�
 | `:where()` 不花优先级 | 门控要零成本时用 `:where(.cls)`，否则会压过本该赢的对手 | 菜单霜门控用过（已撤销，见上两条） |
 | 宿主令牌声明在 `body`，不在 `:root` | 自定义属性只向下继承：在 `:root` 上读 `--dsw-specific-*` 恒为空 | v0.3.9：`readHostOpacityTokens()` 读错元素 → 无主题色时**所有**透明度滑块是死的 |
 | 读自己写过的值 = 回声 | 采样宿主令牌时要把插件自己的 `body{}` 表关掉，且按宿主代次缓存 | 同上 |
-| CSS Module 哈希类名 | 用形状 `[class*="_localName"]`（产物是 `<hash>_<local>`），别写死哈希；宿主改名就自然失效（= 保持宿主原样） | `[class*="_sidebarCol"]`、`[class*="_ioCard"]`、`[class*="_panel"]` |
-| 规范问题去查规范，别猜 | `isolation:isolate` 造层叠上下文但**不**造 backdrop root；`clip-path`/`opacity<1`/`mask` 才造 | v0.3.9 判"行霜吞掉子层模糊"时以 MDN 列表为准 |
+| CSS Module 哈希类名 | 用形状 `[class*="_localName"]`（产物是 `<hash>_<local>`），禁止写死哈希；宿主改名就自然失效（= 保持宿主原样） | `[class*="_sidebarCol"]`、`[class*="_ioCard"]`、`[class*="_panel"]` |
+| 规范问题以规范为准 | `isolation:isolate` 造层叠上下文但**不**造 backdrop root；`clip-path`/`opacity<1`/`mask` 才造 | v0.3.9 判"行霜吞掉子层模糊"时以 MDN 列表为准 |
 
 ### F. `backdrop-filter` 三宗罪
 
@@ -133,19 +146,20 @@ npm test                            # 真起宿主半侧，跑「写盘 → 重�
 - v0.3.5 把霜压在会话标题行 → 行内挂出的 `z-index:100` 菜单被关进行内、压到对话之下（issue #26）。
   修法是给行补 `z-index:10`（高于 `.seat` 9 / 回底 8 / 页脚 7 / `.tabs` 1，远低于 portal 100 /
   模态 1000 / 统计面板 1100），**不是**用 `:has()` 撤霜。
-- v0.3.9 行霜改垫层后，就地浮层才重新采得到壁纸（此前"顶栏模糊度无效"的另一半）。
-- 模态打开时撤隔离（`:has([role="dialog"])`）是**故意**的：看不见对话框是死路，丢一会儿磨砂是便宜。
+- v0.3.9 行霜改垫层后，就地浮层才重新采得到壁纸。
+- 模态打开时撤隔离（`:has([role="dialog"])`）是**故意的取舍**：对话框不可见属于功能失效，
+  暂时失去磨砂只影响观感。
 - v0.4.2 反向命中：`isolation:isolate` 只造成层叠上下文，但这足以**囚禁宿主自己的就地 fixed
   浮层**。宿主 Tooltip 气泡是就地渲染的 `span[role=tooltip]{position:fixed;z-index:100}`
   （`dsh-web-frontend` 的 Tooltip.module.css；`portal` prop 默认 false，工作区「添加工作区」调用点
   没传 portal → 气泡留在侧栏列子树里），磨砂侧栏列的 isolation 把它的 z-index 关在本地，后绘的
   中心列磨砂整层盖住悬出侧栏的段（issue #32）。修法与 #26 同族：把**磨砂侧栏列**整体提到
   `z-index:1`（`dab-part-blur-side`，随侧栏模糊值加/摘，网格轨道几何不重叠 → 只影响悬出浮层），
-  不动浮层。安全边界逐个核对：宿主 overlay `.overlayLayer{z-index:20}`（0.2.0-rc.1 与 0.2.1-rc.3
-  逐字节一致）必须仍压在其上；`:has([role="dialog"])` 豁免必须**同时**归位 `z-index:auto` 与
-  `isolation:auto`——钉着 z-index 的列仍是层叠上下文，对话框会困在列里被 overlay 压住。验证走
-  §4.2 mock（类落位 / computed z-index / dialog 豁免往返）+ §4.3 真机 A/B（旧包复现悬出段发糊、
-  新包清晰，两次截图对照）。
+  不动浮层。安全边界逐个核对（阶梯全表见 §2-T）：宿主 `.overlayLayer{z-index:20}`
+  （0.2.0-rc.1 与 0.2.1-rc.3 逐字节一致）必须仍压在其上；`:has([role="dialog"])` 豁免必须**同时**
+  归位 `z-index:auto` 与 `isolation:auto`——钉着 z-index 的列仍是层叠上下文，对话框会困在列里被
+  overlay 压住。验证走 §4.2 mock（类落位 / computed z-index / dialog 豁免往返）+ §4.3 真机 A/B
+  （旧包复现悬出段发糊、新包清晰，两次截图对照）。
 
 ### G. 认领 / 误认领（谁的表面归谁）
 
@@ -158,7 +172,7 @@ npm test                            # 真起宿主半侧，跑「写盘 → 重�
   `[data-slot="conversation.session.header.utilities"]` 里 → 认领条件必须是"body 直接子级 **或**
   头部锚点后代"，只认 body 就会漏。
 - **启发式有代价就写清楚**：`:has([class*="_danger"])` 近似"会话行菜单"，也会命中 `TaskMenu` 的
-  危险行；这是已知取舍，别当 bug 乱改。
+  危险行；这是已知取舍，不应作为缺陷修改。
 - **保持原样的豁免**：宿主刻意不透明的东西（安装对话框的 `fieldset[data-install-registry]`）要并入
   `applyExemptDefaults` 的钉组（含子树，因为自定义属性只向下传）。
 
@@ -175,7 +189,7 @@ teardown 之后要有 `active` 闸门，防止已排队的回调把标记再写�
 档位**无条件返回 true**——那是"每次 read 换一张"的实现方式，接进 tick 就成了壁纸每 30 秒自动切换
 （v0.4.1 修：`shared/rotation.ts: rotationAdvancesLive()` 划定只有时间档位参与活推进，`reload`
 只在 read / 手动按钮 / boot 回退里推进）。tick 的其他触发源（系统明暗变化、开启昼夜定时）同理会被
-放大，修这类问题要连调用图一起看，不止 setInterval 那一处。
+放大，修这类问题要连调用图一起看，不止 `setInterval` 一处。
 
 ### I. 一个表面只涂一次 alpha
 
@@ -193,11 +207,11 @@ teardown 之后要有 `active` 闸门，防止已排队的回调把标记再写�
 - 方向判定不要用真值短路（v0.2.5：`scheme='light'` 是真值，导致强制亮暗都走深色分支）。
 - 亮度度量统一 Rec.709（壁纸判定与自动取色同一把尺子）。
 - 有主题色时字体与表面方向由**主题色明度**驱动；无主题色时才由壁纸亮度驱动 —— 两者要分开，
-  别把壁纸 verdict 当主题方向用。
+  不得将壁纸判定用作主题方向。
 - 强制方向与主题色明度冲突时，明度镜像映射进目标区间再建令牌，色相/饱和度不变（v0.2.5）。
 - **条带/铬用墨的冲突要交给用户**：宿主标签色跟随主题，而条带是"主题色 × 侧栏透明度 × 壁纸"，
   低透明度下可能反向。v0.3.8 用 composite 推导修好"白按钮看不见"，v0.3.9 就收到 issue #30
-  "暗主题下应用/编辑变黑"—— 同一场景两种诉求，所以做成「标题条带文字」四态选项，不再猜赢家。
+  "暗主题下应用/编辑变黑"—— 同一场景两种诉求，所以做成「标题条带文字」四态选项，不再猜测赢家。
 
 ### K. 二进制、限额与文件路径
 
@@ -214,8 +228,8 @@ teardown 之后要有 `active` 闸门，防止已排队的回调把标记再写�
   （`pointer-events:none`，完全不声明 app-region）。
 - 宿主蒙版故意从标题栏下方开始（`--dsh-frame-chrome-top`），条带是插件自绘 → 模态时自己变暗（#29④）。
 - 原生最小化/最大化/关闭块**没有页面侧 IPC**：唯一杠杆是 preload 的探针 `<span>`，它读
-  `--dsw-specific-sidebar-fill` 与 `--dsw-alias-label-primary` → 探针喂 `transparent` 让 Windows
-  别自绘背景；**滑块动时要重写规则文本**，探针才重新量得到。
+  `--dsw-specific-sidebar-fill` 与 `--dsw-alias-label-primary` → 探针喂 `transparent` 以阻止
+  Windows 自绘背景；**滑块动时要重写规则文本**，探针才重新量得到。
 - 分段依据是宿主发在帧元素上的 `--dsh-windows-sidebar-width`（Windows only），折叠时宽度 0 自动整条交还。
 
 ### M. 平台 / 宿主形态差异
@@ -233,7 +247,7 @@ teardown 之后要有 `active` 闸门，防止已排队的回调把标记再写�
   宿主 adoption 后也要重发。
 - 深色标记用插件专用值 `body[data-ds-dark-theme="dsh-any-background"]`，不要复用宿主的属性值
   （`e58e9a4`：选择器与设置值不一致 → 深色渐变根本不生效）。
-- 令牌要写成样式表规则而不是 `body.style`，因为宿主会在启动时清 body 内联样式（v0.3.x 注释）。
+- 令牌要写成样式表规则而不是 `body.style`：宿主启动时会清 body 内联样式。
 
 ### O. 生命周期与卸载残留（新增写入就必须新增清理）
 
@@ -248,20 +262,21 @@ teardown 之后要有 `active` 闸门，防止已排队的回调把标记再写�
 ### P. 启动时序与首屏
 
 - boot 时持久化状态还没加载完，**不要**用 `rColor()` 的默认值发令牌（会闪一下默认色）；
-  透明度可以无条件发，颜色必须等有条件（v0.3.x 的 `applyWp` 注释）。
+  透明度可以无条件发，颜色必须等有条件（见 `applyWp` 注释）。
 - 到期轮换要在 `read` 里由服务端直接推进，首屏就是新壁纸，不做二次刷新（v0.2.5）。
-- 静态表在版本判定落地前是 `unknown` 版（DOM 仲裁），落地后整表替换 —— 别把两套都留在页面上。
+- 静态表在版本判定落地前是 `unknown` 版（DOM 仲裁），落地后整表替换 —— 两套不得同时存在于页面。
 - 页面直接读 `cfg` 的地方要订阅 `metaRev`，否则预设/导入/Profile 改完界面还显示旧值（v0.2.10）。
 
 ### Q. 插件互不越界
 
 不抢共享通道（§B）、不写别人的 slot、不假设别的插件的 DOM 或加载顺序；`dsh-better-sidebar` 是
 可选 peer，功能要探测它在不在（`startBetterSidebarWatch`）。宿主对不兼容插件是"跳过并警告"，
-我们宁可少功能也不能带崩宿主 —— 这条也是 §C 不收窄门禁的另一个理由。
+宁可放弃功能，也不可将宿主带崩 —— 这条也是 §C 不收窄门禁的另一个理由。
 **插件自己抛出去的东西会带走宿主**：五页都包在 `components/ErrorBoundary.tsx` 里
 （`ThemeSection.tsx` 用 `<ErrorBoundary t={t}>` 包住），新增页面/入口必须留在它内部；
 宿主扩展点（`sidebarRightTabs` / `slots.contribute`）的返回值要判空，注册不上就静默不注册，
-不要 throw。
+不要 throw。层级上本插件从不写第三方节点的 z-index，与其他插件的层级冲突只可能经由
+类形状认领发生（§2-G）；插件自有 UI（toast 10001 / 遮罩 999999）必须压过宿主全部模态。
 
 ### R. 性能
 
@@ -273,6 +288,59 @@ observer 回调必须合批 + 早退（`needsPartsPass` + 值签名 + 目标身�
 
 README 双语；changelog 只留最近两版；`dshReleases` 记录"怎么验证的"（逐 tag diff / 上手实测）；
 release 标题与提交主题一致；issue 回复要带根因 + 验证数字 + "重启宿主"提醒。
+
+### T. 层级阶梯与提层（插件写入 × 宿主自升层级 × 其他插件）
+
+宿主侧的 z-index 阶梯（0.2.1-rc.3 产物逐条核实；`overlayLayer` 一条在 0.2.0-rc.1 逐字节一致）：
+
+| 层 | z | 位置 |
+|---|---|---|
+| dockkit 拖拽 scrim / hint | 10 | dockkit 面板内 |
+| 会话标题行（插件提层，§2-F issue #26） | 10 | 中心列内 |
+| 列拖拽把手 `.handle` | 11 | frame 直属 |
+| `leadingSeat`（shell.leading 槽，平台相关挂载） | 15 | frame 直属 |
+| `.overlayLayer[data-shell-overlay]`（shell.overlay 槽） | 20 | frame 直属 |
+| dockkit 标签菜单 | 70 | |
+| 菜单列表 / HoverCard / 就地 Tooltip（子菜单 101） | 100 | portal 或就地 |
+| 模态 root / backdrop | 1000 | |
+| toast、portal 模式 Tooltip | 1100 | body |
+| 插件自有设置 UI（toast 10001 / 遮罩 999999） | — | 自有节点，必须压过宿主全部模态 |
+
+本插件对 z 的全部写入只有五处，安全论证各自成立：
+
+1. 壁纸层 `wpEl` 与 `body[data-ds-dark-theme]::before` 渐变：z -1，body 层最底。
+2. 各磨砂垫层：z -1，由宿主的 `isolation:isolate` 关在所属表面内（§2-F）。
+3. `HEADER_BAR_RULE` 行提层 z-10（§2-F，issue #26）。
+4. `dab-part-blur-side` 磨砂侧栏列提层 z-1（§2-F，issue #32）——**提层上限是 1**：必须留在
+   handle 11 / leadingSeat 15 / overlay 20 之下，body 级 portal 全部在其上。网格轨道几何不重叠，
+   提层只改悬出列边缘的浮层归属。
+5. unknown 适配层的右栏 promotion `z-26/40`：仅当 DOM 无 dockkit 标记才生效
+   （`:not(:has([data-dockkit-host]…))`）。受支持的全部 release 都带 dockkit，故在已验证宿主上
+   恒为惰性；若未来某 release 去掉 dockkit，这条会越过 overlay(20)，必须重新核对。
+
+**检查路径**（新增任何 z-index 或提层）：
+① 对照上表，新值必须落在"需要压过的最高层"与"必须让位的最低层"之间；
+② 带提层的元素若含 `:has([role="dialog"])` 豁免，z-index 与 isolation 必须**同进同退**
+（§2-F v0.4.2）；
+③ 盘点被提层列内的**就地（非 portal）浮层**（§2-G）：提层使整列 subtree 移到相邻列之上，
+相邻列的就地浮层反向被压，两侧都要过一遍；
+④ 不写第三方节点的 z-index；与其他插件的层级冲突只可能经由类形状认领发生（§2-G）。
+
+### U. 状态所有权与持久化真相（v0.4.0 批次，六种故障模式）
+
+**症状**：设置在会话内正确、重启后回跳；列表项复活；文件名与内容对不上；超大上传静默无操作。
+
+| 故障模式 | 检查路径 |
+|---|---|
+| 浅拷贝别名：失败路径返回的 shallow copy 被调用方原地增删，污染模块级默认 | 返回嵌套结构一律 `structuredClone`；拿到引用即可能成为写入者 |
+| 缓存与磁盘分叉：写失败后按 mtime 的内存缓存仍声称已是最新 | 缓存有效性的唯一真相是磁盘；写前丢缓存，重试成功后再建立 |
+| 名称 ≠ 内容：按文件名收养的杂散文件错标 MIME（woff2 被当 ttf 服务） | 类型判定的唯一真相是字节（魔数嗅探），结论落盘 |
+| 输入未验：裸字节上传跳过内容校验 | 与 URL 下载、字体上传共用同一条魔数围栏，拒绝时回传原因 + 限额（§2-K） |
+| 竞态碰撞：同一毫秒生成的文件名互相覆盖 | 并发生成的名字加随机后缀 |
+| 内存态未回写：手动激活只推进内存游标，刷新回跳 | 凡"推进状态"的调用点都走服务端 read-modify-write 落盘 |
+
+实例全部出自 `50cdb5a`（v0.4.0）。防线：`scripts/smoke.mjs` 的落盘往返断言 +
+每种模式各一条负路径用例。
 
 ---
 
@@ -289,6 +357,8 @@ release 标题与提交主题一致；issue 回复要带根因 + 验证数字 + 
 | 取色 / 明暗 | 强制方向 × 主题色明度 × 壁纸 verdict 的 2×2×3 组合；无主题色分支；皮肤注册（§N） |
 | 轮换档位 / 池语义 | 数学只改 `src/shared/rotation.ts`（§0）；给轮换接**新调用点**时逐个数一遍推进者——服务端 `read`、客户端 tick / boot 回退 / 启用开关 / 手动按钮——`reload` 档 `rotationDue` 恒为 true，多接一个就多一处"每次都切"（§2-H v0.4.1） |
 | 上传 / URL 拉取 | 上限与错误回传、MIME 落盘、`revokeObjectURL`、失败不留半个槽位 |
+| 新增 z-index / 提层 | §2-T 阶梯核对：提层上限、dialog 豁免同进同退、被提层列的就地浮层盘点、body 级 portal 次序 |
+| 状态"推进"类改动（游标、缓存、收养） | §2-U 所有权核对：真相在磁盘还是内存、深拷贝、魔数而非文件名、写失败路径 |
 | 新增运行时文件 | `package.json` 的 `files` + `exports`（§0） |
 | `lib/` | 一定要 `npm run bundle`，产物和源码同批提交 |
 
@@ -297,17 +367,19 @@ release 标题与提交主题一致；issue 回复要带根因 + 验证数字 + 
 ## 4. 四条测试路径：能证明什么
 
 1. **`npm test`（宿主半侧真机）** —— 唯一能证明"配置真的落盘、真的读回、Profile 真的带"。
-   它用一个临时 `DSH_HOME` 起真实 `lib/index.js` + 真 HTTP，不碰你的 `~/.dsh`。
+   它用一个临时 `DSH_HOME` 起真实 `lib/index.js` + 真 HTTP，不触碰本机 `~/.dsh`。
    *不能*证明任何视觉 / CSS。
 
 2. **浏览器 mock（file:// 页 + 真实生成样式表）** —— 把 `buildStaticStyles()` 和宿主安装产物里的
    CSS 原文装进同一页，用 `getComputedStyle` 量 computed 值。做法：写一个临时 entry 引
    `styles.ts` / `header-tag.ts` / `wallpaper.ts`，`npx rolldown <entry> -o out.js -f iife -p browser`
-   打成 IIFE 再在 mock 里调用 —— 测的是**真代码**，不是抄一份。
+   打成 IIFE 再在 mock 里调用 —— 测的是**真代码**，而非复制副本。
    能证明：层叠胜负、令牌是否落到 `.material`、类名形状是否匹配、认领后属性是否写上。
    **不能**证明：像素遮挡、模糊的观感、任何需要绘制的东西。
    已知环境限制：内置浏览器视口 0×0 且 `visibilityState=hidden` → 截图 / `elementFromPoint` 不可用，
    **rAF 不触发**（要么先把 rAF 换成 `setTimeout`，要么像 v0.3.9 那样让代码不依赖绘制）。
+   无内置浏览器时，headless Chrome 的 `--dump-dom` 可替代：把结果写进 DOM 再读取，可覆盖
+   本路径的全部用途（v0.4.2 审计即以此完成）。
 
 3. **真机 `dsh web`** —— 唯一能证明"用户拖这个滑块，那块表面真的变了"。
    ```bash
@@ -317,9 +389,11 @@ release 标题与提交主题一致；issue 回复要带根因 + 验证数字 + 
    # web.log 里那行 "dsh web: http://127.0.0.1:<port>/?token=…" 才是可访问地址（裸访问是 401）
    ```
    纪律：① 测前 `cp ~/.dsh/.dsh-any-background-data/theme-config.json` 备份，测后逐字节还原并核对
-   （**拖滑块就是改用户配置**）；② 只杀**自己**起的端口的进程；③ 服务端 9ms 有响应而 CDP 全超时 =
-   浏览器标签页卡死，别误判成插件死循环（拿已提交版本做 A/B 可以区分，v0.3.9 就是这样排除的）；
+   （**拖滑块就是改用户配置**）；② 只终止**自己**启动的端口进程；③ 服务端 9ms 有响应而 CDP 全超时 =
+   浏览器标签页卡死，不要误判为插件死循环（与已提交版本做 A/B 可以区分，v0.3.9 即以此排除）；
    ④ 要看改的是哪张表，读 `style[data-plugin=…]` 系列（§0 末行）。
+   页面内交互（悬停出 tooltip、拖滑块）可用独立 headless Chrome + CDP（`Input.dispatchMouseEvent`）
+   驱动，v0.4.2 的真机 A/B 即以此完成。
 
 4. **桌面版** —— Windows 专属行为（条带、原生按钮区、`--dsh-frame-chrome-top`、app-region）
    只有桌面壳能验。**无法自动化时必须在报告里明说"这条我没跑过"**，不要拿 web 的结果代替。
@@ -327,7 +401,7 @@ release 标题与提交主题一致；issue 回复要带根因 + 验证数字 + 
 **事实来源优先级**（写适配 / 查结构时）：宿主源码对应 tag > 安装产物里的 CSS 原文
 （`versions/<v>/node_modules/.pnpm/@deepseek-ai+dsh-client-ui-*/…/lib/client.js` 内联字符串，
 哈希类名以这里为准）> 规范文档（MDN）> 推断。子代理 / 工具给出的"宿主有这个东西"必须自己 grep
-一遍再动手 —— 本仓库出现过被幻觉出来的宿主 API 和文档路径带偏的情况。
+一遍再动手 —— 本仓库曾出现宿主 API 与文档路径被工具凭空生成的案例。
 
 ---
 
@@ -350,7 +424,7 @@ release 标题与提交主题一致；issue 回复要带根因 + 验证数字 + 
   `theme-config.json`、日志。
 - 已推送的提交不 amend、不强推；要改就新提交。
 - 版本三连：`package.json` version + changelog（两份 README）+ 提交主题里的版本号必须一致；
-  发 release 时标题与提交主题对齐（历史 tag 不全，别假设"每个版本都有 tag"）。
+  发 release 时标题与提交主题对齐（历史 tag 不全，不得假设每个版本都有 tag）。
 - 推送 / 发 release / 关 issue 属于对外动作，未获明确指示不做。
 
 ---
