@@ -325,6 +325,8 @@ export function BackgroundPage({ p, notify }: { p: ThemeSectionProps; notify: (m
               <span className="dab-chip-sep" />
               <button type="button" className={`dab-chip${rotation.interval === 'reload' ? ' is-active' : ''}`}
                 onClick={() => setRotation({ interval: 'reload' })}>{t('rotReload')}</button>
+              <button type="button" className={`dab-chip${rotation.interval === 'hourly' ? ' is-active' : ''}`}
+                onClick={() => setRotation({ interval: 'hourly' })}>{t('rotHourly')}</button>
               <button type="button" className={`dab-chip${rotation.interval === 'daily' ? ' is-active' : ''}`}
                 onClick={() => setRotation({ interval: 'daily' })}>{t('rotDaily')}</button>
               <button type="button" className={`dab-chip${rotation.interval === 'weekly' ? ' is-active' : ''}`}

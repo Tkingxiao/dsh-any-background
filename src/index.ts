@@ -12,12 +12,14 @@
  *                       uploaded to /dsh-any-background/video/upload as raw
  *                       bytes — never base64 through the RPC channel.
  */
-import { access, mkdir, readFile, writeFile, rm, rename, stat } from 'node:fs/promises'
+import { access, copyFile, mkdir, open, readdir, readFile, writeFile, rm, rename, stat } from 'node:fs/promises'
+import { randomUUID } from 'node:crypto'
 import { createReadStream, createWriteStream } from 'node:fs'
 import { Readable } from 'node:stream'
 import { dshHomePath } from '@deepseek-ai/dsh-home-paths'
 import { resolveHostInfo, type HostInfo } from './host-compat/detect'
 import { UNKNOWN_HOST_INFO } from './host-compat/channel'
+import { rotationDue, pickNextRotationIndex } from './shared/rotation'
 
 export const name = 'dsh-any-background'
 export const inject = ['connection', 'webServer']
@@ -34,9 +36,12 @@ const WALLPAPER_ROUTE = '/dsh-any-background/wallpaper'
 const WALLPAPER_UPLOAD_ROUTE = '/dsh-any-background/wallpaper/upload'
 const FONT_ROUTE = '/dsh-any-background/font'
 const FONT_UPLOAD_ROUTE = '/dsh-any-background/font/upload'
+/** Serves one rotation-pool image by name (the export path fetches these). */
+const ROTATION_FILE_ROUTE = '/dsh-any-background/rotation/file'
 const UPLOAD_TMP = 'wallpaper.upload.tmp'
 const VIDEO_UPLOAD_TMP = 'video.upload.tmp'
 const FONT_UPLOAD_TMP = 'font.upload.tmp'
+const VIDEO_DOWNLOAD_TMP = 'video.download.tmp'
 const WALLPAPER_UPLOAD_MAX = 100 * 1024 * 1024
 const VIDEO_UPLOAD_MAX = 2 * 1024 * 1024 * 1024
 // CJK font files routinely reach tens of MB; the cap only guards the drive.
@@ -63,6 +68,21 @@ function videoFileName(mime: string | null): string {
   }
 }
 const VIDEO_CANDIDATES = ['wallpaper.mp4', 'wallpaper.webm', 'wallpaper.ogv', 'wallpaper.mov', 'wallpaper.mkv', 'wallpaper.video']
+
+/** Reverse of videoFileName for the stray-adoption path below: a config that
+ *  lost videoMime would otherwise serve the stored file as
+ *  application/octet-stream, which no <video> element plays. The legacy
+ *  extensionless name keeps null — its container is unknowable from the name. */
+function mimeForVideoFile(name: string): string | null {
+  switch (name) {
+    case 'wallpaper.mp4': return 'video/mp4'
+    case 'wallpaper.webm': return 'video/webm'
+    case 'wallpaper.ogv': return 'video/ogg'
+    case 'wallpaper.mov': return 'video/quicktime'
+    case 'wallpaper.mkv': return 'video/x-matroska'
+    default: return null
+  }
+}
 
 /** Font slot: one font owns the slot, named by format like the video slot. */
 function fontFileName(mime: string | null): string {
@@ -133,7 +153,7 @@ interface RotationItem { file: string; thumb: string }
 interface RotationConfig {
   enabled: boolean
   mode: 'shuffle' | 'order'
-  interval: 'reload' | 'daily' | 'weekly'
+  interval: 'reload' | 'hourly' | 'daily' | 'weekly'
   current: number
   items: RotationItem[]
   lastRotate: string | null
@@ -259,6 +279,22 @@ const fontPathFor = (mime: string | null): string => dshHomePath(DATA_DIR, fontF
 
 const exists = async (p: string): Promise<boolean> => { try { await access(p); return true } catch { return false } }
 
+/** Read a file's first bytes for magic-number sniffing (null when unreadable). */
+const readHead = async (p: string, n: number): Promise<Buffer | null> => {
+  try {
+    const head = Buffer.alloc(n)
+    const fh = await open(p, 'r')
+    try {
+      const { bytesRead } = await fh.read(head, 0, n, 0)
+      return bytesRead === 0 ? null : head.subarray(0, bytesRead)
+    } finally {
+      await fh.close()
+    }
+  } catch {
+    return null
+  }
+}
+
 /** Locate the stored video: the recorded MIME decides the expected name; a
  *  legacy extensionless wallpaper.video is renamed on first access. */
 async function findVideoFile(): Promise<{ path: string; mime: string | null } | null> {
@@ -272,6 +308,20 @@ async function findVideoFile(): Promise<{ path: string; mime: string | null } | 
       // Stray file from a lost config write: adopt it via rename.
       try { await rename(p, expected); return { path: expected, mime: cfg.videoMime } } catch { return null }
     }
+    if (cfg.videoMime === null) {
+      // The config lost the MIME (a corrupt-config reset, a lost write): the
+      // extension decides it and the answer is persisted, so the next lookup
+      // resolves by name instead of serving the file as an octet stream.
+      const mime = mimeForVideoFile(name)
+      if (mime !== null) {
+        const fresh = await readConfig()
+        if (fresh.videoMime !== mime) {
+          fresh.videoMime = mime
+          await writeConfig(fresh)
+        }
+        return { path: p, mime }
+      }
+    }
     return { path: p, mime: cfg.videoMime }
   }
   return null
@@ -281,30 +331,45 @@ function clamp(n: unknown, lo: number, hi: number, def: number): number {
   return typeof n === 'number' && isFinite(n) ? Math.min(hi, Math.max(lo, n)) : def
 }
 
-/** Locate the stored font: the recorded MIME decides the expected name; stray
- *  files from a lost config write are adopted via rename (mirrors the video
- *  slot's recovery). */
+/** Locate the stored font: the recorded MIME decides the expected name. A
+ *  stray from a lost config write (or one whose recorded MIME no longer
+ *  matches the bytes on disk) is adopted by sniffing the file's REAL container
+ *  magic — never by trusting its name: the old name-based rename moved woff2
+ *  bytes into font.ttf, and the next lookup then served them as font/ttf. The
+ *  sniffed answer is renamed into place and persisted, so later lookups
+ *  resolve by name (mirrors the video slot's recovery). */
 async function findFontFile(): Promise<{ path: string; mime: string } | null> {
   const cfg = await readConfig()
-  const mime = cfg.fontMime ?? 'font/ttf'
-  const expected = fontPathFor(mime)
-  if (await exists(expected)) return { path: expected, mime }
+  if (cfg.fontMime !== null) {
+    const expected = fontPathFor(cfg.fontMime)
+    if (await exists(expected)) return { path: expected, mime: cfg.fontMime }
+  }
   for (const name of FONT_CANDIDATES) {
     const p = dshHomePath(DATA_DIR, name)
     if (!(await exists(p))) continue
-    const foundMime = mimeForFontFile(name)
-    try { await rename(p, expected); return { path: expected, mime: foundMime } } catch { return null }
+    const head = await readHead(p, 4)
+    if (head === null) continue
+    const sniffed = sniffFontMime(head)
+    if (sniffed === null) continue
+    const target = fontPathFor(sniffed)
+    try {
+      if (target !== p) {
+        await rm(target, { force: true }) // Windows rename refuses to overwrite
+        await rename(p, target)
+      }
+    } catch {
+      return null
+    }
+    // Record the MIME server-side (mirrors the video slot) so the next lookup
+    // resolves by name instead of re-sniffing.
+    const fresh = await readConfig()
+    if (fresh.fontMime !== sniffed) {
+      fresh.fontMime = sniffed
+      await writeConfig(fresh)
+    }
+    return { path: target, mime: sniffed }
   }
   return null
-}
-
-function mimeForFontFile(name: string): string {
-  switch (name) {
-    case 'font.woff2': return 'font/woff2'
-    case 'font.woff': return 'font/woff'
-    case 'font.otf': return 'font/otf'
-    default: return 'font/ttf'
-  }
 }
 
 async function fontUrl(): Promise<string | null> {
@@ -519,7 +584,7 @@ function normalizeRotation(raw: unknown): RotationConfig {
   return {
     enabled: r.enabled === true,
     mode: r.mode === 'order' ? 'order' : 'shuffle',
-    interval: r.interval === 'reload' || r.interval === 'weekly' ? r.interval : 'daily',
+    interval: r.interval === 'reload' || r.interval === 'hourly' || r.interval === 'weekly' ? r.interval : 'daily',
     current: typeof r.current === 'number' && isFinite(r.current) && r.current >= 0 ? Math.floor(r.current) : 0,
     items,
     lastRotate: typeof r.lastRotate === 'string' ? r.lastRotate : null,
@@ -538,9 +603,16 @@ function normalizeSchedule(raw: unknown): ScheduleConfig {
   }
 }
 
+// Memoized per process: every readConfig/writeConfig call used to re-issue
+// the recursive mkdir syscall, and readConfig sits under every video Range
+// seek. A failure stays un-memoized so a later call can retry — a transient
+// EACCES must not brick persistence for the whole session.
+let dirEnsured = false
 async function ensureDir(): Promise<void> {
+  if (dirEnsured) return
   try {
     await mkdir(dataDir(), { recursive: true })
+    dirEnsured = true
   } catch (e) {
     console.warn(`dsh-any-background: cannot create data dir "${dataDir()}"`, e)
   }
@@ -580,9 +652,12 @@ async function readConfig(): Promise<ThemeConfig> {
   } catch {
     // Absent or momentarily unreadable: serve the defaults and leave whatever
     // is on disk untouched (a file that exists also keeps `firstRun` false, so
-    // nothing overwrites it either).
+    // nothing overwrites it either). structuredClone, not a spread: callers
+    // mutate the returned object's nested arrays (rotation add/remove), and a
+    // shallow copy shares those arrays with DEFAULT_CONFIG itself — the
+    // module-level defaults would then carry ghost pool items forever.
     dropConfigCache()
-    return { ...DEFAULT_CONFIG }
+    return structuredClone(DEFAULT_CONFIG)
   }
   try {
     const parsed = normalizeConfig(JSON.parse(text))
@@ -602,7 +677,7 @@ async function readConfig(): Promise<ThemeConfig> {
       // Unmovable file: the defaults below are still the right answer.
     }
     dropConfigCache()
-    return { ...DEFAULT_CONFIG }
+    return structuredClone(DEFAULT_CONFIG)
   }
 }
 
@@ -646,15 +721,19 @@ function warnUnknownConfigKeys(raw: unknown, normalized: ThemeConfig): void {
 // filesystem, so the reader always sees either the old or the new full file.
 async function writeConfig(config: ThemeConfig): Promise<boolean> {
   await ensureDir()
+  // Drop the cache BEFORE writing: callers mutate the object readConfig handed
+  // out (rotation add/remove, the MIME write-backs below), so a FAILED write
+  // would leave the cache describing changes the disk never got — and with the
+  // file's mtime unchanged (or under the coarse mtime granularity some
+  // filesystems hand back for back-to-back writes), that stale entry keeps
+  // hitting until the next successful write.
+  dropConfigCache()
   const tmp = `${configPath()}.tmp`
   try {
     const normalized = normalizeConfig(config)
     warnUnknownConfigKeys(config, normalized)
     await writeFile(tmp, JSON.stringify(normalized, null, 2), 'utf8')
     await rename(tmp, configPath())
-    // mtime would catch this too, but not under the coarse mtime granularity
-    // some filesystems hand back for back-to-back writes.
-    dropConfigCache()
     return true
   } catch (e) {
     console.error(`dsh-any-background: failed to write "${CONFIG_FILE}"`, e)
@@ -805,7 +884,9 @@ async function handleRotationAdd(payload: unknown): Promise<{ ok: boolean; index
   await ensureRotationDir()
   const cfg = await readConfig()
   if (cfg.rotation.items.length >= MAX_ROTATION_ITEMS) return { ok: false, error: 'too many items' }
-  const file = `wp-${Date.now().toString(36)}.${imageExtFor(sniffImageMime(buf))}`
+  // Millisecond timestamp + random suffix: two tabs adding in the same
+  // millisecond must not overwrite each other's pool file.
+  const file = `wp-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}.${imageExtFor(sniffImageMime(buf))}`
   try {
     await writeFile(dshHomePath(DATA_DIR, ROTATION_DIR, file), buf)
   } catch (e) {
@@ -844,19 +925,87 @@ async function handleRotationSet(payload: unknown): Promise<{ ok: boolean; wallp
   const i = Math.floor(idx)
   const item = cfg.rotation.items[i]
   if (item === undefined) return { ok: false, error: 'not found' }
-  let buf: Buffer
   try {
-    buf = await readFile(dshHomePath(DATA_DIR, ROTATION_DIR, item.file))
-  } catch {
-    return { ok: false, error: 'file missing' }
-  }
-  try {
-    await writeFile(wallpaperPath(), buf)
+    // copyFile streams kernel-side; the old read-into-memory/write path put
+    // every multi-MB pool image through the heap on each activation.
+    await copyFile(dshHomePath(DATA_DIR, ROTATION_DIR, item.file), wallpaperPath())
   } catch (e) {
     console.error('dsh-any-background: failed to activate a rotation wallpaper', e)
+    const missing = typeof e === 'object' && e !== null && (e as { code?: string }).code === 'ENOENT'
+    return { ok: false, error: missing ? 'file missing' : 'write failed' }
+  }
+  // Persist the cursor the way advanceRotationIfDue does — merged into the
+  // FRESHEST on-disk config so a slider save landing inside this window is not
+  // clobbered. Manual activation mirrors the client's own semantics: only
+  // current moves; lastRotate fills in when it was never set, so a manual pick
+  // does not reset the daily/weekly cadence clock. A failed persist only
+  // re-opens the reload race the client's debounced save already closes — the
+  // wallpaper slot is switched either way, so this must not fail the response.
+  try {
+    const fresh = await readConfig()
+    if (fresh.rotation.items[i] !== undefined) {
+      const merged: ThemeConfig = {
+        ...fresh,
+        rotation: { ...fresh.rotation, current: i, lastRotate: fresh.rotation.lastRotate ?? new Date().toISOString() },
+      }
+      if (!(await writeConfig(merged))) {
+        console.warn('dsh-any-background: rotation cursor did not persist (the client save will catch up)')
+      }
+    }
+  } catch { /* best effort — see above */ }
+  return { ok: true, wallpaperUrl: WALLPAPER_ROUTE }
+}
+
+/** Replace the whole rotation pool from an imported theme (v3 export): each
+ *  entry's bytes are written under the name the exported config's metadata
+ *  already points at, files the imported pool does not reference are dropped,
+ *  and the config's item list is rebuilt. Wholesale replacement matches import
+ *  semantics — the rotation state lands exactly as it left the source machine
+ *  (a v2 export could not carry pool bytes, so its entries pointed at files
+ *  that never travelled and every activation failed with 'file missing'). */
+async function handleRotationRestore(payload: unknown): Promise<{ ok: boolean; items?: RotationItem[]; error?: string }> {
+  const raw = (payload as { items?: unknown } | null)?.items
+  if (!Array.isArray(raw)) return { ok: false, error: 'invalid payload' }
+  const entries: Array<{ file: string; thumb: string; buf: Buffer }> = []
+  for (const it of raw.slice(0, MAX_ROTATION_ITEMS)) {
+    const e = (it ?? {}) as { file?: unknown; thumb?: unknown; dataUrl?: unknown }
+    const file = safeRotationFile(e.file)
+    if (file === null) return { ok: false, error: 'invalid file name' }
+    if (entries.some(x => x.file === file)) continue
+    const buf = decodeImageDataUrl(e.dataUrl)
+    if (buf === null) return { ok: false, error: 'invalid image' }
+    entries.push({ file, thumb: sanitizeThumb(e.thumb), buf })
+  }
+  await ensureDir()
+  await ensureRotationDir()
+  if (await exists(rotationDir())) {
+    for (const name of await readdir(rotationDir())) {
+      if (!entries.some(x => x.file === name)) {
+        await rm(dshHomePath(DATA_DIR, ROTATION_DIR, name), { force: true })
+      }
+    }
+  }
+  try {
+    for (const e of entries) await writeFile(dshHomePath(DATA_DIR, ROTATION_DIR, e.file), e.buf)
+  } catch (err) {
+    console.error('dsh-any-background: failed to restore the rotation pool', err)
     return { ok: false, error: 'write failed' }
   }
-  return { ok: true, wallpaperUrl: WALLPAPER_ROUTE }
+  // Merge the rebuilt item list into the FRESHEST on-disk config — the same
+  // read-modify-write idiom as the other rotation handlers, so a concurrent
+  // slider save cannot be clobbered. The cursor clamps into the new range.
+  const items = entries.map(e => ({ file: e.file, thumb: e.thumb }))
+  const fresh = await readConfig()
+  const merged: ThemeConfig = {
+    ...fresh,
+    rotation: {
+      ...fresh.rotation,
+      current: Math.min(fresh.rotation.current, Math.max(0, items.length - 1)),
+      items,
+    },
+  }
+  if (!(await writeConfig(merged))) return { ok: false, error: 'config write failed' }
+  return { ok: true, items }
 }
 
 async function videoUrl(): Promise<string | null> {
@@ -901,7 +1050,7 @@ async function writeVideoFromUrl(url: string | null): Promise<{ ok: boolean; mim
   const declared = Number(res.headers.get('content-length') ?? '')
   if (Number.isFinite(declared) && declared > VIDEO_FETCH_MAX) return { ok: false, error: 'too large' }
   await ensureDir()
-  const tmp = dshHomePath(DATA_DIR, 'video.download.tmp')
+  const tmp = dshHomePath(DATA_DIR, VIDEO_DOWNLOAD_TMP)
   const target = videoPathFor(mime)
   try {
     if (res.body === null) return { ok: false, error: 'empty response' }
@@ -1158,15 +1307,14 @@ async function serveWallpaper(req: any, res: any): Promise<void> {
       res.end()
       return
     }
-    // readFile has no length option; stream just the first 16 bytes so MIME
-    // sniffing never pulls a multi-MB wallpaper into memory.
-    const head = await new Promise<Buffer>((resolve, reject) => {
-      const chunks: Buffer[] = []
-      const s = createReadStream(wallpaperPath(), { start: 0, end: 15 })
-      s.on('data', (c: Buffer) => chunks.push(c))
-      s.on('end', () => resolve(Buffer.concat(chunks)))
-      s.on('error', reject)
-    })
+    // Stream just the first 16 bytes so MIME sniffing never pulls a multi-MB
+    // wallpaper into memory.
+    const head = await readHead(wallpaperPath(), 16)
+    if (head === null) {
+      res.writeHead(404)
+      res.end('no wallpaper stored')
+      return
+    }
     const mime = sniffImageMime(head)
     res.writeHead(200, { 'Content-Type': mime, 'Content-Length': st.size, 'Cache-Control': 'no-store' })
     if (req.method === 'HEAD') { res.end(); return }
@@ -1227,6 +1375,18 @@ async function handleWallpaperUpload(req: any, res: any): Promise<void> {
           res.end(JSON.stringify({ ok: false, error: 'empty upload' }))
           return
         }
+        // The declared Content-Type said image/*, but the bytes must agree —
+        // the same fence as writeWallpaperFromUrl and the font upload, so a
+        // mislabeled or hostile body is refused instead of persisted (the
+        // serve route would re-sniff it later, but the stored slot would
+        // render as a broken image either way).
+        const head = await readHead(tmp, 12)
+        if (head === null || !isImageBytes(head)) {
+          await rm(tmp, { force: true })
+          res.writeHead(415, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ ok: false, error: 'not an image' }))
+          return
+        }
         // Windows rename refuses to overwrite (EEXIST): drop the old one first.
         await rm(wallpaperPath(), { force: true })
         await rename(tmp, wallpaperPath())
@@ -1241,6 +1401,41 @@ async function handleWallpaperUpload(req: any, res: any): Promise<void> {
   } catch (e) {
     console.error('dsh-any-background: failed to accept the wallpaper upload', e)
     try { res.writeHead(500); res.end() } catch { /* response already sent */ }
+  }
+}
+
+/** Serve one rotation-pool image by its `?f=<name>` query. The name goes
+ *  through the same pattern fence the config sanitizer uses (bare file name
+ *  with a known image extension), so there is no path traversal; unfenced like
+ *  the other image serve routes (an <img> fetch carries no auth headers). */
+async function serveRotationFile(req: any, res: any): Promise<void> {
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    res.writeHead(405)
+    res.end()
+    return
+  }
+  let name: string | null = null
+  try {
+    name = safeRotationFile(new URL(req.url ?? '/', 'http://localhost').searchParams.get('f'))
+  } catch {
+    name = null
+  }
+  if (name === null) {
+    res.writeHead(400)
+    res.end('invalid file name')
+    return
+  }
+  try {
+    const p = dshHomePath(DATA_DIR, ROTATION_DIR, name)
+    const st = await stat(p)
+    const head = await readHead(p, 12)
+    if (head === null) throw new Error('unreadable')
+    res.writeHead(200, { 'Content-Type': sniffImageMime(head), 'Content-Length': st.size, 'Cache-Control': 'no-store' })
+    if (req.method === 'HEAD') { res.end(); return }
+    createReadStream(p).pipe(res)
+  } catch {
+    res.writeHead(404)
+    res.end('no such rotation image')
   }
 }
 
@@ -1381,46 +1576,24 @@ const NS = 'dshAnyBackground'
 const RPC_CHANNEL = '/dsh-any-background'
 const RPC_BODY_MAX = 300 * 1024 * 1024
 
-/** ISO week key — mirrors the client's rotationDue so daily/weekly cadence
- *  decisions agree across both halves. */
-function isoWeekKey(d: Date): string {
-  const t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()))
-  const day = t.getUTCDay() || 7
-  t.setUTCDate(t.getUTCDate() + 4 - day)
-  const yearStart = new Date(Date.UTC(t.getUTCFullYear(), 0, 1))
-  const week = Math.ceil(((t.getTime() - yearStart.getTime()) / 86400000 + 1) / 7)
-  return `${t.getUTCFullYear()}-W${week}`
-}
-
 /** Advance the rotation pool when its cadence is due: pick the next item,
  *  copy it over the active wallpaper slot, and persist the rotation state.
  *  Runs inside `read` so a reload restores the NEW wallpaper directly — the
  *  old one never reaches the screen. The client's maybeRotate stays as a
- *  fallback and skips when this already advanced (the `rotated` flag). */
+ *  fallback and skips when this already advanced (the `rotated` flag).
+ *  The due/next math is the SHARED implementation (`src/shared/rotation.ts`)
+ *  so both halves can never disagree on a day/week boundary. */
 async function advanceRotationIfDue(): Promise<boolean> {
   const cfg = await readConfig()
   const rot = cfg.rotation
-  if (!rot.enabled || rot.items.length === 0) return false
+  if (!rotationDue(rot)) return false
   const now = new Date()
-  const last = rot.lastRotate !== null ? new Date(rot.lastRotate) : null
-  const due = rot.interval === 'reload'
-    || last === null || isNaN(last.getTime())
-    || (rot.interval === 'daily'
-      ? last.toDateString() !== now.toDateString()
-      : isoWeekKey(last) !== isoWeekKey(now))
-  if (!due) return false
-  const n = rot.items.length
-  let idx = rot.current
-  if (rot.mode === 'shuffle' && n > 1) {
-    while (idx === rot.current) idx = Math.floor(Math.random() * n)
-  } else {
-    idx = (rot.current + 1) % n
-  }
+  const idx = pickNextRotationIndex(rot)
   const item = rot.items[idx]
   if (item === undefined) return false
   try {
-    const buf = await readFile(dshHomePath(DATA_DIR, ROTATION_DIR, item.file))
-    await writeFile(wallpaperPath(), buf)
+    // copyFile streams kernel-side (see handleRotationSet).
+    await copyFile(dshHomePath(DATA_DIR, ROTATION_DIR, item.file), wallpaperPath())
   } catch (e) {
     console.error('dsh-any-background: failed to advance the rotation pool', e)
     return false
@@ -1459,16 +1632,20 @@ async function handleRpcMethod(
         const rotated = await advanceRotationIfDue()
         // Image, video and font all travel as serve URLs, never as bytes.
         const config = await readConfig()
-        // First run: no theme-config.json has ever been written. Materialize
-        // the defaults on disk right away instead of leaving the install in a
-        // "nothing persisted yet" limbo — the client also re-reads once on this
-        // flag so the restored appearance comes from a file that really exists.
+        // First run: no theme-config.json has ever been written. The CLIENT
+        // owns the first persist — it writes the browser half's full default
+        // set and re-reads once on this flag. The server used to write its own
+        // defaults here too, which made every fresh install do two full-config
+        // writes before the first paint finished.
         const firstRun = !(await exists(configPath()))
-        if (firstRun) await writeConfig(config)
+        // The three slot probes are independent — resolve them concurrently
+        // instead of paying three sequential stat/read round-trips. (The locals
+        // cannot reuse the probe function names `videoUrl`/`fontUrl`.)
+        const [wpServeUrl, vidServeUrl, fntServeUrl, host] = await Promise.all([wallpaperServeUrl(), videoUrl(), fontUrl(), hostInfo])
         // `host` is the front door's verdict; the client picks a per-version
         // adapter from it and lets the DOM arbitrate when the release is
         // undetermined. See `host-compat/`.
-        return { ok: true, value: { config, wallpaperUrl: await wallpaperServeUrl(), videoUrl: await videoUrl(), fontUrl: await fontUrl(), rotated, firstRun, host: await hostInfo } }
+        return { ok: true, value: { config, wallpaperUrl: wpServeUrl, videoUrl: vidServeUrl, fontUrl: fntServeUrl, rotated, firstRun, host } }
       }
       case 'writeConfig':
         return { ok: true, value: await writeConfig((payload as { config?: unknown } | null)?.config as ThemeConfig ?? {}) }
@@ -1486,6 +1663,8 @@ async function handleRpcMethod(
         return { ok: true, value: await handleRotationRemove(payload) }
       case 'rotationSet':
         return { ok: true, value: await handleRotationSet(payload) }
+      case 'rotationRestore':
+        return { ok: true, value: await handleRotationRestore(payload) }
       case 'removeFont':
         return { ok: true, value: await removeFontFile() }
       default:
@@ -1496,7 +1675,61 @@ async function handleRpcMethod(
   }
 }
 
+// ── Startup sweep ─────────────────────────────────────────────────────────────
+// Crash leftovers and orphans the write paths cannot clean themselves:
+//   · *.upload.tmp / video.download.tmp — a killed process leaves them behind
+//     (the failure paths only run while the process is alive);
+//   · theme-config.json.corrupt-<ts> — archived bad configs accumulate
+//     forever; keep the newest few for manual recovery, drop the rest;
+//   · rotation/ files the config no longer references — a pool write whose
+//     config write failed (or a corrupt-config reset) strands them permanently.
+// The sweep runs only at plugin load, before any user action. An unreferenced
+// rotation file must also be older than the grace window, so a pool add whose
+// config write is still in flight on another tab never loses its bytes.
+const KEEP_CORRUPT_ARCHIVES = 3
+const ORPHAN_GRACE_MS = 10 * 60 * 1000
+
+async function sweepDataDir(): Promise<void> {
+  try {
+    const entries = await readdir(dataDir())
+    for (const name of entries) {
+      if (name === UPLOAD_TMP || name === VIDEO_UPLOAD_TMP || name === FONT_UPLOAD_TMP || name === VIDEO_DOWNLOAD_TMP) {
+        await rm(dshHomePath(DATA_DIR, name), { force: true })
+      }
+    }
+    // Newest-first by mtime; everything past the keep-count goes.
+    const corrupts: Array<{ name: string; mtime: number }> = []
+    for (const name of entries) {
+      if (!/^theme-config\.json\.corrupt-\d+$/.test(name)) continue
+      try {
+        const st = await stat(dshHomePath(DATA_DIR, name))
+        corrupts.push({ name, mtime: st.mtimeMs })
+      } catch { /* vanished mid-sweep */ }
+    }
+    corrupts.sort((a, b) => b.mtime - a.mtime)
+    for (const c of corrupts.slice(KEEP_CORRUPT_ARCHIVES)) {
+      await rm(dshHomePath(DATA_DIR, c.name), { force: true })
+    }
+    if (await exists(rotationDir())) {
+      const referenced = new Set((await readConfig()).rotation.items.map(it => it.file))
+      const now = Date.now()
+      for (const name of await readdir(rotationDir())) {
+        if (referenced.has(name)) continue
+        const p = dshHomePath(DATA_DIR, ROTATION_DIR, name)
+        try {
+          if (now - (await stat(p)).mtimeMs < ORPHAN_GRACE_MS) continue
+        } catch { continue }
+        await rm(p, { force: true })
+      }
+    }
+  } catch {
+    // A sweep failure is never worth failing the boot over.
+  }
+}
+
 export function apply(ctx: any): void {
+  // Clean crash leftovers before anything else touches the data dir.
+  void sweepDataDir()
   // The host release is decided once, here, from the anchor the running app was
   // composed with (`installAnchor` is that app's own package.json). A detection
   // that throws must not take the `read` RPC down with it — that is the call the
@@ -1617,6 +1850,10 @@ export function apply(ctx: any): void {
     webCtx.effect(
       () => webCtx.webServer.register({ kind: 'exact', path: WALLPAPER_UPLOAD_ROUTE, handler: fenceUpload(handleWallpaperUpload) }),
       'dsh-any-background: wallpaper upload route',
+    )
+    webCtx.effect(
+      () => webCtx.webServer.register({ kind: 'prefix', path: ROTATION_FILE_ROUTE, handler: serveRotationFile }),
+      'dsh-any-background: rotation file route',
     )
     webCtx.effect(
       () => webCtx.webServer.register({ kind: 'prefix', path: FONT_ROUTE, handler: serveFont }),

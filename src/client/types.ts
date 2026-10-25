@@ -165,7 +165,7 @@ export interface RotationItem {
 export interface RotationConfig {
   enabled: boolean
   mode: 'shuffle' | 'order'
-  interval: 'reload' | 'daily' | 'weekly'
+  interval: 'reload' | 'hourly' | 'daily' | 'weekly'
   /** Index of the item currently active. */
   current: number
   items: RotationItem[]
@@ -357,6 +357,10 @@ export interface ThemeSectionProps {
   applyProfile: (id: string) => boolean
   /** Delete a saved profile by id. */
   deleteProfile: (id: string) => boolean
+  /** Rename a saved profile by id. */
+  renameProfile: (id: string, name: string) => boolean
+  /** Duplicate a saved profile under a fresh id (copy of name + appearance). */
+  duplicateProfile: (id: string) => boolean
   /** Apply a built-in preset's appearance bundle. */
   applyPreset: (appearance: ProfileAppearance) => void
   /** Force the interface scheme ('auto' derives it from the color lightness). */

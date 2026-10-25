@@ -61,6 +61,7 @@
  */
 
 import { hostAdapter } from './host-compat/capabilities'
+import { watchDom } from './dom-watch'
 
 /** Marker attribute the stylesheet keys on. */
 export const HEADER_POPOVER_ATTR = 'data-dsh-any-header-popover'
@@ -111,7 +112,6 @@ function isHeaderSurface(el: Element): boolean {
   return el.parentElement === document.body || el.closest(headerSlotAnchors()) !== null
 }
 
-let observer: MutationObserver | null = null
 let pending: Promise<void> | null = null
 /** False once the effect is torn down, so a pass already queued on the microtask queue
  *  cannot re-mark a popover after the teardown cleared it. */
@@ -161,19 +161,13 @@ export function startHeaderPopoverTagging(): () => void {
   if (typeof MutationObserver === 'undefined' || typeof document === 'undefined') return () => {}
   active = true
   refreshHeaderPopovers()
-  observer = new MutationObserver(schedule)
-  // Attribute + childList across the body subtree: a popover mounting and an
-  // `aria-expanded` flipping both land here. Character data is irrelevant.
-  observer.observe(document.body, {
-    childList: true,
-    subtree: true,
-    attributes: true,
-    attributeFilter: ['aria-expanded'],
-  })
+  // The shared body observer (dom-watch) carries exactly the options this watch
+  // needs: childList across the subtree (a popover mounting) plus `aria-expanded`
+  // flips (a trigger opening). Character data is irrelevant.
+  const dispose = watchDom(() => schedule())
   return () => {
     active = false
-    observer?.disconnect()
-    observer = null
+    dispose()
     for (const el of document.querySelectorAll(`[${HEADER_POPOVER_ATTR}]`)) {
       el.removeAttribute(HEADER_POPOVER_ATTR)
     }

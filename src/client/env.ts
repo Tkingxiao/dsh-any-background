@@ -8,6 +8,7 @@
  * verdict is sticky-true for the session: whether a detected plugin's surface
  * is currently collapsed must not hide the settings that govern it.
  */
+import { watchDom } from './dom-watch'
 
 /** Persistent container + surfaces dsh-better-sidebar mounts when loaded.
  *  `[data-dsh-better-sidebar]` is the plugin's host wrapper — always appended
@@ -59,9 +60,12 @@ export function subscribe(cb: () => void): () => void {
  *  unsubscribe for plugin teardown. */
 export function startBetterSidebarWatch(): () => void {
   sync()
-  const observer = new MutationObserver(sync)
-  observer.observe(document.body, { childList: true })
-  return () => observer.disconnect()
+  // The shared body observer (dom-watch) watches the whole subtree; this probe
+  // only needs ROOT-level mounts (the markers are body children), so filter to
+  // body-targeted childList records exactly like the old dedicated observer.
+  return watchDom(records => {
+    if (records.some(r => r.target === document.body && r.type === 'childList')) sync()
+  })
 }
 
 // ── Native right-Sidebar capability ───────────────────────────────────────────

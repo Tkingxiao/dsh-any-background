@@ -23,6 +23,8 @@
 | 版本事实按 release 隔离 | `src/host-compat/channel.ts`、`src/client/host-compat/versions/<目录>/` | 样式/逻辑代码里出现版本号比较 = 架构违规（§2-D） |
 | 静态样式表只有一张，顺序即语义 | `src/client/host-compat/styles.ts: buildStaticStyles()` | 挪动拼接顺序会改变胜负（§2-E） |
 | 动态写盘的另一半 | `style[data-plugin="…-tokens" / "-header" / "-exempt" / "-wco" / "-parts" / "-table-fix"]` | 现场调试先看这几张表（§4.3），比读代码快 |
+| body 级 MutationObserver 只有一个 | `src/client/dom-watch.ts`（统一 bus：childList+subtree+`aria-expanded`） | 新的 DOM 观察订阅 bus，不要自建 observer（parts / header-tag / env / navIcon 四个原来各自一个）；最后一个退订自动断开 |
+| 轮换到期/选图数学双端共享 | `src/shared/rotation.ts`（tsdown 内联进两个 bundle） | 改日/周/随机语义只改这一处；在任一半侧重写 = 两端推进会打架 |
 
 ---
 

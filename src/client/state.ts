@@ -334,7 +334,7 @@ function adoptRotation(raw: unknown): RotationConfig {
   return {
     enabled: r.enabled === true,
     mode: r.mode === 'order' ? 'order' : 'shuffle',
-    interval: r.interval === 'reload' || r.interval === 'weekly' ? r.interval : 'daily',
+    interval: r.interval === 'reload' || r.interval === 'hourly' || r.interval === 'weekly' ? r.interval : 'daily',
     current: num(r.current, 0),
     items,
     lastRotate: typeof r.lastRotate === 'string' ? r.lastRotate : null,

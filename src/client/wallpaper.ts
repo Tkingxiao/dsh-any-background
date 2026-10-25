@@ -1,6 +1,7 @@
 import { MENU_FILL_TOKEN, PANEL_SURFACES, BETTER_SIDEBAR_PANEL, COMPOSER_TAKEOVER_CARD, COMPOSER_TAKEOVER_EDITOR, elementFrostDecl } from './host-compat/versions/shared'
 import { hostAdapter } from './host-compat/capabilities'
 import { HEADER_POPOVER_ATTR } from './header-tag'
+import { watchDom } from './dom-watch'
 import { rWp, rWpImage, rWpVideo, rBgState, rVideoBgState, rBl, rWop, rOps, rSop, rStrokes, rColor, rHasColor, rBlurs, rBgMode, rChatTextOpacity, rTrajectoryOpacity, rPanelOpacity, rProducedOpacity, rHeaderOpacity, rHeaderBarOpacity, rCaptionInk, rScheme, rColorScheme, rSchemeOverride, cfg, setWpUrl, rBgDark, setBgDark, disposeVideoObjectUrl } from './state'
 import type { BackgroundType, GeneratedBgParams, PartOpacities, PartBlurs, StrokeConfig } from './types'
 import { genTokens, toRgba, extractWallpaperColor, analyzeFrameDark } from './utils/color'
@@ -2803,8 +2804,11 @@ export function applyViewCards(): void {
   syncTableFix()
 }
 
-let partsObserver: MutationObserver | null = null
-let partsApplyRaf = 0
+let partsDispose: (() => void) | null = null
+let partsPending: Promise<void> | null = null
+/** False once stopped, so a pass already queued on the microtask queue cannot
+ *  re-style anything after the teardown. */
+let partsActive = false
 /** Signature of the last blur+opacity pass we actually wrote to the DOM. */
 let appliedPartsKey = ''
 /** The surfaces the last pass styled, compared BY IDENTITY: the host can swap
@@ -2842,15 +2846,27 @@ function targetsNow(): (HTMLElement | null)[] {
 /** Watch for the AppFrame mounting so persisted blurs land even when the shell
  *  renders after this plugin's apply. */
 export function watchParts(): void {
-  if (partsObserver !== null || typeof MutationObserver === 'undefined') return
-  partsObserver = new MutationObserver(() => {
+  if (partsDispose !== null || typeof MutationObserver === 'undefined') return
+  partsActive = true
+  // The shared body observer (dom-watch): one MutationObserver for every
+  // body-subtree watch this plugin runs.
+  partsDispose = watchDom(() => {
     // The observer cannot tell whether a mutation touched our surfaces, so
     // without a gate every childList change on body — streaming tokens,
-    // keystrokes — re-runs the full blur+opacity pass. Coalesce a burst into one
-    // animation frame, then skip it when it cannot change anything.
-    if (partsApplyRaf !== 0) return
-    partsApplyRaf = requestAnimationFrame(() => {
-      partsApplyRaf = 0
+    // keystrokes — re-runs the full blur+opacity pass. Coalesce a burst into
+    // ONE pass, then skip it when it cannot change anything.
+    //
+    // MICROTASK, not rAF — the lesson header-tag learned in v0.3.9 (AGENTS.md
+    // §H): a queued animation frame never runs while the window is not painting
+    // (hidden tab, occluded or minimized desktop window), so a takeover card
+    // elected or a view mounted in the background would keep the stock look
+    // until the next paint. A MutationObserver batch is already delivered once
+    // per task at microtask time, so coalescing is just as effective and has no
+    // dependency on the compositor at all.
+    if (partsPending !== null || !partsActive) return
+    partsPending = Promise.resolve().then(() => {
+      partsPending = null
+      if (!partsActive) return
       const blurs = rBlurs()
       const ops = rOps()
       const key = JSON.stringify([blurs, ops])
@@ -2866,13 +2882,13 @@ export function watchParts(): void {
       appliedTargets = targetsNow()
     })
   })
-  partsObserver.observe(document.body, { childList: true, subtree: true })
 }
 
 export function stopWatchingParts(): void {
-  partsObserver?.disconnect()
-  partsObserver = null
-  if (partsApplyRaf !== 0) { cancelAnimationFrame(partsApplyRaf); partsApplyRaf = 0 }
+  partsDispose?.()
+  partsDispose = null
+  partsActive = false
+  partsPending = null
   appliedPartsKey = ''
   appliedTargets = []
   // Re-probe on the next enable: a marker seen before the teardown is no longer
@@ -3229,9 +3245,10 @@ export function applyWp(): void {
   // no plugin palette is present so the panel follows the slider in every
   // state (picked color, wallpaper verdict, forced scheme, or none).
   applyPanelOverrides(rPanelOpacity())
-  applyProduced()
-  applyHeaderPopovers()
   applyExemptDefaults()
+  // applyProduced / applyHeaderPopovers (and, through them, the header-bar,
+  // caption-band and view-card passes) are reached from applyPartBlurs just
+  // below — spelling them out here too made every applyWp run each pass twice.
   applyPartBlurs(rBlurs())
   // Strokes re-derive here so 'auto'/'theme' colors follow palette and
   // wallpaper-verdict changes (applyWp runs on every theme/color re-apply).

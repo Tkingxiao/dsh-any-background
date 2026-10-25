@@ -13,7 +13,7 @@
  * v0.2.9, and the「标题栏」 keys in 0.3.7). Run with `npm test`.
  */
 import assert from 'node:assert/strict'
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -135,12 +135,98 @@ try {
   await rpc('writeConfig', { config: { captionInk: 'hot-pink' } })
   assert.equal(onDisk().captionInk, 'auto', 'disk: an unknown captionInk falls back to auto')
 
-  // 5. The sanitizer must not call any of these keys unknown — that warning is
+  // 5. The rotation pool: same-millisecond adds get distinct file names, a
+  //    manual activation persists the cursor server-side, and a remove keeps
+  //    the cursor in range.
+  const PNG_1PX = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
+  const add1 = await rpc('rotationAdd', { dataUrl: PNG_1PX, thumb: PNG_1PX })
+  assert.equal(add1.items.length, 1, 'rotationAdd: one item after the first add')
+  const add2 = await rpc('rotationAdd', { dataUrl: PNG_1PX, thumb: PNG_1PX })
+  assert.equal(add2.items.length, 2, 'rotationAdd: two items after the second add')
+  assert.notEqual(add2.items[0].file, add2.items[1].file, 'rotationAdd: same-ms adds must not collide on one file name')
+  assert.match(add2.items[1].file, /^wp-[\w-]+\.png$/i, 'rotationAdd: server-generated name shape')
+
+  const activated = await rpc('rotationSet', { index: 1 })
+  assert.equal(activated.wallpaperUrl, '/dsh-any-background/wallpaper', 'rotationSet: serve URL returned')
+  assert.equal(onDisk().rotation.current, 1, 'rotationSet: cursor persisted server-side')
+
+  const removed = await rpc('rotationRemove', { index: 0 })
+  assert.equal(removed.items.length, 1, 'rotationRemove: one item left')
+  assert.ok(onDisk().rotation.current <= removed.items.length - 1, 'rotationRemove: cursor stays in range')
+
+  // 5b. Server-side advance inside `read`: a due pool advances the cursor and
+  //     persists the new state — the shared cadence math (src/shared/rotation.ts)
+  //     exercised end-to-end through the real handler.
+  const extra = await rpc('rotationAdd', { dataUrl: PNG_1PX, thumb: PNG_1PX })
+  assert.equal(extra.items.length, 2, 'rotationAdd: pool re-filled to two items')
+  await rpc('writeConfig', { config: { rotation: { enabled: true, mode: 'order', interval: 'daily', current: 0, items: extra.items, lastRotate: '2020-01-01T00:00:00.000Z' } } })
+  const advanced = await rpc('read', {})
+  assert.equal(advanced.rotated, true, 'read: a due rotation reports rotated')
+  assert.equal(onDisk().rotation.current, 1, 'read: advanced cursor persisted')
+  assert.notEqual(onDisk().rotation.lastRotate, '2020-01-01T00:00:00.000Z', 'read: lastRotate refreshed')
+  // And the steady state: a lastRotate from today must not advance again.
+  await rpc('writeConfig', { config: { rotation: { ...onDisk().rotation, lastRotate: new Date().toISOString() } } })
+  const steady = await rpc('read', {})
+  assert.equal(steady.rotated, false, 'read: a fresh lastRotate is not due again')
+
+  // 5c. The 'hourly' cadence survives the sanitizer; an unknown interval still
+  //     collapses to 'daily'.
+  await rpc('writeConfig', { config: { rotation: { enabled: true, mode: 'order', interval: 'hourly', current: 0, items: [], lastRotate: null } } })
+  assert.equal(onDisk().rotation.interval, 'hourly', 'writeConfig: hourly interval persists')
+  await rpc('writeConfig', { config: { rotation: { enabled: true, mode: 'order', interval: 'minute', current: 0, items: [], lastRotate: null } } })
+  assert.equal(onDisk().rotation.interval, 'daily', 'writeConfig: unknown interval falls back to daily')
+
+  // 5d. rotationRestore rebuilds the pool wholesale: bytes land under the
+  //     exported names, the config list matches, and activation works.
+  const restored = await rpc('rotationRestore', { items: [{ file: 'wp-export-test.png', thumb: '', dataUrl: PNG_1PX }] })
+  assert.equal(restored.ok, true, 'rotationRestore: ok')
+  assert.equal(restored.items.length, 1, 'rotationRestore: item list rebuilt')
+  assert.ok(existsSync(join(home, '.dsh-any-background-data', 'rotation', 'wp-export-test.png')), 'rotationRestore: file written under the exported name')
+  assert.equal(onDisk().rotation.items[0].file, 'wp-export-test.png', 'rotationRestore: config points at the restored file')
+  const activatedRestored = await rpc('rotationSet', { index: 0 })
+  assert.equal(activatedRestored.wallpaperUrl, '/dsh-any-background/wallpaper', 'rotationSet: a restored item activates')
+
+  // And the name fence: a traversal-shaped name is refused at the handler
+  // (the outer envelope is still ok:true — the refusal rides in value.ok).
+  const badRestore = await fetch(`http://127.0.0.1:${port}${RPC_PATH}/${NS}/rotationRestore`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ type: 'client-request', rpcId: 'smoke', method: `${NS}/rotationRestore`, payload: { items: [{ file: '../evil.png', thumb: '', dataUrl: PNG_1PX }] } }),
+  })
+  const badBody = await badRestore.json()
+  assert.equal(badBody.result.value.ok, false, 'rotationRestore: path traversal refused')
+
+  // 6. The wallpaper upload route refuses a body whose bytes are not an image
+  //    even when the Content-Type claims one (the same fence as the URL
+  //    download), and accepts real PNG bytes.
+  const uploadRoute = routes.get('/dsh-any-background/wallpaper/upload')
+  assert.ok(uploadRoute !== undefined, 'wallpaper upload route registered')
+  const uploadServer = createServer((req, res) => { void uploadRoute.handler(req, res) })
+  await new Promise(resolve => uploadServer.listen(0, '127.0.0.1', resolve))
+  try {
+    const uploadBase = `http://127.0.0.1:${uploadServer.address().port}/dsh-any-background/wallpaper/upload`
+    const bad = await fetch(uploadBase, {
+      method: 'POST',
+      headers: { 'Content-Type': 'image/png' },
+      body: Buffer.from('this is definitely not an image'),
+    })
+    assert.equal(bad.status, 415, 'wallpaper upload: non-image bytes refused with 415')
+    const good = await fetch(uploadBase, {
+      method: 'POST',
+      headers: { 'Content-Type': 'image/png' },
+      body: Buffer.from(PNG_1PX.slice('data:image/png;base64,'.length), 'base64'),
+    })
+    assert.equal(good.status, 200, 'wallpaper upload: real PNG bytes accepted')
+  } finally {
+    await new Promise(resolve => uploadServer.close(resolve))
+  }
+
+  // 7. The sanitizer must not call any of these keys unknown — that warning is
   //    exactly what the bug report captured.
   const drift = warnings.filter(w => w.includes('ignoring unknown config field'))
   assert.deepEqual(drift, [], `unexpected config drift warnings: ${drift.join(' | ')}`)
 
-  originalWarn('smoke: PASS — headerBar + captionInk settings and profiles round-trip through disk')
+  originalWarn('smoke: PASS — settings, profiles, rotation pool, and the upload fence round-trip through disk')
 } finally {
   console.warn = originalWarn
   await new Promise(resolve => server.close(resolve))

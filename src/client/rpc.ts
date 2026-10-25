@@ -46,11 +46,33 @@ async function rpcCall(method: string, payload: unknown): Promise<unknown> {
 const SAVE_DEBOUNCE_MS = 250
 let saveTimer: number | undefined
 
+/** Write the config and SURFACE a failed persist. The server answers
+ *  `ok:true` with `value:false` when the DISK write failed — the transport
+ *  succeeded, so `rpcCall` returns the boolean without a word and every caller
+ *  used to assume the save had landed. Retry once after a beat (the common
+ *  Windows cause is a transient EBUSY from an antivirus scan holding the
+ *  file), then say it in the log so a "settings reverted" report has a trail. */
+let writeRetryQueued = false
+async function writeNow(): Promise<void> {
+  const ok = (await rpcCall('writeConfig', { config: cfg })) === true
+  if (ok) {
+    writeRetryQueued = false
+    return
+  }
+  if (!writeRetryQueued) {
+    writeRetryQueued = true
+    window.setTimeout(() => { void writeNow() }, 1000)
+    return
+  }
+  writeRetryQueued = false
+  console.warn('dsh-any-background: the host could not persist the config — recent settings may be lost on reload (see the host log for the write error)')
+}
+
 export function saveConfig(): void {
   if (saveTimer !== undefined) window.clearTimeout(saveTimer)
   saveTimer = window.setTimeout(() => {
     saveTimer = undefined
-    void rpcCall('writeConfig', { config: cfg })
+    void writeNow()
   }, SAVE_DEBOUNCE_MS)
 }
 
@@ -58,12 +80,12 @@ export function flushSave(): void {
   if (saveTimer === undefined) return
   window.clearTimeout(saveTimer)
   saveTimer = undefined
-  void rpcCall('writeConfig', { config: cfg })
+  void writeNow()
 }
 
 /** Persist the current config immediately (import path — no debounce). */
 export function persistConfig(): void {
-  void rpcCall('writeConfig', { config: cfg })
+  void writeNow()
 }
 
 /** Load the persisted theme (config + wallpaper URL + video URL) from the node
@@ -247,6 +269,11 @@ export async function removeFont(): Promise<boolean> {
 
 // ── Wallpaper rotation RPCs ──────────────────────────────────────────────────
 
+/** Serve URL of one rotation-pool image (the export path fetches its bytes). */
+export function rotationFileUrl(file: string): string {
+  return `/dsh-any-background/rotation/file?f=${encodeURIComponent(file)}`
+}
+
 export interface RotationAddResult { ok: boolean; index?: number; items?: Array<{ file: string; thumb: string }>; error?: string }
 
 /** Add an image (data URL + small thumbnail) to the server-side rotation pool. */
@@ -280,6 +307,24 @@ export async function rotationActivate(index: number): Promise<{ ok: boolean; wa
   try {
     const res = await rpcCallFn(rpcEndpoint('rotationSet'), { index })
     if (res && res.ok === true) return (res.value ?? { ok: false, error: 'no value' }) as { ok: boolean; wallpaperUrl?: string; error?: string }
+    return { ok: false, error: (res as { error?: { message?: string } })?.error?.message ?? 'request failed' }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+}
+
+/** One rotation-pool image travelling inside a v3 theme export. */
+export interface RotationPoolEntry { file: string; thumb: string; dataUrl: string }
+
+/** Replace the whole server-side rotation pool (theme-import path): the bytes
+ *  land under their exported file names, so the imported config's pool
+ *  metadata is live on this machine instead of pointing at files it does not
+ *  have. */
+export async function rotationRestore(items: RotationPoolEntry[]): Promise<{ ok: boolean; items?: Array<{ file: string; thumb: string }>; error?: string }> {
+  if (!rpcCallFn) return { ok: false, error: 'rpc not ready' }
+  try {
+    const res = await rpcCallFn(rpcEndpoint('rotationRestore'), { items })
+    if (res && res.ok === true) return (res.value ?? { ok: false, error: 'no value' }) as { ok: boolean; items?: Array<{ file: string; thumb: string }>; error?: string }
     return { ok: false, error: (res as { error?: { message?: string } })?.error?.message ?? 'request failed' }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }

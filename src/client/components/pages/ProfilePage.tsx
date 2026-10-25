@@ -3,7 +3,7 @@ import type { CSSProperties } from 'react'
 import type { ThemeSectionProps, ThemeStoreState, ProfileEntry, ScheduleConfig } from '../../types'
 import { BUILTIN_PRESETS } from '../../utils/presets'
 import { hslToRgb } from '../../utils/color'
-import { DownloadIcon, UploadIcon, CheckIcon, PlusIcon, SunIcon, MoonIcon, ClockIcon } from '../icons'
+import { DownloadIcon, UploadIcon, CheckIcon, PlusIcon, SunIcon, MoonIcon, ClockIcon, EditIcon } from '../icons'
 
 const hexOf = (color: [number, number, number] | null): string =>
   color === null
@@ -20,7 +20,7 @@ function ProfileDot({ entry }: { entry: ProfileEntry }) {
 }
 
 export function ProfilePage({ p, notify }: { p: ThemeSectionProps; notify: (msg: string, ok?: boolean) => void }) {
-  const { t, exportTheme, importTheme, saveProfile, applyProfile, deleteProfile, applyPreset, setSchedule, useStore } = p
+  const { t, exportTheme, importTheme, saveProfile, applyProfile, deleteProfile, renameProfile, duplicateProfile, applyPreset, setSchedule, useStore } = p
   // Field-level subscriptions: profile list, active id and schedule are the only
   // store fields this page renders — full-state subscription would re-render
   // the whole profile list on every unrelated store write (color, wallpaper…).
@@ -31,6 +31,8 @@ export function ProfilePage({ p, notify }: { p: ThemeSectionProps; notify: (msg:
   const [nameOpen, setNameOpen] = useState(false)
   const [nameVal, setNameVal] = useState('')
   const [confirmId, setConfirmId] = useState<string | null>(null)
+  const [editId, setEditId] = useState<string | null>(null)
+  const [editVal, setEditVal] = useState('')
 
   const onImport = async (file: File) => {
     try {
@@ -61,6 +63,16 @@ export function ProfilePage({ p, notify }: { p: ThemeSectionProps; notify: (msg:
     if (confirmId !== entry.id) { setConfirmId(entry.id); return }
     setConfirmId(null)
     deleteProfile(entry.id)
+  }
+
+  const onRenameCommit = (entry: ProfileEntry): void => {
+    const name = editVal.trim()
+    setEditId(null)
+    if (name && name !== entry.name && renameProfile(entry.id, name)) notify(t('profileRenamed'), true)
+  }
+
+  const onDuplicate = (entry: ProfileEntry): void => {
+    if (duplicateProfile(entry.id)) notify(t('profileDuplicated'), true)
   }
 
   const profileOptions = (value: string | null, onChange: (id: string | null) => void) => (
@@ -124,19 +136,41 @@ export function ProfilePage({ p, notify }: { p: ThemeSectionProps; notify: (msg:
             {profiles.map((entry, i) => (
               <div key={entry.id} className={`dab-profile-row${activeProfile === entry.id ? ' is-active' : ''}`} style={{ '--i': i } as CSSProperties}>
                 <ProfileDot entry={entry} />
-                <div className="dab-profile-meta">
-                  <span className="dab-profile-name">{entry.name}</span>
-                  <span className="dab-profile-sub">{new Date(entry.createdAt).toLocaleDateString()}</span>
-                </div>
-                <button type="button" className="dab-btn" onClick={() => onApply(entry)}>{t('profileApply')}</button>
-                <button type="button" className={`dab-btn dab-btn-danger-solid${confirmId === entry.id ? ' dab-btn-confirm' : ''}`}
-                  title={t('profileDelete')} onClick={() => onDelete(entry)}>
-                  {confirmId === entry.id ? (
-                    <><CheckIcon size={13} />{t('profileDeleteConfirm')}</>
-                  ) : (
-                    t('profileDelete')
-                  )}
-                </button>
+                {editId === entry.id ? (
+                  <>
+                    <div className="dab-urlrow" style={{ flex: 1, minWidth: 0 }}>
+                      <input type="text" className="dab-urlinput" value={editVal} maxLength={60}
+                        onChange={e => setEditVal(e.target.value)}
+                        onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); onRenameCommit(entry) } }}
+                        autoFocus />
+                      <button type="button" className="dab-btn dab-btn-primary" disabled={!editVal.trim()} onClick={() => onRenameCommit(entry)}>{t('editorCommit')}</button>
+                      <button type="button" className="dab-btn" onClick={() => setEditId(null)}>{t('bgUrlCancel')}</button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="dab-profile-meta">
+                      <span className="dab-profile-name">{entry.name}</span>
+                      <span className="dab-profile-sub">{new Date(entry.createdAt).toLocaleDateString()}</span>
+                    </div>
+                    <button type="button" className="dab-btn" onClick={() => onApply(entry)}>{t('profileApply')}</button>
+                    <button type="button" className="dab-btn" title={t('profileRename')}
+                      onClick={() => { setEditId(entry.id); setEditVal(entry.name) }}>
+                      <EditIcon size={13} />
+                    </button>
+                    <button type="button" className="dab-btn" title={t('profileDuplicate')} onClick={() => onDuplicate(entry)}>
+                      <PlusIcon size={13} />
+                    </button>
+                    <button type="button" className={`dab-btn dab-btn-danger-solid${confirmId === entry.id ? ' dab-btn-confirm' : ''}`}
+                      title={t('profileDelete')} onClick={() => onDelete(entry)}>
+                      {confirmId === entry.id ? (
+                        <><CheckIcon size={13} />{t('profileDeleteConfirm')}</>
+                      ) : (
+                        t('profileDelete')
+                      )}
+                    </button>
+                  </>
+                )}
               </div>
             ))}
           </div>

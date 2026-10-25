@@ -9,7 +9,8 @@ import { defineStore } from './runtime'
 import type { Ctx, RpcResultLike, BoundActions, ThemeSectionProps, PartOpacities, PartBlurs, PartStrokes, BackgroundType, GeneratedBgParams, ProfileAppearance, ProfileEntry, RotationItem, ScheduleConfig, SchemeOverride, UploadOutcome, StoreInstance } from './types'
 import { NS, zh, en } from './i18n'
 import { cfg, rHasColor, rColor, rWp, rWpImage, rWpVideo, rBgState, rVideoBgState, setWpUrl, setWpImageUrl, setWpVideoUrl, setWpVideoSnapshot, setBgState, adoptConfig, DEFAULT_CONFIG, setBgDark, rBgDark, rProfiles, rRotation, rSchedule, rScheme, rColorScheme, rSchemeOverride, currentAppearance, applyAppearance } from './state'
-import { RPC_CHANNEL, VIDEO_SERVE_URL, FONT_SERVE_URL, fontServeUrl, initRpc, saveConfig, flushSave, loadPersisted, persistWallpaper, persistVideo, persistConfig, uploadVideo, uploadFont, removeFont as rpcRemoveFont, rotationAdd, rotationRemove, rotationActivate, setVideoFromUrl as rpcSetVideoFromUrl } from './rpc'
+import { RPC_CHANNEL, VIDEO_SERVE_URL, FONT_SERVE_URL, fontServeUrl, initRpc, saveConfig, flushSave, loadPersisted, persistWallpaper, persistVideo, persistConfig, uploadVideo, uploadFont, removeFont as rpcRemoveFont, rotationAdd, rotationRemove, rotationActivate, rotationRestore, rotationFileUrl, setVideoFromUrl as rpcSetVideoFromUrl } from './rpc'
+import type { RotationPoolEntry } from './rpc'
 import { applyWp, teardownWp, applySettingsOverrides, applyPanelOverrides, applyStrokes, applyFontFace, watchParts, watchThemeResets, regenerateGeneratedBg, setBackgroundType, updateGeneratedBg, applyThemeColor, onGeneratedSnapshot, watchWallpaperDragQuality, clearThemeTokens, onVerdictApplied, onColorAdopted, LABEL_TOKENS, SETTINGS_PANEL_SEL } from './wallpaper'
 import { mountStaticStyles } from './host-compat/styles'
 import { genTokens, hslToHsv, hsvToHsl, extractWallpaperColor } from './utils/color'
@@ -21,6 +22,8 @@ import { registerNativeSidebarTab } from './sidebar/native-tab'
 import { SUN_PATHS } from './components/icons'
 import { startBetterSidebarWatch } from './env'
 import { startHeaderPopoverTagging } from './header-tag'
+import { watchDom } from './dom-watch'
+import { rotationDue as sharedRotationDue, pickNextRotationIndex as sharedPickNext } from '../shared/rotation'
 
 export const name = 'dsh-any-background'
 export const inject = ['slots', 'locale', 'theme', 'connection']
@@ -316,37 +319,12 @@ export function apply(ctx: Ctx): void {
     return true
   }
 
-  const isoWeekKey = (d: Date): string => {
-    const t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()))
-    const day = t.getUTCDay() || 7
-    t.setUTCDate(t.getUTCDate() + 4 - day)
-    const yearStart = new Date(Date.UTC(t.getUTCFullYear(), 0, 1))
-    const week = Math.ceil(((t.getTime() - yearStart.getTime()) / 86400000 + 1) / 7)
-    return `${t.getUTCFullYear()}-W${week}`
-  }
+  // The cadence math is the shared implementation (`src/shared/rotation.ts`)
+  // — the same one the server advances with inside `read`, so the fallback
+  // here can never disagree with the server on a day/week boundary.
+  const rotationDue = (): boolean => sharedRotationDue(rRotation())
 
-  const rotationDue = (): boolean => {
-    const rot = rRotation()
-    if (!rot.enabled || rot.items.length === 0) return false
-    if (rot.interval === 'reload') return true
-    const last = rot.lastRotate !== null ? new Date(rot.lastRotate) : null
-    if (last === null || isNaN(last.getTime())) return true
-    const now = new Date()
-    if (rot.interval === 'daily') return last.toDateString() !== now.toDateString()
-    return isoWeekKey(last) !== isoWeekKey(now)
-  }
-
-  const pickNextRotationIndex = (): number => {
-    const rot = rRotation()
-    const n = rot.items.length
-    if (n === 0) return -1
-    if (rot.mode === 'shuffle' && n > 1) {
-      let idx = rot.current
-      while (idx === rot.current) idx = Math.floor(Math.random() * n)
-      return idx
-    }
-    return (rot.current + 1) % n
-  }
+  const pickNextRotationIndex = (): number => sharedPickNext(rRotation())
 
   const maybeRotate = async (): Promise<void> => {
     if (!rotationDue()) return
@@ -372,6 +350,10 @@ export function apply(ctx: Ctx): void {
   }
 
   const scheduleTick = (): void => {
+    // Rotation re-checks on every tick, not only on reload: an 'hourly'
+    // cadence now actually advances while the page stays open (maybeRotate is
+    // math-gated, so this is a no-op whenever nothing is due).
+    void maybeRotate()
     const sc = rSchedule()
     if (!sc.enabled) return
     // Both steps are optional: `matchMedia?.(…)` alone still throws on the
@@ -775,12 +757,35 @@ export function apply(ctx: Ctx): void {
             }
           }
         }
+        // v3: the rotation pool travels as bytes too — fetch each image from
+        // its serve route and embed it, so an import on another machine
+        // rebuilds the pool instead of pointing at files it does not have.
+        let pool: RotationPoolEntry[] | undefined
+        const rotItems = rRotation().items
+        if (rotItems.length > 0) {
+          pool = []
+          for (const it of rotItems) {
+            try {
+              const blob = await fetch(rotationFileUrl(it.file)).then(r => {
+                if (!r.ok) throw new Error(`http ${r.status}`)
+                return r.blob()
+              })
+              pool.push({ file: it.file, thumb: it.thumb, dataUrl: await blobToDataUrl(blob) })
+            } catch {
+              // One unreadable pool image must not lose the whole export; the
+              // import tolerates a pool shorter than the metadata.
+              console.warn(`dsh-any-background: export skipped a rotation image (${it.file})`)
+            }
+          }
+          if (pool.length === 0) pool = undefined
+        }
         const payload = {
-          version: 2,
+          version: 3,
           exportedAt: new Date().toISOString(),
           config: cfg,
           wallpaper: wallpaperPayload,
           video: videoPayload,
+          pool,
         }
         const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
         const url = URL.createObjectURL(blob)
@@ -801,7 +806,7 @@ export function apply(ctx: Ctx): void {
         try {
           const data: unknown = JSON.parse(await file.text())
           if (!data || typeof data !== 'object') return false
-          const d = data as { version?: number; config?: unknown; wallpaper?: unknown; video?: unknown }
+          const d = data as { version?: number; config?: unknown; wallpaper?: unknown; video?: unknown; pool?: unknown }
           if (typeof d.config !== 'object' || d.config === null) return false
           adoptConfig(d.config)
           if (cfg.backgroundType === 'video') {
@@ -851,6 +856,26 @@ export function apply(ctx: Ctx): void {
             if (cfg.regenerateOnReload) regenerateGeneratedBg()
             else if (cfg.generatedBg) updateGeneratedBg(cfg.generatedBg)
           }
+          // v3 payloads carry the rotation pool's bytes: restore them under
+          // their exported names so the imported metadata is live here. A v2
+          // export could not carry bytes — its pool entries would point at
+          // files this machine never got, so those drop to an empty pool
+          // rather than dead entries that fail on every activation.
+          const poolRaw = d.pool
+          if (Array.isArray(poolRaw)) {
+            if (poolRaw.length > 0) {
+              const r = await rotationRestore(poolRaw as RotationPoolEntry[])
+              if (r.ok && r.items) {
+                cfg.rotation = { ...cfg.rotation, items: r.items, current: Math.min(cfg.rotation.current, Math.max(0, r.items.length - 1)) }
+              } else {
+                console.warn('dsh-any-background: rotation pool restore failed', r.error)
+              }
+            } else if (cfg.rotation.items.length > 0) {
+              cfg.rotation = { ...cfg.rotation, items: [], current: 0 }
+            }
+          } else if ((typeof d.version !== 'number' || d.version < 3) && cfg.rotation.items.length > 0) {
+            cfg.rotation = { ...cfg.rotation, items: [], current: 0 }
+          }
           persistConfig()
           // The imported file carries profiles / rotation / schedule / scheme
           // too: push them into the meta store or the panels keep rendering the
@@ -885,6 +910,29 @@ export function apply(ctx: Ctx): void {
         return true
       },
       applyProfile: (id: string): boolean => applyProfileById(id),
+      renameProfile: (id: string, name: string): boolean => {
+        const trimmed = name.trim()
+        if (!trimmed) return false
+        const before = rProfiles()
+        if (!before.some(p => p.id === id)) return false
+        cfg.profiles = before.map(p => (p.id === id ? { ...p, name: trimmed.slice(0, 60) } : p))
+        persistConfig()
+        syncMetaNow()
+        return true
+      },
+      duplicateProfile: (id: string): boolean => {
+        const before = rProfiles()
+        const src = before.find(p => p.id === id)
+        if (!src) return false
+        const profiles = [...before]
+        if (profiles.length >= 20) profiles.shift()
+        const nid = `p-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+        profiles.push({ ...src, id: nid, name: `${src.name} (2)`.slice(0, 60), createdAt: new Date().toISOString() })
+        cfg.profiles = profiles
+        persistConfig()
+        syncMetaNow()
+        return true
+      },
       deleteProfile: (id: string): boolean => {
         const before = rProfiles()
         if (!before.some(p => p.id === id)) return false
@@ -1056,10 +1104,12 @@ export function apply(ctx: Ctx): void {
       }
     }
   }
-  let navIconObserver: MutationObserver | null = null
+  let disposeNavWatch: (() => void) | null = null
   const watchNavIcon = (): void => {
-    if (navIconObserver !== null || typeof MutationObserver === 'undefined') return
-    navIconObserver = new MutationObserver(records => {
+    if (disposeNavWatch !== null || typeof MutationObserver === 'undefined') return
+    // The shared body observer (dom-watch) — see that module for why there is
+    // only one.
+    disposeNavWatch = watchDom(records => {
       // React only when the settings panel (or its nav) is (re)created, so
       // chat-content mutations don't trigger a scan.
       const relevant = records.some(r => {
@@ -1072,11 +1122,10 @@ export function apply(ctx: Ctx): void {
       })
       if (relevant) applyNavIcon()
     })
-    navIconObserver.observe(document.body, { childList: true, subtree: true })
     applyNavIcon()
   }
   watchNavIcon()
-  ctx.effect(() => () => { navIconObserver?.disconnect(); navIconObserver = null }, 'dsh-any-background: nav icon watch')
+  ctx.effect(() => () => { disposeNavWatch?.(); disposeNavWatch = null }, 'dsh-any-background: nav icon watch')
 
   // 7. Deferred boot restore: the theme service and the host settings scope
   // settle asynchronously after this apply, so the synchronous restore can be
