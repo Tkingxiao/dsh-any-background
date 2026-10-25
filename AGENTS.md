@@ -135,6 +135,17 @@ npm test                            # 真起宿主半侧，跑「写盘 → 重�
   模态 1000 / 统计面板 1100），**不是**用 `:has()` 撤霜。
 - v0.3.9 行霜改垫层后，就地浮层才重新采得到壁纸（此前"顶栏模糊度无效"的另一半）。
 - 模态打开时撤隔离（`:has([role="dialog"])`）是**故意**的：看不见对话框是死路，丢一会儿磨砂是便宜。
+- v0.4.2 反向命中：`isolation:isolate` 只造成层叠上下文，但这足以**囚禁宿主自己的就地 fixed
+  浮层**。宿主 Tooltip 气泡是就地渲染的 `span[role=tooltip]{position:fixed;z-index:100}`
+  （`dsh-web-frontend` 的 Tooltip.module.css；`portal` prop 默认 false，工作区「添加工作区」调用点
+  没传 portal → 气泡留在侧栏列子树里），磨砂侧栏列的 isolation 把它的 z-index 关在本地，后绘的
+  中心列磨砂整层盖住悬出侧栏的段（issue #32）。修法与 #26 同族：把**磨砂侧栏列**整体提到
+  `z-index:1`（`dab-part-blur-side`，随侧栏模糊值加/摘，网格轨道几何不重叠 → 只影响悬出浮层），
+  不动浮层。安全边界逐个核对：宿主 overlay `.overlayLayer{z-index:20}`（0.2.0-rc.1 与 0.2.1-rc.3
+  逐字节一致）必须仍压在其上；`:has([role="dialog"])` 豁免必须**同时**归位 `z-index:auto` 与
+  `isolation:auto`——钉着 z-index 的列仍是层叠上下文，对话框会困在列里被 overlay 压住。验证走
+  §4.2 mock（类落位 / computed z-index / dialog 豁免往返）+ §4.3 真机 A/B（旧包复现悬出段发糊、
+  新包清晰，两次截图对照）。
 
 ### G. 认领 / 误认领（谁的表面归谁）
 
@@ -272,7 +283,7 @@ release 标题与提交主题一致；issue 回复要带根因 + 验证数字 + 
 | 任何配置键（增/改名/改默认） | §2-A 五处 + `scripts/smoke.mjs` 断言 + `utils/presets.ts` 是否要带 + i18n 标签 + `ProfileAppearance`（要不要进 Profile） |
 | 一条 CSS 规则（`wallpaper.ts` 常量） | `styles.ts` 里的**位置**（谁该赢）、优先级、`0` 与"未设置"两种取值各画出什么（§E 第 2 行） |
 | 认领 / 标记逻辑 | 单一持有者摘除、空态排除、portal 与就地两种形状、误认领邻居（dockkit / antd / 输入位）、teardown 能摘干净（§O） |
-| 磨砂（任何 `backdrop-filter`） | 是否压在宿主部件上（三宗罪）、模态撤隔离、`0` 的语义、宿主同名令牌是否被覆盖 |
+| 磨砂（任何 `backdrop-filter`） | 是否压在宿主部件上（三宗罪）、模态撤隔离、`0` 的语义、宿主同名令牌是否被覆盖；磨砂列若带提层（`dab-part-blur-side`），overlay(z-20)/模态豁免（z-index 与 isolation 同进同退）/portal 层的次序要逐个核对（§2-F v0.4.2） |
 | 版本事实（新宿主） | §C 四处 + §D 三处 + `dshReleases` + README 兼容性段 |
 | 滑块 / 选择器 UI | `onInput` 与 `onChange` 两条路径都落值；`metaRev` 订阅；禁用态与越界值；双语标签 |
 | 取色 / 明暗 | 强制方向 × 主题色明度 × 壁纸 verdict 的 2×2×3 组合；无主题色分支；皮肤注册（§N） |

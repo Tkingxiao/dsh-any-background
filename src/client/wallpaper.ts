@@ -2241,6 +2241,45 @@ let rightEl: HTMLElement | null = null
 
 const PART_BLUR_CLASS = 'dab-part-blur'
 const PART_UNDERLAY_CLASS = 'dab-part-underlay'
+/** Paint-order lift for the frosted SIDEBAR column (issue #32).
+ *
+ *  The host's `Tooltip` bubble is an IN-PLACE `span[role="tooltip"]`: its sheet
+ *  (`dsh-web-frontend` `Tooltip.module.css`, read on 0.2.1-rc.3) reads
+ *  `position:fixed;z-index:100`, going to `z-index:1100` only under
+ *  `[data-portal]` — and the `portal` prop defaults to FALSE, which the
+ *  workspace browser's 添加工作区 trigger (`ui-workspace` `headerActions`) does
+ *  not pass. `position:fixed` keeps the bubble anchored to the viewport, but
+ *  its z-index only competes INSIDE the nearest stacking-context ancestor. The
+ *  frosted sidebar column IS that ancestor — `PART_BLUR_RULE`'s
+ *  `isolation:isolate` is what keeps the underlay's `z-index:-1` inside — so
+ *  the bubble, hanging below the icon row and past the column's right edge, is
+ *  painted as part of the sidebar's subtree, and the center column (a later
+ *  sibling, itself an isolated stacking context once 「主界面」模糊 is up)
+ *  paints its translucent fill + frost OVER the overhang: the tooltip's right
+ *  half comes out blurred and tinted. The trap is not the tooltip's alone —
+ *  every in-place float the sidebar hangs (the workspace pick flow anchors
+ *  there too) sits in the same local context.
+ *
+ *  Lifting the FROSTED sidebar column to `z-index:1` moves its whole paint
+ *  slot after the center column's. The two are grid siblings on separate
+ *  tracks — they never overlap geometrically, so the lift only matters to
+ *  floating layers that overhang a column edge, which is exactly the set that
+ *  must win. It stays below everything that has to beat it: the host's overlay
+ *  layer (`AppFrame.module.css` `.overlayLayer{z-index:20}`, byte-identical on
+ *  0.2.0-rc.1 and 0.2.1-rc.3), the settings modal (it escapes the center
+ *  column through the `isolation:auto` arm below and carries z-index 1000+),
+ *  and body-level portaled menus/tooltips (z-index 100 / 1100). Grid items
+ *  honor `z-index` without `position`, so this lands even on a column the
+ *  host leaves `static`.
+ *
+ *  The `:has([role="dialog"])` arm must pair `z-index:auto` with the
+ *  isolation arm: with the settings view open the sidebar column itself holds
+ *  a `[role="dialog"]` (counted live when the isolation arm was written), and
+ *  a column pinned at `z-index:1` would REMAIN a stacking context through that
+ *  arm — the dialog would keep its z-index local and paint under the overlay
+ *  layer instead of covering the page. Back at `auto` it escapes the column
+ *  exactly as it did before this class existed. */
+const PART_LIFT_CLASS = 'dab-part-blur-side'
 
 /** The AppFrame's main-bg clear-out, as a class rather than an inline write.
  *
@@ -2312,6 +2351,8 @@ const PART_BLUR_RULE =
   // settings view closed the sidebar column holds no `[role="dialog"]` at all,
   // which was counted live before this exemption was written.
   `.${PART_BLUR_CLASS}:has([role="dialog"]){isolation:auto}` +
+  `.${PART_LIFT_CLASS}{z-index:1}` +
+  `.${PART_LIFT_CLASS}:has([role="dialog"]){z-index:auto}` +
   `.${PART_UNDERLAY_CLASS}{position:absolute;inset:0;z-index:-1;pointer-events:none;border-radius:inherit;` +
   `backdrop-filter:var(--dsh-any-part-blur,none);-webkit-backdrop-filter:var(--dsh-any-part-blur,none)}`
 
@@ -2362,12 +2403,18 @@ function discoverParts(): void {
   }
 }
 
-function setBlur(el: HTMLElement | null, px: number): void {
+function setBlur(el: HTMLElement | null, px: number, lift = false): void {
   if (el === null) return
   // Nothing to clear and nothing applied yet: skip the querySelector and the
   // style writes. This is the common steady state — every observer tick and
   // every applyWp calls setBlur(el, 0) on parts that never had a blur.
-  if (px === 0 && !el.classList.contains(PART_BLUR_CLASS) && el.getAttribute('data-dab-pos-patched') !== '1') return
+  if (
+    px === 0 &&
+    !el.classList.contains(PART_BLUR_CLASS) &&
+    !el.classList.contains(PART_LIFT_CLASS) &&
+    el.getAttribute('data-dab-pos-patched') !== '1'
+  )
+    return
   const underlay = el.querySelector<HTMLDivElement>(`:scope > .${PART_UNDERLAY_CLASS}`)
   if (px > 0) {
     ensurePartBlurStyle()
@@ -2379,6 +2426,7 @@ function setBlur(el: HTMLElement | null, px: number): void {
       el.setAttribute('data-dab-pos-patched', '1')
     }
     el.classList.add(PART_BLUR_CLASS)
+    el.classList.toggle(PART_LIFT_CLASS, lift)
     if (underlay === null) {
       const node = document.createElement('div')
       node.className = PART_UNDERLAY_CLASS
@@ -2387,6 +2435,7 @@ function setBlur(el: HTMLElement | null, px: number): void {
     el.style.setProperty('--dsh-any-part-blur', `blur(${px}px)`)
   } else {
     el.classList.remove(PART_BLUR_CLASS)
+    el.classList.remove(PART_LIFT_CLASS)
     el.style.removeProperty('--dsh-any-part-blur')
     underlay?.remove()
     if (el.getAttribute('data-dab-pos-patched') === '1') {
@@ -2447,7 +2496,7 @@ export function applyPartBlurs(blurs: PartBlurs): void {
   // and paints from its own tokens, so a backdrop-filter there would bleed
   // the wallpaper into the panel surface and break the focused-tab chrome.
   setBlur(frameEl, 0)
-  setBlur(sidebarEl, blurs.sidebar)
+  setBlur(sidebarEl, blurs.sidebar, true)
   setBlur(centerEl, blurs.bg)
   setBlur(rightEl, 0)
   applyBgBlurGlobal(blurs.bg)
@@ -2504,7 +2553,9 @@ export function setPartBlur(part: keyof PartBlurs, v: number): void {
   if (part === 'bg') { setBlur(centerEl, v); applyBgBlurGlobal(v); return }
   // The caption segment above the sidebar frosts from the same value, mirrored on
   // :root — the live-drag path has to move both or the band lags the column.
-  setBlur(sidebarEl, v)
+  // The lift rides along (see PART_LIFT_CLASS): a frosted sidebar paints after
+  // the center column, or its in-place floats lose to the center's frost.
+  setBlur(sidebarEl, v, true)
   applySidebarBandBlur(v)
 }
 
