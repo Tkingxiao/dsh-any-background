@@ -52,6 +52,7 @@ export const DEFAULT_CONFIG: ThemeConfig = {
   headerOpacity: 0.5,
   headerBarOpacity: 0.5,
   captionInk: 'auto',
+  protectThirdParty: true,
   profiles: [],
   rotation: { enabled: false, mode: 'shuffle', interval: 'daily', current: 0, items: [], lastRotate: null },
   schedule: { enabled: false, mode: 'time', dayProfile: null, nightProfile: null, dayStart: '07:00', nightStart: '19:00' },
@@ -204,6 +205,10 @@ export function rHeaderOpacity(): number { return clamp01(cfg.headerOpacity, DEF
 export function rHeaderBarOpacity(): number { return clamp01(cfg.headerBarOpacity, DEFAULT_CONFIG.headerBarOpacity) }
 /** Who owns the desktop caption strip's chrome ink — see `CaptionInkMode`. */
 export function rCaptionInk(): CaptionInkMode { return adoptCaptionInk(cfg.captionInk) }
+/** Whether the third-party compatibility pins are active — see `third-party.ts`. */
+export function rProtectThirdParty(): boolean {
+  return typeof cfg.protectThirdParty === 'boolean' ? cfg.protectThirdParty : DEFAULT_CONFIG.protectThirdParty
+}
 export function rBgState(): BgState { return cfg.bgState }
 export function rVideoBgState(): BgState { return cfg.videoBgState }
 
@@ -416,6 +421,7 @@ export function adoptConfig(raw: unknown): void {
     headerOpacity: clamp01(c.headerOpacity, DEFAULT_CONFIG.headerOpacity),
     headerBarOpacity: clamp01(c.headerBarOpacity, DEFAULT_CONFIG.headerBarOpacity),
     captionInk: adoptCaptionInk(c.captionInk),
+    protectThirdParty: typeof c.protectThirdParty === 'boolean' ? c.protectThirdParty : DEFAULT_CONFIG.protectThirdParty,
     profiles: adoptProfiles(c.profiles),
     rotation: adoptRotation(c.rotation),
     schedule: adoptSchedule(c.schedule),

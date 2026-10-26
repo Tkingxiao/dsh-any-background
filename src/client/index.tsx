@@ -21,6 +21,7 @@ import { registerThemeSidebarTab } from './sidebar/tab'
 import { registerNativeSidebarTab } from './sidebar/native-tab'
 import { SUN_PATHS } from './components/icons'
 import { startBetterSidebarWatch } from './env'
+import { startThirdPartyWatch } from './third-party'
 import { startHeaderPopoverTagging } from './header-tag'
 import { watchDom } from './dom-watch'
 import { rotationDue as sharedRotationDue, pickNextRotationIndex as sharedPickNext, rotationAdvancesLive as sharedRotationAdvancesLive } from '../shared/rotation'
@@ -454,6 +455,7 @@ export function apply(ctx: Ctx): void {
   }, 'dsh-any-background: schedule timer')
   ctx.effect(() => () => { teardownWp() }, 'dsh-any-background: wp cleanup')
   ctx.effect(() => startBetterSidebarWatch(), 'dsh-any-background: better-sidebar watch')
+  ctx.effect(() => startThirdPartyWatch(), 'dsh-any-background: third-party scan')
   ctx.effect(() => startHeaderPopoverTagging(), 'dsh-any-background: header popover tagging')
   ctx.effect(() => ctx.on('theme/change', () => {
     // The custom theme's preference lives in memory, so a host adoption can

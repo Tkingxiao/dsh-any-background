@@ -202,6 +202,13 @@ interface ThemeConfig {
    *  at write time, which is exactly how「标题栏」lost its settings in 0.3.7); the
    *  browser half reads it through `rCaptionInk`. */
   captionInk: string
+  /** Whether the third-party compatibility pins stay active (see the browser half's
+   *  `third-party.ts`): a surface that fills from a token this plugin fades — another
+   *  plugin's, not the host's — gets pinned back to a legible density. Like
+   *  `fontEnabled`, this is a behavior switch rather than an appearance value, so it is
+   *  deliberately NOT in `ProfileAppearance`: applying a look must not silently change
+   *  how a third-party plugin renders. */
+  protectThirdParty: boolean
   /** Saved appearance profiles (name + appearance snapshot). */
   profiles: ProfileEntry[]
   /** Wallpaper rotation pool + cadence. */
@@ -258,6 +265,7 @@ export const DEFAULT_CONFIG: ThemeConfig = {
   headerOpacity: 0.5,
   headerBarOpacity: 0.5,
   captionInk: 'auto',
+  protectThirdParty: true,
   profiles: [],
   rotation: { enabled: false, mode: 'shuffle', interval: 'daily', current: 0, items: [], lastRotate: null },
   schedule: { enabled: false, mode: 'time', dayProfile: null, nightProfile: null, dayStart: '07:00', nightStart: '19:00' },
@@ -464,6 +472,7 @@ function normalizeConfig(raw: unknown): ThemeConfig {
     headerOpacity: clamp(r.headerOpacity, 0, 1, DEFAULT_CONFIG.headerOpacity),
     headerBarOpacity: clamp(r.headerBarOpacity, 0, 1, DEFAULT_CONFIG.headerBarOpacity),
     captionInk: r.captionInk === 'theme' || r.captionInk === 'white' || r.captionInk === 'black' ? r.captionInk : 'auto',
+    protectThirdParty: typeof r.protectThirdParty === 'boolean' ? r.protectThirdParty : DEFAULT_CONFIG.protectThirdParty,
     profiles: normalizeProfiles(r.profiles),
     rotation: normalizeRotation(r.rotation),
     schedule: normalizeSchedule(r.schedule),

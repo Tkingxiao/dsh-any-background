@@ -2,7 +2,7 @@ import { MENU_FILL_TOKEN, PANEL_SURFACES, BETTER_SIDEBAR_PANEL, COMPOSER_TAKEOVE
 import { hostAdapter } from './host-compat/capabilities'
 import { HEADER_POPOVER_ATTR } from './header-tag'
 import { watchDom } from './dom-watch'
-import { rWp, rWpImage, rWpVideo, rBgState, rVideoBgState, rBl, rWop, rOps, rSop, rStrokes, rColor, rHasColor, rBlurs, rBgMode, rChatTextOpacity, rTrajectoryOpacity, rPanelOpacity, rProducedOpacity, rHeaderOpacity, rHeaderBarOpacity, rCaptionInk, rScheme, rColorScheme, rSchemeOverride, cfg, setWpUrl, rBgDark, setBgDark, disposeVideoObjectUrl } from './state'
+import { rWp, rWpImage, rWpVideo, rBgState, rVideoBgState, rBl, rWop, rOps, rSop, rStrokes, rColor, rHasColor, rBlurs, rBgMode, rChatTextOpacity, rTrajectoryOpacity, rPanelOpacity, rProducedOpacity, rHeaderOpacity, rHeaderBarOpacity, rCaptionInk, rProtectThirdParty, rScheme, rColorScheme, rSchemeOverride, cfg, setWpUrl, rBgDark, setBgDark, disposeVideoObjectUrl } from './state'
 import type { BackgroundType, GeneratedBgParams, PartOpacities, PartBlurs, StrokeConfig } from './types'
 import { genTokens, toRgba, extractWallpaperColor, analyzeFrameDark } from './utils/color'
 import { loadImage } from './utils/image'
@@ -105,6 +105,13 @@ const OPACITY_VARS: Record<string, string> = {
   '--dsw-specific-input-major': '--dsh-any-op-input',
   '--dsw-specific-menu': '--dsh-any-op-menu',
 }
+
+/** Every host token this plugin re-emits on `body` at a slider's alpha. Exported
+ *  because it is also the answer to "what can another plugin collide with": anything
+ *  that fills from one of these names fades with our sliders whether or not its author
+ *  knew we existed — the whole of §2-V. `third-party.ts` scans installed plugin
+ *  stylesheets for exactly this list. */
+export const OWNED_TOKENS: readonly string[] = Object.keys(OPACITY_VARS)
 
 // Fingerprint of the non-alpha token base (color pick + brightness verdict).
 // The static body rule is only rebuilt when it changes; a drag never touches it.
@@ -301,6 +308,9 @@ function applyCustomTokensNow(ops: PartOpacities): void {
     // underneath changes. This is the one function every color/verdict/scheme
     // path funnels through.
     applyExemptDefaults()
+    // Same funnel, same reason, for the pinned reading lanes of dsh-better-display:
+    // its plate must follow the theme color while ignoring every slider.
+    applyReaderLanes(surfaces)
   } catch {
     // ignore
   }
@@ -1397,6 +1407,181 @@ function ensureExemptStyle(): HTMLStyleElement {
   exemptStyleEl.dataset.plugin = 'dsh-any-background-exempt'
   document.head.appendChild(exemptStyleEl)
   return exemptStyleEl
+}
+
+// ── dsh-better-display reading lanes ───────────────────────────────────────
+// dsh-better-display (github.com/aa2246740/dsh-better-display) registers its own
+// reading view over the conversation and pins a stack of summary lanes to the top
+// of the scrollport: a toolbar lane, the live 「正在处理」 status lane, a closed-turn
+// digest, and the live-fold summary cell. Every one of them paints its plate from
+// the host's page-ground token — `Reader.module.css:13 / :17 / :558` all declare
+// `background:var(--dsw-alias-bg-base)`, and `:555 / :564 / :565` extend that plate
+// over the in-flow gaps with same-color `box-shadow` — and every one of them then
+// sets `backdrop-filter:none` (`:538`, `:546`), because an OPAQUE plate is what
+// hides the text that scrolls under a sticky band.
+//
+// That token is exactly what 「主界面」透明度 owns (`OPACITY_TOKEN_GROUPS`, part `bg`),
+// and its default is 0: on a fresh install their lanes paint nothing, the
+// conversation streams straight through the summary bar, and the bar is unreadable.
+// Their own answer is the `data-reader-glass` "skin mode" opt-in (`store.ts:52`,
+// off by default) that drops the plates and puts a frosted pill on each control
+// instead — a different product decision, not a fix for this.
+//
+// The shim pins that band OUTSIDE the sliders: a plate literal at `READER_LANE_ALPHA`
+// plus a `blur(READER_LANE_BLUR_PX)` frost. Only the ALPHA is pinned — the color still
+// comes from the active theme, the same rule `applyExemptDefaults` follows, so a picked
+// color / forced scheme / wallpaper verdict keep re-tinting the band while its density
+// stops being a knob.
+//
+// BINDING — the plate is re-declared as the TOKEN, not as `background`. They never
+// define or override `--dsw-alias-bg-base` anywhere (their `src/` and built sheet:
+// reads only, no declarations), so a local re-declaration is uncontested and needs
+// no `!important`: an element's own declaration beats `body`'s `!important` re-scope
+// because that one reaches it by inheritance only — the same mechanism documented on
+// `SIDEBAR_ONE_LAYER_RULE`.
+//
+// ONE BOX, NOT THREE — pinning every lane separately produced stacked bars that
+// visibly disagreed (different widths, a darker strip at every seam where their
+// same-color `box-shadow` gap plates overlapped another plate at 20% + 20%). The paint
+// therefore moved to a single element — the sticky wrapper — which is grown over the
+// whole band stack with padding cancelled by equal negative margins so no content
+// moves; see `READER_LANE_RULE` for the geometry and `READER_SILENT` for what stops
+// painting. The one thing this buys at a price: while a turn's lanes are NOT stuck
+// (you are looking at the very top of that turn), the grown box paints its 40px of
+// frost over the strip above it — the same trick their own `box-shadow` gap plates play
+// at 14px, just taller. CSS cannot see "stuck", so this is the trade, not an oversight.
+//
+// SCOPE — `[data-dsh-better-display]` is that plugin's own root marker
+// (`Reader.tsx:890`), the same selector it relies on internally (`StickyLane.tsx:9`),
+// and the three lane attributes are its own: `data-reader-lane` (`StickyLane.tsx:33`,
+// kinds `toolbar` | `status`), `data-reader-closed-summary`
+// (`ClosedProcessSummary.tsx:16`), `data-flow-summary` (`ChoreographedFlow.tsx:95`).
+// None of these four names exists anywhere in the host's 0.2.1-rc.3 install tree
+// (grep across all 97 `lib/client.js` bundles: 0 hits — the same grep finds
+// `data-chat-flow`), so this cannot reach a host element. A better-display build
+// that renames them simply stops matching, which leaves its lanes as it paints them.
+//
+// WHY GLASS MODE IS EXCLUDED — under `[data-reader-glass]` they set
+// `background:transparent` + `backdrop-filter:none` on these very lanes
+// (`:585-598`) and move the wash onto the buttons (`:602-609`). Pinning there would
+// replace their choice with ours; the `:not()` also keeps this selector out of any
+// cascade race with those glass rules.
+//
+// WHY THE FROST MAY SIT ON THEIR ELEMENT (the §2-F three-sins test) — a
+// backdrop-filter is only a hazard when something gets trapped, and nothing does:
+// the disclosed process body renders as a SIBLING of the lanes (`Reader.tsx:663` vs
+// `:648`), the diff panel a summary row opens is an in-flow `position:static` row
+// inside it (`DiffPanel.tsx:109-110`, `Reader.module.css:155`), the only positioned
+// descendants are self-contained pairs (`.think`/`.thinkText`, `.numberRoll*`), and
+// their image viewer is a `<dialog>` in the browser top layer. No new stacking
+// context reaches the paint order either: `.turnStickyLanes` already owns one
+// (`:27`, z-index 6) and `:556` pins its children `position:static; z-index:auto`, so
+// the lanes gain a filter without gaining a level — §2-T's ladder is untouched.
+const READER_ROOT = '[data-dsh-better-display]:not([data-reader-glass])'
+
+/** Plate density the lanes are pinned at: 「主界面」 at 20% — a band that reads as a
+ *  band while still letting the wallpaper through. */
+const READER_LANE_ALPHA = 0.2
+
+/** Frost the lanes are pinned at (px) — the middle of the 0–60 blur range, i.e. the
+ *  plugin's own default, so the band looks like every other frosted surface here. */
+const READER_LANE_BLUR_PX = 30
+
+/** The sticky wrapper holding the status lane and the closed-turn digest. It paints
+ *  NOTHING today (`Reader.module.css:27`), and `:556` forces both children
+ *  `position:static; z-index:auto` — so it is the one element whose box can simply BE
+ *  the band: one plate, one frost region, one pair of rounded corners. */
+const READER_WRAP = `${READER_ROOT} [class*="_turnStickyLanes"]`
+
+/** The band's two height levers, both published by that plugin itself
+ *  (`StickyLane.tsx:11-13` writes the measured toolbar and status-lane heights onto
+ *  ancestors the wrapper inherits from), so the merged box tracks real text wrapping
+ *  instead of a hardcoded 40px. */
+const READER_TOOLBAR_H = 'var(--reader-toolbar-height,40px)'
+const READER_BAND_TOP = `max(${READER_TOOLBAR_H},var(--reader-status-height,40px))`
+
+/** The two surfaces that paint a band, spelled once so the static and dynamic halves
+ *  cannot drift: the merged wrapper, and the live-fold summary cell — which cannot be
+ *  merged into it, because it sticks at `z-index:5` BELOW the wrapper's 6, so growing
+ *  the wrapper over that row would paint the wrapper's plate straight across the row's
+ *  own text (tried, measured, reverted). */
+export const READER_LANE_SEL = `${READER_WRAP},${READER_ROOT} [data-flow-summary]`
+
+/** Everything that used to paint its own plate and must stop now that the wrapper
+ *  does. Their plates are what made the stack read as separate bars: the status lane is
+ *  `width:calc(100% - var(--reader-control-width))` (`:546`) so it notched short of the
+ *  toolbar's width, and each `box-shadow` gap plate (`:555/:564/:565`) lands on a
+ *  neighbour and doubles the alpha there — a 14–16px darker strip per seam.
+ *
+ *  The toolbar lane hands its plate over only while a band exists to swallow it: a turn
+ *  with no process steps renders no wrapper at all, and there the strip would be left
+ *  with nothing behind its own button. It can be swallowed at all because its
+ *  `z-index:7` (`:538`) sits ABOVE the wrapper's 6 — its own text keeps painting over
+ *  the merged plate, which is exactly the arrangement the live-fold cell cannot use. */
+const READER_SILENT =
+  `${READER_WRAP}>*,` +
+  `${READER_ROOT}:has([class*="_turnStickyLanes"]) [data-reader-lane="toolbar"]`
+
+/** Static half — the merge, the frost, the shape. Every value is a literal or one of
+ *  that plugin's own published variables; nothing here reads a slider, which is what
+ *  makes the band immune to 调控.
+ *
+ *  It is TEXT in the dynamic sheet rather than a rule in `buildStaticStyles()`, and
+ *  that is the point: the static sheet is this plugin's contract with the HOST, and a
+ *  third-party accommodation must be able to vanish completely — paint, frost and the
+ *  merged box's geometry alike — when 「保护第三方表面」 is switched off. One sheet, one
+ *  owner, one thing to remove.
+ *
+ *  HOW THE BOX GROWS WITHOUT MOVING CONTENT: `padding-top` reaches up over the toolbar
+ *  strip and an equal negative `margin-top` cancels it, so the wrapper's margin box
+ *  keeps its height and every following sibling stays exactly where it was; `top` is
+ *  pulled up by the same amount so the STUCK position puts the wrapper's content back at
+ *  `max(toolbar, status)`. The lanes' text does not move a pixel — only the paint does.
+ *  Measured in the §4.2 mock with the pin on and off: the column's height and the first
+ *  paragraph's offset are identical, and the status row's `top` is unchanged.
+ *
+ *  The rounded bottom goes on whichever band is actually LAST: the live-fold cell sticks
+ *  40px below the wrapper (`:558`), so while the turn has one the wrapper is not the
+ *  bottom edge and rounding it would open a notch against the cell under it. A build
+ *  without `:has()` keeps both bands square; nothing else changes. */
+export const READER_LANE_RULE =
+  `${READER_LANE_SEL}{background:var(--dsw-alias-bg-base);box-shadow:none;` +
+  `${elementFrostDecl(`blur(${READER_LANE_BLUR_PX}px)`)}}` +
+  `${READER_WRAP}{border-radius:0 0 14px 14px;` +
+  `padding-top:${READER_TOOLBAR_H};margin-top:calc(0px - ${READER_TOOLBAR_H});` +
+  `top:calc(${READER_BAND_TOP} - ${READER_TOOLBAR_H})}` +
+  `${READER_ROOT} [data-flow-summary]{border-radius:0 0 14px 14px}` +
+  `${READER_ROOT} [data-reader-turn]:has([data-flow-summary]) ` +
+  `[class*="_turnStickyLanes"]{border-radius:0}` +
+  `${READER_SILENT}{background:transparent;box-shadow:none}`
+
+let readerStyleEl: HTMLStyleElement | null = null
+
+/** Emit the whole pin — geometry, frost and the plate literal — into one sheet, or
+ *  remove that sheet entirely. Two things switch it off: 「保护第三方表面」 being turned
+ *  off, and no color resolving yet (the palette and the host's own tokens are both
+ *  empty pre-boot), because a `var()` naming an unwritten property is the §2-E
+ *  guaranteed-invalid trap and its symptom here is the very bug being pinned. */
+export function applyReaderLanes(surfaces?: Record<string, string> | null): void {
+  if (typeof document === 'undefined') return
+  const base = rProtectThirdParty()
+    ? (surfaces ?? paletteTokens() ?? readHostOpacityTokens())?.['--dsw-alias-bg-base']
+    : undefined
+  if (base === undefined || base === '') {
+    if (readerStyleEl !== null) { readerStyleEl.remove(); readerStyleEl = null }
+    return
+  }
+  if (readerStyleEl === null) {
+    readerStyleEl = document.createElement('style')
+    readerStyleEl.dataset.plugin = 'dsh-any-background-reader'
+    document.head.appendChild(readerStyleEl)
+  }
+  // The plate is re-declared as the TOKEN, never as `background`: that plugin's own
+  // `background:var(--dsw-alias-bg-base)` then carries it, and an element's own
+  // declaration beats `body`'s inherited `!important` re-scope without needing
+  // `!important` (the mechanism documented on `SIDEBAR_ONE_LAYER_RULE`).
+  const css = `${READER_LANE_RULE}${READER_LANE_SEL}{--dsw-alias-bg-base:${toRgba(base, READER_LANE_ALPHA)}}`
+  if (readerStyleEl.textContent !== css) readerStyleEl.textContent = css
 }
 
 // ── Produced/artifact surfaces ─────────────────────────────────────────────
@@ -3297,6 +3482,10 @@ export function applyWp(): void {
   // state (picked color, wallpaper verdict, forced scheme, or none).
   applyPanelOverrides(rPanelOpacity())
   applyExemptDefaults()
+  // Directly, not only from the rAF-coalesced token pass above: a page that is not
+  // painting (hidden tab, occluded desktop window) never runs that frame, and the
+  // lanes would boot with no plate at all (§2-H).
+  applyReaderLanes()
   // applyProduced / applyHeaderPopovers (and, through them, the header-bar,
   // caption-band and view-card passes) are reached from applyPartBlurs just
   // below — spelling them out here too made every applyWp run each pass twice.
@@ -3363,6 +3552,7 @@ export function teardownWp(): void {
   document.documentElement.style.removeProperty('--dsh-any-blur-header')
   headerStyleEl?.remove(); headerStyleEl = null
   exemptStyleEl?.remove(); exemptStyleEl = null
+  readerStyleEl?.remove(); readerStyleEl = null
   for (const v of Object.values(OPACITY_VARS)) document.documentElement.style.removeProperty(v)
   baseTokenKey = ''
   lastBgKey = ''

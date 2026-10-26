@@ -83,6 +83,7 @@ try {
   assert.equal(first.config.headerBarOpacity, 0.5, 'default headerBarOpacity')
   assert.equal(first.config.strokes.headerBar.width, 0, 'default strokes.headerBar')
   assert.equal(first.config.captionInk, 'auto', 'default captionInk')
+  assert.equal(first.config.protectThirdParty, true, 'default protectThirdParty')
 
   // 2. Values written through the RPC survive the sanitizer, on disk and on read.
   await rpc('writeConfig', {
@@ -91,6 +92,7 @@ try {
       headerBarOpacity: 0.77,
       headerOpacity: 0.33,
       captionInk: 'theme',
+      protectThirdParty: false,
       strokes: { headerBar: { width: 2, color: 'theme', customColor: '#123456' } },
       profiles: [{
         id: 'smoke-profile',
@@ -114,6 +116,7 @@ try {
   assert.equal(disk.blurs.header, 44, 'disk: existing blurs.header untouched')
   assert.equal(disk.headerOpacity, 0.33, 'disk: existing headerOpacity untouched')
   assert.equal(disk.captionInk, 'theme', 'disk: captionInk')
+  assert.equal(disk.protectThirdParty, false, 'disk: protectThirdParty')
   assert.equal(disk.profiles.length, 1, 'disk: profile kept')
   assert.equal(disk.profiles[0].config.blurs.headerBar, 33, 'disk: profile blurs.headerBar')
   assert.equal(disk.profiles[0].config.blurs.header, 22, 'disk: profile blurs.header')
@@ -129,11 +132,17 @@ try {
   assert.equal(reloaded.config.strokes.headerBar.width, 2, 'read: strokes.headerBar.width')
   assert.equal(reloaded.config.profiles[0].config.blurs.headerBar, 33, 'read: profile headerBar')
   assert.equal(reloaded.config.captionInk, 'theme', 'read: captionInk')
+  assert.equal(reloaded.config.protectThirdParty, false, 'read: protectThirdParty')
 
   // 4. A value the host half does not know collapses to the default rather than
   //    reaching the browser half, where `rCaptionInk` would have to guess again.
   await rpc('writeConfig', { config: { captionInk: 'hot-pink' } })
   assert.equal(onDisk().captionInk, 'auto', 'disk: an unknown captionInk falls back to auto')
+  //    A boolean switch gets the same treatment: a string is not "truthy means on",
+  //    it is an unknown value, and the pin must not silently switch itself off
+  //    because some editor wrote `"false"` with quotes.
+  await rpc('writeConfig', { config: { protectThirdParty: 'yes' } })
+  assert.equal(onDisk().protectThirdParty, true, 'disk: a non-boolean protectThirdParty falls back to true')
 
   // 5. The rotation pool: same-millisecond adds get distinct file names, a
   //    manual activation persists the cursor server-side, and a remove keeps

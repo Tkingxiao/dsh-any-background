@@ -35,8 +35,8 @@
 | 配置落盘在真实磁盘 | `<DSH_HOME>/.dsh-any-background-data/theme-config.json` | **在 generation restore 之外**：回滚主题不会还原插件设置，删目录 = 整体重置 |
 | 版本事实按 release 隔离 | `src/host-compat/channel.ts`、`src/client/host-compat/versions/<目录>/` | 样式/逻辑代码里出现版本号比较 = 架构违规（§2-D） |
 | 静态样式表只有一张，顺序即语义 | `src/client/host-compat/styles.ts: buildStaticStyles()` | 挪动拼接顺序会改变胜负（§2-E） |
-| 动态写盘的另一半 | `style[data-plugin="…-tokens" / "-header" / "-exempt" / "-wco" / "-parts" / "-table-fix"]` | 现场调试先看这几张表（§4.3），比读代码快 |
-| body 级 MutationObserver 只有一个 | `src/client/dom-watch.ts`（统一 bus：childList+subtree+`aria-expanded`） | 新的 DOM 观察订阅 bus，不要自建 observer（parts / header-tag / env / navIcon 四个原来各自一个）；最后一个退订自动断开 |
+| 动态写盘的另一半 | `style[data-plugin="…-tokens" / "-header" / "-exempt" / "-reader" / "-wco" / "-parts" / "-table-fix"]` | 现场调试先看这几张表（§4.3），比读代码快 |
+| DOM 观察只有一个 observer、两棵树 | `src/client/dom-watch.ts`（bus：`body` 走 childList+subtree+`aria-expanded`，`head` 只走 childList） | 新的 DOM 观察订阅 bus 并选对 target，不要自建 observer（parts / header-tag / env / navIcon 四个原来各自一个）；`head` 那棵树只为开机自检看第三方样式表落地，按 record.target 路由且无人监听时不分配；最后一个退订自动断开 |
 | 轮换到期/选图数学双端共享 | `src/shared/rotation.ts`（tsdown 内联进两个 bundle） | 改日/周/随机语义只改这一处；在任一半侧重写 = 两端推进失去一致性 |
 
 ---
@@ -272,6 +272,8 @@ teardown 之后要有 `active` 闸门，防止已排队的回调把标记再写�
 不抢共享通道（§B）、不写别人的 slot、不假设别的插件的 DOM 或加载顺序；`dsh-better-sidebar` 是
 可选 peer，功能要探测它在不在（`startBetterSidebarWatch`）。宿主对不兼容插件是"跳过并警告"，
 宁可放弃功能，也不可将宿主带崩 —— 这条也是 §C 不收窄门禁的另一个理由。
+**反向的越界同样要查**：本插件改的是令牌而不是 `background`，所以"不越界"不止是"不写别人的节点"，
+还包括"别人的表面吃了我们接管的令牌时会不会塌"——那一类记在 §2-V。
 **插件自己抛出去的东西会带走宿主**：五页都包在 `components/ErrorBoundary.tsx` 里
 （`ThemeSection.tsx` 用 `<ErrorBoundary t={t}>` 包住），新增页面/入口必须留在它内部；
 宿主扩展点（`sidebarRightTabs` / `slots.contribute`）的返回值要判空，注册不上就静默不注册，
@@ -342,6 +344,29 @@ release 标题与提交主题一致；issue 回复要带根因 + 验证数字 + 
 实例全部出自 `50cdb5a`（v0.4.0）。防线：`scripts/smoke.mjs` 的落盘往返断言 +
 每种模式各一条负路径用例。
 
+### V. 跨插件令牌所有权 —— 别的插件的表面也吃我们接管的令牌
+
+**症状**：装某个第三方插件后，它的一块表面整体透明化、文字与底下滚动内容叠在一起；本插件的滑块表里没有任何一条规则指向它。
+
+**根因模式**：我们不改 `background`，改的是**令牌**（`body{--dsw-alias-bg-base:var(--dsh-any-op-bg)!important}` 等，§2-A / §2-I）。凡是从这些宿主令牌取色的表面——**不管它属于宿主还是属于另一个插件**——都会跟着滑块变透明。第三方插件按"这个令牌恒不透明"的假设画的底板，在我们的默认值（`opacities.bg = 0`，全新安装什么都不画）下就什么都不画了。
+
+**实例（v0.4.2）**：dsh-better-display 的吸顶总结栏。它的四条车道（`Reader.module.css:13 / :17 / :558`）全部 `background:var(--dsw-alias-bg-base)`，还特意把 `backdrop-filter` 关掉（`:538`、`:546`）——因为它原本靠不透明底板遮住滚过去的正文。`--dsw-alias-bg-base` 正是「主界面」透明度接管的那个令牌 → 底板消失 → 总结栏文字与正文重叠。
+
+**检查路径**（新增/改动任何被接管的令牌，或接入任何会画表面的第三方插件）：
+
+1. **谁在读这个令牌**：`grep` 宿主安装产物 **和 `~/.dsh/profiles/<档>/node_modules/` 里各第三方插件的产物表**（第三方插件的 CSS 以它 `lib/client.js` 里的内联字符串为准，与 `src/` 逐条对照；哈希前缀每次构建都变，`EiJPLW_` 与 `fSkBFq_` 是同一逻辑表的两个构建）。只 grep 宿主 = 漏掉这一整类。
+2. **它有没有自己的对策**：dsh-better-display 有 `data-reader-glass`「皮肤模式」（`store.ts:52` 默认关）——它自己把底板撤成 `transparent` 并把水洗挪到按钮上（`:585-598`、`:602-609`）。**已带对策的表面不要再替它决定**，用 `:not(它的对策标记)` 整条排除。
+3. **钉值怎么钉**：在**绘制元素上就地重发那个令牌**，不要改 `background`——元素自身的声明恒胜 `body` 上那条 `!important` 的**继承**值，所以不需要 `!important`（§2-E「同令牌 + 同选择器 + 同优先级」那条在这里不适用，因为对手是继承不是声明）；令牌也保证不会退化成 `var()` 指向未写属性（§2-E 自引用回退那条）。但**不要为了省事把 `box-shadow` 缝隙底板一起留着**：不透明时同色补漆看不出来，20% 之下每一处两块底板交叠就变成 0.2+0.2 的深色带——v0.4.2 第一版就是这么留下三条缝的。
+4. **多条吸顶带要合成一块，不要各画各的**：找那个"今天什么都不画、盒子正好覆盖整叠带"的元素当唯一绘制者（这里是 `.turnStickyLanes`：`:27` 无 background，`:556` 已把两个孩子压成 `position:static; z-index:auto`），其余表面一律 `background:transparent;box-shadow:none`。要吃掉上方那条带：`padding-top: X; margin-top: -X`，并把 `top` 同步减去 X —— 内容一格不动，只有绘制范围长出去了（实测：开关前后 column 高度与首段 `top` 完全一致）。**能不能合并由 z 阶梯决定**：工具栏道 z-7 在包裹层 z-6 之上，所以它的文字仍画在我们的板子上面，可以吞；实时折叠行 z-5 在之下，吞它就等于把它的文字盖掉（试过、量过、撤了）——所以那种状态留两块相邻的板。
+5. **颜色仍要跟主题，只有密度钉死**：字面量取自 `paletteTokens() ?? readHostOpacityTokens()`（与 `applyExemptDefaults` 同一入口、同一个 funnel 调用），解析不到就**一条都不发**。
+6. **磨砂能不能压在它身上**：照 §2-F 三宗罪逐个数——它有没有就地（非 portal）浮层、有没有 `position:fixed` 后代、展开体是不是它的后代。dsh-better-display 的展开体是车道的**兄弟**（`Reader.tsx:663` vs `:648`），diff 面板是 in-flow `static` 行（`DiffPanel.tsx:109`），定位后代全是自包含对（`.think`/`.thinkText`、`.numberRoll*`），图片预览走 `<dialog>` 顶层 → 可以压。它自己的产物表里就有 `backdrop-filter:blur(12px)` 挂在这些 sticky 车道上，Chromium 认这条。
+   **磨砂要糊得住东西，得有一整块够高的盒子**（v0.4.2 实测，同一页同一滚动位，量水平边缘能量）：逐条各画各的 40px 小盒时代，钉上滑块后 edge 3.04→**4.52**（不降反升——20% 底板把对比抬高了，模糊全落在边缘衰减区，等于没糊）；合并成 120px 一块后 edge 3.61→**0.70**，与"同样 20% 底板 + blur(30px) 的 fixed 对照"（**0.73**）吻合，而"同样 20% 底板、不磨砂"的对照是 **3.58** ≈ 无遮挡 3.81。结论两条：**底板单独什么遮不住，磨砂才是承重的**；而**磨砂要生效，盒子必须合并**——所以 §2-V 第 4 条不是审美，是功能。判据用边缘能量而不是看截图，是因为截图会被"测完开关序列后停在 OFF 再截"这类自摆乌龙骗过去（真发生过）。
+7. **识别只用结构标记，并证明它不撞宿主**：新选择器里的每个属性名都要在宿主安装产物里 grep 一遍（`grep -rl --include=*.js` 跑遍 `versions/<v>/node_modules/.pnpm` 的 97 个 `lib/client.js`），0 命中才允许写进规则；同时优先用**对方自己也在用的**标记（它内部 `closest('[data-dsh-better-display]')`，所以那名字是它自己的契约）。改名即失效 = 保持对方原样，这是特性不是缺陷（§2-E CSS Module 那条）。
+8. **整钉一张表，开关一撤到底**：合并后的几何（`padding-top` / 负 `margin-top` / `top`）、磨砂、底板字面量**全部写进 `style[data-plugin="…-reader"]` 这一张动态表**，不进 `buildStaticStyles()`。原因：`「保护第三方表面」`关掉时必须能整张撤下——静态表里留一半、动态表撤一半，会留下"几何还在、颜色没了"的半截状态。静态表是本插件与**宿主**的契约，第三方兼容不属于它（`styles.ts` 里那条注释就是这条）。
+9. **检测自动、保护登记**：`src/client/third-party.ts` 开机扫 `head` 里所有 `style[data-plugin="<包名>"]`（第三方插件挂自己表的通用约定），把读了 `OWNED_TOKENS` 的点名进日志——已登记的一行说明，未登记的 `console.warn` 并邀请把该行发过来。**不要**把未登记的表面自动钉值：猜别人哪块该亮就是 §2-G 那条有代价的启发式。加一个插件 = `THIRD_PARTY_PINS` 一行 + 它的 CSS。
+10. **兼容开关不进外观快照**：`protectThirdParty` 是行为开关（同 `fontEnabled`），**故意不写进 `ProfileAppearance` / `currentAppearance` / `applyAppearance`**——换一套外观不该顺手改变另一个插件的画法。它仍要走完 §2-A 的宿主半三处 + 客户端两处 + `smoke.mjs` 断言（含"非布尔值塌回默认"，别把 `"false"` 字符串当成真）。
+11. **钉值本身零运行时**：那张表由 `applyWp` / 开关两处直接写，**没有**为它设的 observer、不向对方 DOM 写任何节点/类/属性、也不需要读 `getComputedStyle`（密度来自我们自己的调色板入口）。因此 §2-O 的 teardown 只有一件事：`teardownWp()` 撤表。开机自检**才**是那个观察者——它订阅 `head` 的 childList（§R：只在新出现的 `style[data-plugin]` 且非自家表时重扫，实测 6 次无关 head 变更 0 重扫、1 次迟到插件表 1 点名），退订函数交给 `ctx.effect` 回收。两者别搞混：*检测有观察者，保护没有*。
+
 ---
 
 ## 3. 改动 → 必查映射
@@ -353,12 +378,14 @@ release 标题与提交主题一致；issue 回复要带根因 + 验证数字 + 
 | 认领 / 标记逻辑 | 单一持有者摘除、空态排除、portal 与就地两种形状、误认领邻居（dockkit / antd / 输入位）、teardown 能摘干净（§O） |
 | 磨砂（任何 `backdrop-filter`） | 是否压在宿主部件上（三宗罪）、模态撤隔离、`0` 的语义、宿主同名令牌是否被覆盖；磨砂列若带提层（`dab-part-blur-side`），overlay(z-20)/模态豁免（z-index 与 isolation 同进同退）/portal 层的次序要逐个核对（§2-F v0.4.2） |
 | 版本事实（新宿主） | §C 四处 + §D 三处 + `dshReleases` + README 兼容性段 |
+| 被接管令牌的语义（`--dsw-alias-bg-base` / `-layer-*` / `--dsw-specific-*`），或新接入一个会画表面的第三方插件 | §2-V 十一条：grep 遍宿主**与已装第三方插件的产物表**找消费者、对方自带对策（glass）就排除、钉值钉在令牌上而不是 `background`、多条吸顶带合成一块（合并与否由 z 阶梯决定）、颜色跟主题只有密度钉死、磨砂能否压在它身上按 §2-F 逐个数、选择器每个名字都要 0 命中宿主才算数 |
 | 滑块 / 选择器 UI | `onInput` 与 `onChange` 两条路径都落值；`metaRev` 订阅；禁用态与越界值；双语标签 |
 | 取色 / 明暗 | 强制方向 × 主题色明度 × 壁纸 verdict 的 2×2×3 组合；无主题色分支；皮肤注册（§N） |
 | 轮换档位 / 池语义 | 数学只改 `src/shared/rotation.ts`（§0）；给轮换接**新调用点**时逐个数一遍推进者——服务端 `read`、客户端 tick / boot 回退 / 启用开关 / 手动按钮——`reload` 档 `rotationDue` 恒为 true，多接一个就多一处"每次都切"（§2-H v0.4.1） |
 | 上传 / URL 拉取 | 上限与错误回传、MIME 落盘、`revokeObjectURL`、失败不留半个槽位 |
 | 新增 z-index / 提层 | §2-T 阶梯核对：提层上限、dialog 豁免同进同退、被提层列的就地浮层盘点、body 级 portal 次序 |
 | 状态"推进"类改动（游标、缓存、收养） | §2-U 所有权核对：真相在磁盘还是内存、深拷贝、魔数而非文件名、写失败路径 |
+| 任何**按 DOM 标记遍历其它插件**的逻辑（如 `third-party.ts` 的扫描） | 必须在**真宿主页面**量过：宿主自己给每张表打 `data-plugin`（实测 157/172 张是 `@deepseek-ai/`），先判命名空间再截断、再聚合；mock 只会给你一张表，永远测不出来 |
 | 新增运行时文件 | `package.json` 的 `files` + `exports`（§0） |
 | `lib/` | 一定要 `npm run bundle`，产物和源码同批提交 |
 
@@ -380,6 +407,12 @@ release 标题与提交主题一致；issue 回复要带根因 + 验证数字 + 
    **rAF 不触发**（要么先把 rAF 换成 `setTimeout`，要么像 v0.3.9 那样让代码不依赖绘制）。
    无内置浏览器时，headless Chrome 的 `--dump-dom` 可替代：把结果写进 DOM 再读取，可覆盖
    本路径的全部用途（v0.4.2 审计即以此完成）。
+   **mock 覆盖不到的两类**（v0.4.2 都是先过了 mock、后在真宿主上才抓到的）：
+   ① **页面上同类节点有多少**——mock 只挂一张宿主样式的表，真实 `<head>` 里是
+   **172 张 `style[data-plugin]`，其中 157 张属于 `@deepseek-ai/`**：任何"按标记遍历第三方"
+   的逻辑，成本与误报只有在真页面才量得出来。② **名字截断 / 归一化的顺序**——
+   `'@deepseek-ai/x'.split('/')[0]` 得到 `@deepseek-ai`，之后再拿 `startsWith('@deepseek-ai/')`
+   去判宿主就永远不成立；判定必须在截断**之前**做。
 
 3. **真机 `dsh web`** —— 唯一能证明"用户拖这个滑块，那块表面真的变了"。
    ```bash

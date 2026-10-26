@@ -1,8 +1,10 @@
+import { useEffect, useState } from 'react'
 import type { CSSProperties, ComponentType } from 'react'
 import type { ThemeSectionProps, ThemeStoreState, PartOpacities, PartBlurs, CaptionInkMode } from '../../types'
-import { cfg, rOps, rSop, rBlurs, rChatTextOpacity, rTrajectoryOpacity, rPanelOpacity, rProducedOpacity, rHeaderOpacity, rHeaderBarOpacity, rCaptionInk } from '../../state'
+import { cfg, rOps, rSop, rBlurs, rChatTextOpacity, rTrajectoryOpacity, rPanelOpacity, rProducedOpacity, rHeaderOpacity, rHeaderBarOpacity, rCaptionInk, rProtectThirdParty } from '../../state'
 import { saveConfig } from '../../rpc'
-import { applyCustomTokens, applySettingsOverrides, setPartBlur, applyViewCards, applyTrajectoryOverrides, applyPanelOverrides, applyProduced, applyHeaderPopovers, applyHeaderBar } from '../../wallpaper'
+import { applyCustomTokens, applySettingsOverrides, setPartBlur, applyViewCards, applyTrajectoryOverrides, applyPanelOverrides, applyProduced, applyHeaderPopovers, applyHeaderBar, applyReaderLanes } from '../../wallpaper'
+import { subscribeThirdParty, thirdPartySightings } from '../../third-party'
 import { LiveSlider } from '../LiveSlider'
 import { CanvasIcon, SidebarIcon, ChatIcon, GearIcon, TextIcon, TrajectoryIcon, InputIcon, PanelIcon, HeaderBarIcon } from '../icons'
 
@@ -50,6 +52,12 @@ export function InterfacePage({ p }: { p: ThemeSectionProps }) {
   // values from before the change (while the interface itself already moved).
   const metaRev = useStore((s: ThemeStoreState) => s.metaRev)
   void metaRev
+  // The third-party scan re-runs when another plugin's stylesheet lands in <head>,
+  // which can be after this page mounted; without this the list would show whatever
+  // was true when the page opened.
+  const [tpRev, setTpRev] = useState(0)
+  useEffect(() => subscribeThirdParty(() => setTpRev(v => v + 1)), [])
+  void tpRev
   // The panel row owns the host's own right Sidebar only. The dsh-better-sidebar
   // workbench used to ride this row too, but it is an artifact viewer, not a page
   // column, so since 0.3.2 it belongs to the produced row below (PRODUCED_RULE).
@@ -203,6 +211,44 @@ export function InterfacePage({ p }: { p: ThemeSectionProps }) {
           )
         })}
       </div>
+
+      {/* Third-party compatibility. This plugin fades the HOST's tokens, so any other
+          plugin that fills from them fades too — and its author had no way to know.
+          The scan names who is installed and what of ours they read; this card is where
+          that shows up, and where the whole class can be switched off. */}
+      <section className="dab-card dab-rise" style={{ '--d': PARTS.length + 1 } as CSSProperties}>
+        <div className="dab-row-head">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div className="dab-part-ico"><PanelIcon size={16} /></div>
+            <div className="dab-part-name">{t('tpTitle')}</div>
+          </div>
+          <button type="button" className={`dab-toggle${rProtectThirdParty() ? ' is-on' : ''}`} role="switch"
+            aria-checked={rProtectThirdParty()} aria-label={t('tpEnabled')} title={t('tpHint')}
+            onClick={() => {
+              cfg.protectThirdParty = !rProtectThirdParty()
+              // The pin lives entirely in its own sheet, so this single call emits or
+              // removes all of it — merged geometry, frost and plate alike.
+              applyReaderLanes()
+              saveConfig()
+              // …and bump the local counter: `saveConfig` only debounces the write, it
+              // does not touch metaRev, so without this the switch would flip the
+              // interface while its own knob stayed where it was (the v0.2.10 class).
+              setTpRev(v => v + 1)
+            }}>
+            <span className="dab-toggle-knob" />
+          </button>
+        </div>
+        <div className="dab-slider-block">
+          <span className="dab-slider-label" title={t('tpHint')}>{t('tpEnabled')}</span>
+          {thirdPartySightings().length === 0
+            ? <span style={{ fontSize: 12 }}>{t('tpNone')}</span>
+            : thirdPartySightings().map(s => (
+              <span key={s.plugin} style={{ fontSize: 12 }} title={s.tokens.join(', ')}>
+                {s.plugin}：{s.pinned && s.labelKey ? `${t(s.labelKey)} ${t('tpPinned')}` : s.pinned ? t('tpPinned') : t('tpUnpinned')}
+              </span>
+            ))}
+        </div>
+      </section>
     </>
   )
 }

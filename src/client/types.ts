@@ -275,6 +275,11 @@ export interface ThemeConfig {
   /** Who wins on the desktop caption strip when the theme's direction and the strip's
    *  actual brightness disagree — see `CaptionInkMode`. */
   captionInk: CaptionInkMode
+  /** Whether the third-party compatibility pins are active (`third-party.ts`): another
+   *  plugin's surface that fills from a token this plugin fades gets pinned back to a
+   *  legible density. A behavior switch like `fontEnabled`, so it is not part of a
+   *  profile's appearance snapshot. */
+  protectThirdParty: boolean
   /** Saved appearance profiles. */
   profiles: ProfileEntry[]
   /** Wallpaper rotation pool + cadence. */

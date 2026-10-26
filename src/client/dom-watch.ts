@@ -12,18 +12,37 @@
  *
  * Teardown: unsubscribing the last listener disconnects the observer, so a
  * plugin dispose leaves nothing watching the DOM.
+ *
+ * Two trees, still ONE observer: `body` (subtree, the original contract) and `head`
+ * (childList only, for `style[data-plugin]` sheets — see `DomTarget`). Records are
+ * routed by target, and the head split is gated on somebody listening, so adding the
+ * second tree costs the body listeners nothing.
  */
 export type DomListener = (records: MutationRecord[]) => void
 
-const listeners = new Set<DomListener>()
+/** Which tree a subscription watches. `head` is the one place the plugin needs to see
+ *  a stylesheet appear — third-party plugins tag their own sheets
+ *  (`style[data-plugin="…"]`, which is how dsh-better-display mounts its CSS), and that
+ *  is the only reliable "this plugin is loaded" signal that does not depend on its view
+ *  being mounted. It is observed WITHOUT `subtree`, so its records always carry
+ *  `target === document.head` and can be routed cleanly. */
+export type DomTarget = 'body' | 'head'
+
+const listeners: Record<DomTarget, Set<DomListener>> = { body: new Set(), head: new Set() }
 let observer: MutationObserver | null = null
 
-/** Subscribe to body-subtree mutations. Returns an unsubscribe. */
-export function watchDom(cb: DomListener): () => void {
-  listeners.add(cb)
+/** Subscribe to mutations of one tree. Returns an unsubscribe. */
+export function watchDom(cb: DomListener, target: DomTarget = 'body'): () => void {
+  listeners[target].add(cb)
   if (observer === null && typeof MutationObserver !== 'undefined' && typeof document !== 'undefined') {
     observer = new MutationObserver(records => {
-      for (const l of listeners) l(records)
+      // Body listeners keep seeing the raw batch exactly as before. The head split is
+      // gated on somebody actually listening, so the common case pays no allocation.
+      for (const l of listeners.body) l(records)
+      if (listeners.head.size > 0) {
+        const head = records.filter(r => r.target === document.head)
+        if (head.length > 0) for (const l of listeners.head) l(head)
+      }
     })
     observer.observe(document.body, {
       childList: true,
@@ -31,10 +50,11 @@ export function watchDom(cb: DomListener): () => void {
       attributes: true,
       attributeFilter: ['aria-expanded'],
     })
+    observer.observe(document.head, { childList: true })
   }
   return () => {
-    listeners.delete(cb)
-    if (listeners.size === 0) {
+    listeners[target].delete(cb)
+    if (listeners.body.size + listeners.head.size === 0) {
       observer?.disconnect()
       observer = null
     }
