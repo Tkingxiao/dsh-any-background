@@ -1,0 +1,49 @@
+name: Release
+
+# Cutting a release is one action: push a `v<version>` tag. This workflow turns that tag
+# into a GitHub release with notes generated from the commits since the last one, and
+# publish.yml runs from the same tag push (a release created with the workflow's own
+# token does not fire `release: published` — GitHub suppresses that recursion — so the
+# two workflows are deliberately independent rather than chained).
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to release (e.g. v1.2.3)'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Resolve the tag
+        id: tag
+        run: |
+          set -eu
+          tag='${{ github.event.inputs.tag || github.ref_name }}'
+          case "$tag" in
+            v*) ;;
+            *) echo "::error::tag '$tag' must look like v1.2.3"; exit 1 ;;
+          esac
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          set -eu
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "release $TAG already exists; nothing to do"
+            exit 0
+          fi
+          gh release create "$TAG" --title "$TAG" --generate-notes --verify-tag

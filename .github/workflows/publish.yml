@@ -1,8 +1,16 @@
 name: Publish to npm
 
+# Three ways in:
+#  - a `v*` tag push (the same push that makes the GitHub release), so cutting a release
+#    is one action;
+#  - `release: published`, for a release created in the web UI;
+#  - or manually from the Actions tab.
+# Every path is idempotent: a version that is already on npm is skipped, not failed.
 on:
   release:
     types: [published]
+  push:
+    tags: ['v*']
   workflow_dispatch:
 
 # Trusted publishing: npm exchanges this job's OIDC token for a short-lived credential,
@@ -18,16 +26,42 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      - name: Check the tag matches package.json
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          if [ "v$version" != "${GITHUB_REF_NAME}" ]; then
+            echo "::error::tag ${GITHUB_REF_NAME} does not match package.json v$version"
+            exit 1
+          fi
+
+      - name: Is this version already on npm?
+        id: npm
+        run: |
+          name="$(node -p "require('./package.json').name")"
+          version="$(node -p "require('./package.json').version")"
+          if npm view "$name@$version" version >/dev/null 2>&1; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+            echo "$name@$version is already published; skipping"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+
       # lib/ is committed, but the published bundle has to come from the tagged source,
       # not from whatever was last built on someone's machine.
-      - uses: pnpm/action-setup@v4
+      - if: steps.npm.outputs.present == 'false'
+        uses: pnpm/action-setup@v4
         with:
           version: 10
-      - uses: actions/setup-node@v4
+      - if: steps.npm.outputs.present == 'false'
+        uses: actions/setup-node@v4
         with:
           node-version: 24
           cache: pnpm
 
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm bundle
-      - run: npm publish --provenance --access public
+      - if: steps.npm.outputs.present == 'false'
+        run: pnpm install --frozen-lockfile
+      - if: steps.npm.outputs.present == 'false'
+        run: pnpm bundle
+      - if: steps.npm.outputs.present == 'false'
+        run: npm publish --provenance --access public
