@@ -1,0 +1,33 @@
+name: Publish to npm
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+# Trusted publishing: npm exchanges this job's OIDC token for a short-lived credential,
+# so no NPM_TOKEN secret is stored on the repository. `id-token: write` is the whole
+# permission the exchange needs; `contents: read` is all the checkout needs.
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      # lib/ is committed, but the published bundle has to come from the tagged source,
+      # not from whatever was last built on someone's machine.
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm bundle
+      - run: npm publish --provenance --access public
