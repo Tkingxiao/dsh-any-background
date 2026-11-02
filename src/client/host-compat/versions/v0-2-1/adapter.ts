@@ -1,6 +1,7 @@
 /**
  * Adapter for the DSH `0.2.1` patch line, verified at `0.2.1-alpha.1`,
- * `alpha.2`, `alpha.3`, `alpha.4`, `alpha.5`, `rc.1`, `rc.2` and `rc.3`.
+ * `alpha.2`, `alpha.3`, `alpha.4`, `alpha.5`, `rc.1`, `rc.2`, `rc.3`, `rc.4`
+ * and `rc.5`.
  *
  * A new MINOR line opened with a prerelease, and the answer is the `0.2.0-rc.2`
  * folder's — which is a statement this file has to earn, because "same as the
@@ -51,6 +52,25 @@
  *   · `ConversationRoot.module.css` re-laid the View tab row (wrap, gaps, the
  *     More launcher's classes). Layout inside the header, not a surface the
  *     plugin styles by these class names.
+ *
+ * Re-checked at `0.2.1-rc.4` and `rc.5`, and the answer is blunter than for `rc.3`:
+ * those two builds ship artifacts BYTE-IDENTICAL to `rc.3`. The whole install was
+ * hashed — 296 `@deepseek-ai/dsh-*` packages, 5604 shipped files — and 30 files
+ * moved across `rc.3 → rc.5`, none of them a stylesheet this folder speaks for:
+ *   · `ui-sidebar`, `ui-settings-general`, `ui-settings-account` changed only an
+ *     inlined version-string literal; `ui-llm-deepseek-account`, `dsh-mcp-client`
+ *     and `dsh-mcp-resources` are not surfaces at all.
+ *   · `ui-conversation` (`rc.4`) made the header View tab label's tooltip
+ *     CONDITIONAL — `ViewTabLabel` now passes `disabled: !labelNeedsTooltip(label)`
+ *     and keeps `portal: true`. It stays a body-level portal (z-1100, §2-T), so the
+ *     `dab-part-blur-side` lift of `rc.3`'s issue #32 is unaffected: the arm that
+ *     needed the lift was the in-place `span[role=tooltip]`, and this one never was.
+ *   · `ui-chat` + `cordis-client-runner` (`rc.5`) moved the reasoning-body slot
+ *     contract: `ReasoningBodyOwnerProps` gains `rawText`, and a new
+ *     `reasoningText()` helper strips a leading `<signature>` block. This plugin
+ *     registers no chat slot, so it reads none of that contract.
+ * No token, no `[class*="…"]` shape, no `z-index` and no `data-slot` key moved on
+ * either build, so `rc.4`/`rc.5` join this folder's name instead of opening one.
  *
  * Re-checked again across the rest of the line (`alpha.3` … `rc.2`, `git diff
  * <tag> rc.2` on every file above): the menu token contract, both menu stylesheets
@@ -153,7 +173,7 @@ function panelFragments(): PanelFragments {
 
 export function createAdapter(host: HostInfo): HostAdapter {
   return {
-    id: '0.2.1-alpha.1…rc.3',
+    id: '0.2.1-alpha.1…rc.5',
     channel: '0.2.1',
     host,
     panelFragments,

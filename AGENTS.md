@@ -99,9 +99,18 @@ npm test                            # 真起宿主半侧，跑「写盘 → 重�
 **症状**：新宿主一发布，插件整包不加载，界面无任何提示（issue #19、#20）。
 
 **检查路径**：`engines.dsh`、六条 `@deepseek-ai/dsh-*` `peerDependencies`、`dsh.compatibility.dsh`、
-`dsh.compatibility.dshReleases` 四处一起改。宿主**只对前缀是 `@deepseek-ai/dsh` / `dsh-*` 的 peer**
+`dsh.compatibility.dshReleases` 四处一起改，改完由 `npm test` 机检（`scripts/smoke.mjs` 第 8 步：每处都要点名每个已核对构建，
+且都留着不设上界的尾巴）。宿主**只对前缀是 `@deepseek-ai/dsh` / `dsh-*` 的 peer**
 做门禁（`packages/boot/app-boot/src/plugin-compatibility.ts`，`semver.satisfies(…, {includePrerelease:true})`）
 —— `@deepseek-ai/cordis`、`react`、`dsh-better-sidebar` 不参与，不要计入。
+
+**但真正决定加载的只有 `engines.dsh`**：`app-boot` 的 `unmetRequirements`
+在 `engines.dsh` 存在时只看它自己、**整份 peer 列表被跳过**。本插件带着 `engines.dsh`，
+所以 peer 写漏不会拦住加载（仍要四处一致：市场页与 `dshReleases` 读的是它们），
+排查"装了却不加载"先看这一条。（0.2.2-alpha.2 产物核实。）
+
+`dsh.compatibility.dshReleases` 在宿主产物里**没有任何消费者**（0.2.2-alpha.2 全量 grep 0 命中）：
+它是给人看的记录，不是门禁输入，值沿用 `compatible`，"怎么验证的"写进 README 兼容性表和适配器注释里。
 
 **红线**：**不要 fail closed**，收窄门禁 = 插件整包不可用。策略是"逐点名列举已验证构建 + 一个不封顶的 `>=`"。
 装/更新插件后必须重启宿主（门禁在**组装 profile 时**跑，不在更新时跑）—— 这条要写进 issue 回复。
@@ -112,6 +121,10 @@ npm test                            # 真起宿主半侧，跑「写盘 → 重�
   `KnownChannel`/`channelOf`；目录名按**它事实验证过的 tag** 命名（`v0-2-1`、`v0-2-0-rc-2`）。
 - 事实粒度按"事实"切，不按版本号形状：`0.2.0-rc.1` 与 `rc.2` 同渠道，但 rc.2 改了粘性分组标题的
   令牌名，于是两个目录。
+- **跨补丁线即使答案相同也另开一份事实**（`v0-2-2` 之于 `v0-2-1`，0.2.2-alpha.2 逐条重读后无一项改动）。
+  理由不是形式主义：一份目录的结论是**在某一行的 tag 上读出来的**，"线变了但结论一样"这句话必须由新目录
+  自己写一遍并带上它的核对依据，否则旧目录的注释就在替它没读过的宿主作证。同一**线**内不需要（`rc.4`/`rc.5`
+  并入 `v0-2-1`，判定从 `line` 升 `exact`）。
 - 消费方只问问题（`hostAdapter().menus.frostDecl`、`surface.headerSlotKeys`），不比对字符串。
 - 客户端**探测不到**宿主版本：版本由 Node 半解析（`ctx.profileContext.installAnchor`）随 `read`
   RPC 载荷下发，`release.ts: adoptHostInfo` 采纳 —— 所以 RPC 失败时跑的是 `unknown` 适配层，
@@ -352,6 +365,8 @@ release 标题与提交主题一致；issue 回复要带根因 + 验证数字 + 
 
 **实例（v0.4.2）**：dsh-better-display 的吸顶总结栏。它的四条车道（`Reader.module.css:13 / :17 / :558`）全部 `background:var(--dsw-alias-bg-base)`，还特意把 `backdrop-filter` 关掉（`:538`、`:546`）——因为它原本靠不透明底板遮住滚过去的正文。`--dsw-alias-bg-base` 正是「主界面」透明度接管的那个令牌 → 底板消失 → 总结栏文字与正文重叠。
 
+**实例（同一族，走的是另一条路）**：dsh-memu 的新会话询问弹窗拿 `background:var(--dsw-alias-bg-base, #fff)` 当底板（`dsh-memu/lib/client.js` 的 `S.modal`）——同一个令牌、同一个默认 0，于是整个弹窗什么都不画。这次**没有**加 `THIRD_PARTY_PINS` 行，而是补进**语义类豁免臂**：`applyExemptDefaults` 早就为宿主的确认弹窗钉住 layer/menu 令牌（`wallpaper.ts:1367-1369`），却**漏了地面令牌**——结果对话框的卡片不透明、它脚下的页面地面却照样跟着「主界面」滑块消失。现在 dialog 那条臂单独带 `--dsw-alias-bg-base` 字面量（`:1401-1402`），行菜单与 install registry 两条臂不带，卡片滑块照旧管得到卡片。
+
 **检查路径**（新增/改动任何被接管的令牌，或接入任何会画表面的第三方插件）：
 
 1. **谁在读这个令牌**：`grep` 宿主安装产物 **和 `~/.dsh/profiles/<档>/node_modules/` 里各第三方插件的产物表**（第三方插件的 CSS 以它 `lib/client.js` 里的内联字符串为准，与 `src/` 逐条对照；哈希前缀每次构建都变，`EiJPLW_` 与 `fSkBFq_` 是同一逻辑表的两个构建）。只 grep 宿主 = 漏掉这一整类。
@@ -366,6 +381,8 @@ release 标题与提交主题一致；issue 回复要带根因 + 验证数字 + 
 9. **检测自动、保护登记**：`src/client/third-party.ts` 开机扫 `head` 里所有 `style[data-plugin="<包名>"]`（第三方插件挂自己表的通用约定），把读了 `OWNED_TOKENS` 的点名进日志——已登记的一行说明，未登记的 `console.warn` 并邀请把该行发过来。**不要**把未登记的表面自动钉值：猜别人哪块该亮就是 §2-G 那条有代价的启发式。加一个插件 = `THIRD_PARTY_PINS` 一行 + 它的 CSS。
 10. **兼容开关不进外观快照**：`protectThirdParty` 是行为开关（同 `fontEnabled`），**故意不写进 `ProfileAppearance` / `currentAppearance` / `applyAppearance`**——换一套外观不该顺手改变另一个插件的画法。它仍要走完 §2-A 的宿主半三处 + 客户端两处 + `smoke.mjs` 断言（含"非布尔值塌回默认"，别把 `"false"` 字符串当成真）。
 11. **钉值本身零运行时**：那张表由 `applyWp` / 开关两处直接写，**没有**为它设的 observer、不向对方 DOM 写任何节点/类/属性、也不需要读 `getComputedStyle`（密度来自我们自己的调色板入口）。因此 §2-O 的 teardown 只有一件事：`teardownWp()` 撤表。开机自检**才**是那个观察者——它订阅 `head` 的 childList（§R：只在新出现的 `style[data-plugin]` 且非自家表时重扫，实测 6 次无关 head 变更 0 重扫、1 次迟到插件表 1 点名），退订函数交给 `ctx.effect` 回收。两者别搞混：*检测有观察者，保护没有*。
+12. **能按语义钉的就不要按名字钉**：主题插件不可能枚举未来的第三方，所以 `[role="dialog"][aria-modal="true"]`（`wallpaper.ts:1382`）这类**宿主自己定义的语义**优先——语义臂是本插件与**宿主**的契约，可以留在 exempt 表里（第 8 条"开关一撤到底"的理由管不到它：它从来不受 `protectThirdParty` 约束）；按包名点名的兼容才走 `THIRD_PARTY_PINS` + `-reader` 表。**每条臂各有自己的令牌清单**，动一个被接管的令牌就要逐条臂问一遍"这条的清单里有没有它"——`bg-base` 正是从 dialog 臂的 layer 清单（`:1367-1369`）旁边漏过去的：对话框的卡片钉住了，它脚下的地面却继续跟着滑块消失。
+   **两个配套事实**：① dialog 臂的识别条件是 `:not([aria-labelledby])`（它靠这一点与 `SETTINGS_PANEL_SEL`（`:335`）区分确认弹窗和设置面板），所以第三方弹窗必须用 `aria-label` 而不是 `aria-labelledby`，写了就掉出豁免；② 第 1 条的扫描只认 `style[data-plugin]`，而 dsh-memu 的表挂的是 `data-dsh-memu="ui"`——**扫不到 ≠ 不存在**，语义臂就是这类"没打约定标记"的插件唯一的兜底。
 
 ---
 
@@ -377,8 +394,8 @@ release 标题与提交主题一致；issue 回复要带根因 + 验证数字 + 
 | 一条 CSS 规则（`wallpaper.ts` 常量） | `styles.ts` 里的**位置**（谁该赢）、优先级、`0` 与"未设置"两种取值各画出什么（§E 第 2 行） |
 | 认领 / 标记逻辑 | 单一持有者摘除、空态排除、portal 与就地两种形状、误认领邻居（dockkit / antd / 输入位）、teardown 能摘干净（§O） |
 | 磨砂（任何 `backdrop-filter`） | 是否压在宿主部件上（三宗罪）、模态撤隔离、`0` 的语义、宿主同名令牌是否被覆盖；磨砂列若带提层（`dab-part-blur-side`），overlay(z-20)/模态豁免（z-index 与 isolation 同进同退）/portal 层的次序要逐个核对（§2-F v0.4.2） |
-| 版本事实（新宿主） | §C 四处 + §D 三处 + `dshReleases` + README 兼容性段 |
-| 被接管令牌的语义（`--dsw-alias-bg-base` / `-layer-*` / `--dsw-specific-*`），或新接入一个会画表面的第三方插件 | §2-V 十一条：grep 遍宿主**与已装第三方插件的产物表**找消费者、对方自带对策（glass）就排除、钉值钉在令牌上而不是 `background`、多条吸顶带合成一块（合并与否由 z 阶梯决定）、颜色跟主题只有密度钉死、磨砂能否压在它身上按 §2-F 逐个数、选择器每个名字都要 0 命中宿主才算数 |
+| 版本事实（新宿主） | §C 四处 + §D 三处（跨线另开目录见 §D）+ `dshReleases` + README 兼容性段 + `npm test` 第 8 步的门禁机检会跟着红 |
+| 被接管令牌的语义（`--dsw-alias-bg-base` / `-layer-*` / `--dsw-specific-*`），或新接入一个会画表面的第三方插件 | §2-V 十二条：grep 遍宿主**与已装第三方插件的产物表**找消费者、对方自带对策（glass）就排除、钉值钉在令牌上而不是 `background`、多条吸顶带合成一块（合并与否由 z 阶梯决定）、颜色跟主题只有密度钉死、磨砂能否压在它身上按 §2-F 逐个数、选择器每个名字都要 0 命中宿主才算数；**外加第 12 条**：三条豁免臂（dialog / 行菜单 / registry）各自的令牌清单逐个核，能按语义钉的不要按名字钉 |
 | 滑块 / 选择器 UI | `onInput` 与 `onChange` 两条路径都落值；`metaRev` 订阅；禁用态与越界值；双语标签 |
 | 取色 / 明暗 | 强制方向 × 主题色明度 × 壁纸 verdict 的 2×2×3 组合；无主题色分支；皮肤注册（§N） |
 | 轮换档位 / 池语义 | 数学只改 `src/shared/rotation.ts`（§0）；给轮换接**新调用点**时逐个数一遍推进者——服务端 `read`、客户端 tick / boot 回退 / 启用开关 / 手动按钮——`reload` 档 `rotationDue` 恒为 true，多接一个就多一处"每次都切"（§2-H v0.4.1） |
@@ -392,6 +409,18 @@ release 标题与提交主题一致；issue 回复要带根因 + 验证数字 + 
 ---
 
 ## 4. 四条测试路径：能证明什么
+
+0. **宿主产物全量比对（核对新宿主的默认做法）** —— 不装宿主也能把"这份事实还成不成立"问到底：
+   从装机目录列出全部 `@deepseek-ai/dsh-*` 包（实测 296 个），按 tag 抓 npm tarball 解包，
+   **逐文件取哈希**再比对（0.2.1-rc.3 → rc.5：5604 个产物文件里只有 30 个变过）。
+   然后只对本插件声称的那几类事实做集合差：`--dsw-*`/`--dsh-*` 令牌、`[class*="_…"]` 类名局部段、
+   `data-slot` 键、`z-index` 数值、`backdrop-filter`/`isolation`、`data-*` 标记。
+   能证明：哪些事实真的动了、哪些只是"出现次数变了"（次数变不算改）、以及两个 rc 是否**逐字节相同**
+   （`rc.4`/`rc.5` 就是这样判掉、直接并入 `v0-2-1` 的）。
+   顺带把本插件写到的**每个选择器字面量**在三个版本的产物全文里数一遍命中，0 命中才算掉一项。
+   *不能*证明：任何观感、遮挡、模糊 —— 那仍然是 §4.3。
+   注意哈希比的是**产物**，包名与版本号仍会变（`package.json` 里的 monorepo 内部 pin），
+   所以比对要显式跳过 `package.json`。
 
 1. **`npm test`（宿主半侧真机）** —— 唯一能证明"配置真的落盘、真的读回、Profile 真的带"。
    它用一个临时 `DSH_HOME` 起真实 `lib/index.js` + 真 HTTP，不触碰本机 `~/.dsh`。

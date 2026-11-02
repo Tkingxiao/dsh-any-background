@@ -1393,8 +1393,15 @@ export function applyExemptDefaults(): void {
   // the typed address would still inherit the card alpha and fade anyway.
   const registry = '[data-install-registry]'
   const body = decls.join(';')
+  // A dialog's own plate is painted from --dsw-alias-bg-base, which the 「主界面」
+  // slider also owns — so without this the exemption would hold a confirm dialog's
+  // cards opaque while its background kept fading under them. Only the dialog arm
+  // gets it: the row menu and the registry chooser are cards, and cards are meant
+  // to follow the card slider.
+  const ground = source?.['--dsw-alias-bg-base']
+  const dialogBody = ground === undefined || ground === '' ? body : `${body};--dsw-alias-bg-base:${toRgba(ground, 1)}`
   const css =
-    `${dialog},${dialog} *{${body}}` +
+    `${dialog},${dialog} *{${dialogBody}}` +
     `[role="menu"]:has([class*="_danger"]){${body}}` +
     `${registry},${registry} *{${body}}`
   if (el.textContent !== css) el.textContent = css

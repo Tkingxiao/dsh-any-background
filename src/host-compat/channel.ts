@@ -38,13 +38,32 @@
  *  session header's View row grows a More menu that portals to `body` — already a
  *  header candidate through the tagger's portaled arm.
  *
+ *  `rc.4` and `rc.5` are the same line for the same reason, and the evidence is
+ *  blunter than `rc.3`'s: across all 296 `@deepseek-ai/dsh-*` packages of a
+ *  `0.2.1-rc.3` install, every shipped file is byte-identical through `rc.5` except
+ *  eight, and none of those eight is a stylesheet this plugin reads. What did move
+ *  is a version-string literal (`settings-general`, `settings-account`, `sidebar`),
+ *  a conditional tooltip on the header View tabs (`ui-conversation`), and the
+ *  reasoning-body slot contract (`ui-chat`, `cordis-client-runner`) — no token, no
+ *  class shape, no `z-index`, no `data-slot` key.
+ *
  *  The 0.1.5 / 0.1.6 / 0.1.7 channels are GONE: their folders went with them, and a
  *  channel with no folder is a compile error, not a fallback. A host still sitting
- *  on that era clamps to the oldest row here and says so (`nearest`). */
+ *  on that era clamps to the oldest row here and says so (`nearest`).
+ *
+ *  `0.2.2` opens a NEW PATCH LINE, keyed the way `0.2.1` is — to the line, not to a
+ *  prerelease name. Checked build: `0.2.2-alpha.2` (the `alpha` dist-tag; no
+ *  `alpha.1` was ever published). Nothing the `0.2.1` folder speaks for moved onto
+ *  it — see `client/host-compat/versions/v0-2-2/adapter.ts` for the whole diff and
+ *  the two host-side deltas that did land. The line is keyed separately anyway,
+ *  because a folder's facts were earned by reading a tag on ONE line, and an
+ *  unchanged-answers claim across a line boundary is a claim the new folder has to
+ *  carry in its own words. */
 export type HostChannel =
   | '0.2.0-rc'
   | '0.2.0-rc.2'
   | '0.2.1'
+  | '0.2.2'
   | 'unknown'
 
 /** A known channel — one that has a real adapter. */
@@ -79,6 +98,9 @@ export const SUPPORTED_RELEASES: readonly SupportedRelease[] = [
   { channel: '0.2.1', release: '0.2.1-rc.1' },
   { channel: '0.2.1', release: '0.2.1-rc.2' },
   { channel: '0.2.1', release: '0.2.1-rc.3' },
+  { channel: '0.2.1', release: '0.2.1-rc.4' },
+  { channel: '0.2.1', release: '0.2.1-rc.5' },
+  { channel: '0.2.2', release: '0.2.2-alpha.2' },
 ]
 
 /** How the chosen adapter relates to the release that was detected. Reported so a

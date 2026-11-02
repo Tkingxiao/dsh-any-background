@@ -235,7 +235,45 @@ try {
   const drift = warnings.filter(w => w.includes('ignoring unknown config field'))
   assert.deepEqual(drift, [], `unexpected config drift warnings: ${drift.join(' | ')}`)
 
-  originalWarn('smoke: PASS — settings, profiles, rotation pool, and the upload fence round-trip through disk')
+  // 8. Version gate + bundle freshness (§C, §0). `app-boot`'s `unmetRequirements`
+  //    reads `engines.dsh` ALONE when present and ignores peerDependencies, so the
+  //    four manifest places can silently disagree; and `lib/` is the publishable, so
+  //    a `src/` change that was never bundled ships the OLD version facts.
+  const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
+  const gateStrings = {
+    'engines.dsh': manifest.engines.dsh,
+    'dsh.compatibility.dsh': manifest.dsh.compatibility.dsh,
+    ...Object.fromEntries(Object.entries(manifest.peerDependencies)
+      .filter(([name]) => name.startsWith('@deepseek-ai/dsh-'))
+      .map(([name, range]) => [`peer ${name}`, range])),
+  }
+  const verified = Object.keys(manifest.dsh.compatibility.dshReleases)
+  assert.ok(verified.length > 0, 'dshReleases names no verified host build')
+  for (const [where, range] of Object.entries(gateStrings)) {
+    for (const release of verified) {
+      assert.ok(range.split(' || ').includes(release), `${where} does not name verified build ${release}`)
+    }
+    assert.match(range, /\|\| >=\d/, `${where} has no uncapped tail — the gate would fail closed on the next host (§C red line)`)
+  }
+  // Each verified build must route to an adapter folder, through a channel the
+  // client bundle actually carries — a `SUPPORTED_RELEASES` row whose channel has
+  // no folder is a runtime crash the type system cannot see from here.
+  const clientBundle = readFileSync(new URL('../lib/client.js', import.meta.url), 'utf8')
+  const hostBundle = readFileSync(new URL('../lib/index.js', import.meta.url), 'utf8')
+  for (const release of verified) {
+    assert.ok(hostBundle.includes(`'${release}'`) || hostBundle.includes(`"${release}"`),
+      `lib/index.js was not rebuilt after ${release} joined SUPPORTED_RELEASES (§0: lib/ IS the release)`)
+  }
+  const channels = new Set(
+    (hostBundle.match(/channel: (['"])(0\.[^'"]+)\1/g) ?? []).map(s => s.slice(10, -1)),
+  )
+  assert.ok(channels.size >= 2, `expected one channel per verified patch line, got ${[...channels].join(',') || '(none)'}`)
+  for (const channel of channels) {
+    assert.ok(clientBundle.includes(`'${channel}'`) || clientBundle.includes(`"${channel}"`),
+      `channel ${channel} is routed by the node half but has no adapter in lib/client.js (§D)`)
+  }
+
+  originalWarn('smoke: PASS — settings, profiles, rotation pool, the upload fence, and the version gate round-trip through disk')
 } finally {
   console.warn = originalWarn
   await new Promise(resolve => server.close(resolve))
