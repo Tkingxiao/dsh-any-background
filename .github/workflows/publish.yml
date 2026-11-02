@@ -49,10 +49,11 @@ jobs:
 
       # lib/ is committed, but the published bundle has to come from the tagged source,
       # not from whatever was last built on someone's machine.
+      # No `version:` here on purpose: pnpm/action-setup refuses to run when the action
+      # config and package.json's `packageManager` both state a version ("Multiple
+      # versions of pnpm specified"), so packageManager is the single source of truth.
       - if: steps.npm.outputs.present == 'false'
         uses: pnpm/action-setup@v4
-        with:
-          version: 10
       - if: steps.npm.outputs.present == 'false'
         uses: actions/setup-node@v4
         with:
