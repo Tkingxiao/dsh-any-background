@@ -65,4 +65,18 @@ jobs:
       - if: steps.npm.outputs.present == 'false'
         run: pnpm bundle
       - if: steps.npm.outputs.present == 'false'
-        run: npm publish --provenance --access public
+        name: Publish to npm
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        # Two credential paths, whichever this account actually grants: the repository
+        # secret wins, because GitHub has not been handing an OIDC token to every repo
+        # and a repo without one otherwise dies at ENEEDAUTH. With no secret set, the
+        # job's own id-token is used and the version gets a provenance attestation.
+        # `--provenance` requires that OIDC exchange, so it is never combined with a token.
+        run: |
+          if [ -n "${NPM_TOKEN:-}" ]; then
+            echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" >> "$HOME/.npmrc"
+            npm publish --access public
+          else
+            npm publish --provenance --access public
+          fi
