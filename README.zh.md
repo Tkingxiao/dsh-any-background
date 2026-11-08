@@ -4,7 +4,7 @@
   <a href="https://www.npmjs.com/package/dsh-any-background"><img alt="npm 版本" src="https://img.shields.io/npm/v/dsh-any-background?color=4d6bfe"></a>
   <a href="https://www.npmjs.com/package/dsh-any-background"><img alt="npm 月下载量" src="https://img.shields.io/npm/dm/dsh-any-background?color=4d6bfe"></a>
   <a href="https://github.com/Tkingxiao/dsh-any-background/blob/main/LICENSE"><img alt="License: MIT" src="https://img.shields.io/npm/l/dsh-any-background?color=4d6bfe"></a>
-  <a href="https://www.npmjs.com/package/@deepseek-ai/dsh?activeTab=versions"><img alt="支持的 DSH 版本：0.2.0-rc.1 ~ 0.2.2-alpha.2 及其上" src="https://img.shields.io/badge/DSH-0.2.0--rc.1%20~%200.2.2--alpha.2%2B-4d6bfe" /></a>
+  <a href="https://www.npmjs.com/package/@deepseek-ai/dsh?activeTab=versions"><img alt="支持的 DSH 版本：0.2.0-rc.1 ~ 0.2.2-rc.1 及其上" src="https://img.shields.io/badge/DSH-0.2.0--rc.1%20~%200.2.2--rc.1%2B-4d6bfe" /></a>
   <a href="https://github.com/topics/dsh-better-sidebar"><img alt="插件生态：GitHub topic dsh-better-sidebar" src="https://img.shields.io/badge/%E6%8F%92%E4%BB%B6%E7%94%9F%E6%80%81-topic%20dsh--better--sidebar-4d6bfe" /></a><br /><br />
   <a href="https://github.com/Tkingxiao/dsh-any-background"><img src="https://img.shields.io/github/stars/Tkingxiao/dsh-any-background?style=social" alt="GitHub stars"></a>
   <a href="https://dsh.directory/plugins/tkingxiao/dsh-any-background"><img src="https://dsh.directory/badges/listed.svg" alt="dsh.directory listed"></a>
@@ -82,13 +82,6 @@
 
 ## 更新日志（只保留最近两个版本）
 
-### v0.4.2（兼容 dsh-better-display 的吸顶总结栏 · 修掉 issue #32）
-
-- **总结栏不再被掏空。** 它的底板用的是「主界面」透明度接管的那个令牌，被拉到 0 之后正文直接从总结栏底下透上来。现在认出 [dsh-better-display](https://github.com/aa2246740/dsh-better-display) 就把这条带子钉在 **20% 底板 + 30px 磨砂**（不随任何滑块调节，颜色仍跟主题走），并把原来分开的三条合并成一整块，底部两角倒圆。
-- **第三方表面自检 + 兼容开关。** 开机扫一遍其它插件的样式表，在控制台点名「谁的表面吃了本插件接管的令牌」：已登记的自动保护，未登记的提示把这条日志发过来就能加钉。「界面」页底部新增「第三方插件兼容」卡片，关掉后整张钉表撤下，完全不介入另一个插件的画法。
-- **修掉 issue #32。** 被磨砂的侧栏列提到 `z-index:1`，提示条悬出侧栏右缘的那一段重新清晰；模态豁免里 `z-index` 与 `isolation` 同进同退。
-- 装完或更新后请**重启一次宿主**——兼容门禁在组装 profile 时才跑。
-
 ### v0.4.3（跟到 dsh `0.2.1-rc.5` 与新开的 `0.2.2` 线）
 
 - **新增核对的宿主构建**：`0.2.1-rc.4`、`0.2.1-rc.5`、`0.2.2-alpha.2`。
@@ -96,6 +89,15 @@
 - **`0.2.2` 是一条新补丁线，另开 `v0-2-2` 事实目录。** 这一版动静大（1151 个文件改动、1709 个新增），但本插件声称的每一项事实逐条重读后仍然成立：`_handle{z-index:11}` / `_leadingSeat{z-index:15}` / `_overlayLayer{z-index:20}` 逐字节一致（所以侧栏列 `z-index:1` 的上限和标题行 `z-10` 的论证照旧），菜单霜的四个令牌与 8 个 `--dsw-menu-backdrop-filter` 消费者不变，宿主仍在 `body` 上合成 `--dsw-font-family`（字体规则的 `!important` 仍须胜出），5 个会话头部插槽键不变；本插件写到的 75 个宿主选择器全部还能命中。宿主侧的 peer 门禁实现逐字节未变。
 - **`0.2.2` 上两处值得记下的宿主改动**：`--dsw-specific-sidebar-nav-item-hover` 被宿主删掉了（连它唯一的消费者一起），本插件仍会写这个令牌——写了没人读，且宿主自己本来也不再画那个悬停底色，相对宿主默认观感没有退步；`ui-plugin-manager` 新增一处用「主界面」接管的那个令牌做底板（页面头部一条 `pointer-events:none` 的垫层），默认值下什么都不画，但这是「谁在读这个令牌」清单上新增的一行。
 - **兼容门禁新增一致性自检**：`npm test` 现在会核对 `engines.dsh`、六条 peer、`dsh.compatibility.dsh` 四处是否点名了每一个已核对构建、是否都留着不设上界的尾巴，并核对 `lib/` 里确实带着这些构建与对应的渠道（改了 `src/` 忘了重新 bundle 会被直接抓住）。
+- 装完或更新后请**重启一次宿主**——兼容门禁在组装 profile 时才跑。
+
+### v0.4.4（真机核对 `0.2.2-rc.1` · issue #34 第三方登记与反馈 · issue #33 数值输入与区域高亮）
+
+- **真机核对 `0.2.2-rc.1`。** 在 launcher `homes/0.2.2-rc.1` 建隔离测试档（本地插件用 link，另装 dshmarket `1.73.16` / dsh-better-sidebar `0.30.1` / dsh-update-checker `1.7.3`）启动 `dsh web`：兼容门禁放行，`read` 回 `host.version=0.2.2-rc.1 / channel=0.2.2`，配置写入与重读落盘一致；独立 headless Chrome 开机抓到 179 张 `style[data-plugin]`，三条「未登记」日志与 issue #34 逐字吻合。于是该构建进入四处门禁与 `dshReleases`，判定从 `line` 升为 `exact`。
+- **适配层事实复核：三处证据字面量变了，但没有一处是规则输入。** 逐个读该 tag 的 98 个 `lib/client.js`：`_handle{z-index:11}` / `_leadingSeat{z-index:15}` / `_overlayLayer{z-index:20}`、菜单令牌名、9 个 `--dsw-menu-backdrop-filter` 消费者、`data-shimmer` / `data-shell-bottom` / `data-rightbar-col`、会话头部插槽键全都还在。变的是 `--dsw-menu-surface-fill`（`#f8f9fa94` / `#43454a73` → `#fcfdfeb3` / `#303136a3`）、`--dsw-font-family`（收成单条 `var(--dsh-font-family-text-default)`，仍是 `body` 声明，字体规则的 `!important` 照旧胜出）、以及 `--dsh-dockkit-float-top` 不再发出（本档不发 promotion，不受影响）。适配层只读令牌名，答案不变；细节记进 `v0-2-2/adapter.ts`。像素级模糊/遮挡 A/B 仍未跑。
+- **issue #34：三家从「未登记」变成有结论。** 补两条低风险钉值——dshmarket 的「任务」浮层（`--dsw-alias-bg-layer-1`）与 dsh-update-checker 的两个按钮（`--dsw-alias-bg-layer-2`）——只重发令牌字面量，不动 `background` / 几何 / 磨砂；四个选择器名在该宿主产物里 0 命中。`dsh-better-sidebar` 登记为**已核对、故意不钉**：它的整块面板正是「主界面」滑块要调的东西，替用户钉死等于把滑块拿走。钉值仍集中在一张 `-third-party` 动态表里，开关一撤到底。
+- **反馈不再依赖控制台。** 设置卡片逐行列出包名、状态与令牌，并有「复制诊断行」按钮（带宿主版本与开关状态）；生产构建开不了 DevTools 也能一键复制，剪贴板不可用时给可手动选中的文本框。
+- **issue #33 的第 1、2 项。** ① **滑块数值可输入**：每个滑块旁多了数字框，拖动时双向同步，越界收敛、空值不提交；仍走原来的零延迟 DOM 路径，不引入重渲染。② **悬停高亮对应区域**：悬停任一模块卡片，会在真实界面上框出它管的区域。三列直接复用 `setBlur` / `applyPartOpacities` 涂色的**同一批节点**，其余区域只用插件自己规则里的 `data-*` 标记与运行时标签，不写宿主节点、不碰第三方 z-index——只画一个 `fixed` + `pointer-events:none` 的描边层，鼠标离开或离开设置页即整层移除；位置靠捕获阶段的 `scroll` / `resize` 事件更新，不挂 rAF。**配色复用插件自己的明暗判定器 `rScheme()`**（强制方向 > 主题色明度 > 壁纸亮度判定），取它的**反色**：暗界面铺白色半透明板、亮界面铺黑色半透明板，标签同样反色，全程纯中性黑白。既不碰从壁纸提取的 `--dsw-alias-brand-primary`（换主题色就会撞背景），也不引入固定强调色（遇到同色壁纸照样撞）。色块以 2.4s `ease-in-out` **持续缓慢呼吸**（填充 opacity 22% ↔ 100%，不是入场闪一下），动画只作用于填充伪元素，虚线和标签保持静止；`prefers-reduced-motion` 下退化为静态色块，嵌套目标只画最外层以免透明度叠加。实测暗底白板 / 亮底黑板的亮度差 `0.243 / 0.240`，反过来选错方向只有 `0.015 / 0`；琥珀色壁纸上白 / 黑板分别 `0.067 / 0.178`，都不撞色。当前页面没有该区域时明确提示，而不是画一个猜测的框，这也正是 issue 里「某些界面没有对话不会出现」的诚实答案。其余三项（逐模块注释、会话结束 token 用量模块、模型选择器子菜单）需要逐界面的结构探测，本版未做。
 - 装完或更新后请**重启一次宿主**——兼容门禁在组装 profile 时才跑。
 
 ## 安装
@@ -140,7 +142,7 @@ pnpm dsh web
 
 ## 兼容性
 
-- **[`dsh web`](https://github.com/deepseek-ai/deepseek-harness)：`0.2.0-rc.1` ~ `0.2.2-alpha.2`，其上所有版本一并放行。** 门禁先逐一列出核对过的构建，再以不设上界的 `>=0.2.0-rc.1` 收尾。这是有意的：宿主强制的正是这份 peer 列表，范围没写到的版本会在导入任何模块之前被整行禁用——一条写到头的范围等于在一款还能工作的插件前面砌墙。（更准确地说：宿主 `app-boot` 的 `unmetRequirements` 在 `engines.dsh` 存在时只看它自己、忽略 peer，所以四处都要写、但真正决定加载的是 `engines.dsh`。）
+- **[`dsh web`](https://github.com/deepseek-ai/deepseek-harness)：`0.2.0-rc.1` ~ `0.2.2-rc.1`，其上所有版本一并放行。** 门禁先逐一列出核对过的构建，再以不设上界的 `>=0.2.0-rc.1` 收尾。这是有意的：宿主强制的正是这份 peer 列表，范围没写到的版本会在导入任何模块之前被整行禁用——一条写到头的范围等于在一款还能工作的插件前面砌墙。（更准确地说：宿主 `app-boot` 的 `unmetRequirements` 在 `engines.dsh` 存在时只看它自己、忽略 peer，所以四处都要写、但真正决定加载的是 `engines.dsh`。）
 - **没见过的构建怎么跑**：取最近的一份事实，并在日志里写清它离 `exact` 有多远。一份过期事实最坏的代价是某个滑块不再淡出宿主已经搬走的那个表面，而一道失败关闭的版本检查代价是整个插件。
 - **核对过的构建**（`dsh.compatibility.dshReleases`）：
 
@@ -150,7 +152,8 @@ pnpm dsh web
   | `0.2.0-rc.2` | `v0-2-0-rc-2` | 同上；这一版改了吸顶菜单分组标题取色的令牌，所以另开一份事实 |
   | `0.2.1-alpha.1` ~ `0.2.1-rc.5` | `v0-2-1` | 事实未变，并入同一份；每个核对过的构建各占一行，判定为 `exact`。`rc.4` / `rc.5` 的产物与 `rc.3` 逐个文件哈希一致 |
   | `0.2.2-alpha.2` | `v0-2-2` | 新开的补丁线，另开一份事实；逐条重读后答案与 `v0-2-1` 相同（层级阶梯、菜单霜令牌、字体令牌、头部插槽键、75 个宿主选择器命中） |
-  | `0.2.2-alpha.2` 之上 | 沿用该行最近的核对结果 | 未核对的新构建取档位并写日志 |
+  | `0.2.2-rc.1` | `v0-2-2` | **真机核对**：门禁 / RPC / 开机自检全过；98 个产物文件里规则输入全部仍命中，三处证据字面量变动已记进适配层注释；判定 `exact` |
+  | `0.2.2-rc.1` 之上 | 沿用该行最近的核对结果 | 未核对的新构建取档位并写日志 |
 
 - **版本事实按 release 隔离**：宿主版本由 Node 半侧解析、随 `read` RPC 下发，样式与逻辑只向适配层提问（这块表面归谁、磨砂挂在哪一层、菜单该重写哪些令牌），不比较版本字符串；适配新宿主 = 新增一个版本目录并在注册表登记。
 - **安装或更新插件后仍需重启宿主**：兼容检查发生在组装 profile 时，而不是插件更新时。依赖特定宿主结构的功能（右侧栏面板模糊、官方侧栏「主题」卡片）只在对应宿主上启用，其余功能在整个范围内表现一致。

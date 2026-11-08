@@ -310,7 +310,7 @@ function applyCustomTokensNow(ops: PartOpacities): void {
     applyExemptDefaults()
     // Same funnel, same reason, for the pinned reading lanes of dsh-better-display:
     // its plate must follow the theme color while ignoring every slider.
-    applyReaderLanes(surfaces)
+    applyThirdPartyPins(surfaces)
   } catch {
     // ignore
   }
@@ -1562,33 +1562,69 @@ export const READER_LANE_RULE =
   `[class*="_turnStickyLanes"]{border-radius:0}` +
   `${READER_SILENT}{background:transparent;box-shadow:none}`
 
-let readerStyleEl: HTMLStyleElement | null = null
+// ── Issue #34: the two small plates ────────────────────────────────────────
+// dshmarket's 「任务」 popover and dsh-update-checker's two buttons both expect an
+// OPAQUE bottom plate. Neither is a sticky band with text scrolling under it, so
+// neither needs the merged geometry or the frost the reading lanes needed: the whole
+// accommodation is one local token re-declaration (§2-V #3). Their own
+// `background:var(--token)` still carries it, and an element's own declaration beats
+// our `body` !important by inheritance alone.
+//
+// Scope proof (checked against a real 0.2.2-rc.1 install, all host `lib/client.js`):
+// `data-dsh-market-root`, `_opPanel`, `dsh-update-btn`, `dsh-plugin-btn` are 0-hit.
+// The root marker is dshmarket's own contract, so even the generic `_opPanel` suffix
+// cannot reach a host element; a rename on their side simply drops the pin.
+const MARKET_POPOVER_SEL = '[data-dsh-market-root] [class*="_opPanel"]'
+const UPDATE_BUTTONS_SEL = '.dsh-update-btn,.dsh-plugin-btn'
 
-/** Emit the whole pin — geometry, frost and the plate literal — into one sheet, or
- *  remove that sheet entirely. Two things switch it off: 「保护第三方表面」 being turned
- *  off, and no color resolving yet (the palette and the host's own tokens are both
- *  empty pre-boot), because a `var()` naming an unwritten property is the §2-E
- *  guaranteed-invalid trap and its symptom here is the very bug being pinned. */
-export function applyReaderLanes(surfaces?: Record<string, string> | null): void {
+/** Emit only the plates whose literal actually resolved. A `var()` pointing at an
+ *  unset property is the §2-E guaranteed-invalid trap — its symptom would be the very
+ *  transparency being pinned — so an unresolvable token means NO declaration. The
+ *  literal comes from the same funnel as the exempt surfaces: it follows the picked
+ *  theme color / forced scheme / wallpaper verdict, while its density is fixed at the
+ *  host's own opaque value (§2-V #5). */
+function thirdPartyPinRules(surfaces: Record<string, string>): string {
+  const out: string[] = []
+  const pin = (sel: string, token: string): void => {
+    const literal = surfaces[token]
+    if (literal === undefined || literal.trim() === '') return
+    out.push(`${sel}{${token}:${literal}}`)
+  }
+  pin(MARKET_POPOVER_SEL, '--dsw-alias-bg-layer-1')
+  pin(UPDATE_BUTTONS_SEL, '--dsw-alias-bg-layer-2')
+  return out.join('')
+}
+
+let thirdPartyStyleEl: HTMLStyleElement | null = null
+
+/** Emit the whole pin — merged geometry, frost and every plate literal — into ONE
+ *  sheet, or remove that sheet entirely. Two things switch it off: 「保护第三方表面」
+ *  being turned off, and no color resolving yet (the palette and the host's own tokens
+ *  are both empty pre-boot), because a `var()` naming an unwritten property is the
+ *  §2-E guaranteed-invalid trap and its symptom here is the very bug being pinned.
+ *  One sheet / one owner is what makes the switch a clean all-or-nothing (§2-V #8). */
+export function applyThirdPartyPins(surfaces?: Record<string, string> | null): void {
   if (typeof document === 'undefined') return
-  const base = rProtectThirdParty()
-    ? (surfaces ?? paletteTokens() ?? readHostOpacityTokens())?.['--dsw-alias-bg-base']
-    : undefined
+  const resolved = rProtectThirdParty()
+    ? (surfaces ?? paletteTokens() ?? readHostOpacityTokens())
+    : null
+  const base = resolved?.['--dsw-alias-bg-base']
   if (base === undefined || base === '') {
-    if (readerStyleEl !== null) { readerStyleEl.remove(); readerStyleEl = null }
+    if (thirdPartyStyleEl !== null) { thirdPartyStyleEl.remove(); thirdPartyStyleEl = null }
     return
   }
-  if (readerStyleEl === null) {
-    readerStyleEl = document.createElement('style')
-    readerStyleEl.dataset.plugin = 'dsh-any-background-reader'
-    document.head.appendChild(readerStyleEl)
+  if (thirdPartyStyleEl === null) {
+    thirdPartyStyleEl = document.createElement('style')
+    thirdPartyStyleEl.dataset.plugin = 'dsh-any-background-third-party'
+    document.head.appendChild(thirdPartyStyleEl)
   }
   // The plate is re-declared as the TOKEN, never as `background`: that plugin's own
   // `background:var(--dsw-alias-bg-base)` then carries it, and an element's own
   // declaration beats `body`'s inherited `!important` re-scope without needing
   // `!important` (the mechanism documented on `SIDEBAR_ONE_LAYER_RULE`).
-  const css = `${READER_LANE_RULE}${READER_LANE_SEL}{--dsw-alias-bg-base:${toRgba(base, READER_LANE_ALPHA)}}`
-  if (readerStyleEl.textContent !== css) readerStyleEl.textContent = css
+  const css = `${READER_LANE_RULE}${READER_LANE_SEL}{--dsw-alias-bg-base:${toRgba(base, READER_LANE_ALPHA)}}` +
+    thirdPartyPinRules(resolved ?? {})
+  if (thirdPartyStyleEl.textContent !== css) thirdPartyStyleEl.textContent = css
 }
 
 // ── Produced/artifact surfaces ─────────────────────────────────────────────
@@ -2595,6 +2631,19 @@ function discoverParts(): void {
   }
 }
 
+/** The AppFrame column a per-part slider actually paints. Exported for the settings
+ *  hover highlight (issue #33 ②): outlining the SAME nodes `setBlur` /
+ *  `applyPartOpacities` own is the only way to guarantee the frame is not pointing
+ *  at a guessed hashed class. `discoverParts()` re-resolves on every call because
+ *  the host swaps these columns when a sidebar opens. Returns [] on a page where the
+ *  shell has not mounted the column yet — the caller then says so instead of drawing
+ *  a phantom box. */
+export function partHighlightElements(part: 'center' | 'sidebar' | 'right'): HTMLElement[] {
+  discoverParts()
+  const el = part === 'center' ? centerEl : part === 'sidebar' ? sidebarEl : rightEl
+  return el === null ? [] : [el]
+}
+
 function setBlur(el: HTMLElement | null, px: number, lift = false): void {
   if (el === null) return
   // Nothing to clear and nothing applied yet: skip the querySelector and the
@@ -3492,7 +3541,7 @@ export function applyWp(): void {
   // Directly, not only from the rAF-coalesced token pass above: a page that is not
   // painting (hidden tab, occluded desktop window) never runs that frame, and the
   // lanes would boot with no plate at all (§2-H).
-  applyReaderLanes()
+  applyThirdPartyPins()
   // applyProduced / applyHeaderPopovers (and, through them, the header-bar,
   // caption-band and view-card passes) are reached from applyPartBlurs just
   // below — spelling them out here too made every applyWp run each pass twice.
@@ -3559,7 +3608,7 @@ export function teardownWp(): void {
   document.documentElement.style.removeProperty('--dsh-any-blur-header')
   headerStyleEl?.remove(); headerStyleEl = null
   exemptStyleEl?.remove(); exemptStyleEl = null
-  readerStyleEl?.remove(); readerStyleEl = null
+  thirdPartyStyleEl?.remove(); thirdPartyStyleEl = null
   for (const v of Object.values(OPACITY_VARS)) document.documentElement.style.removeProperty(v)
   baseTokenKey = ''
   lastBgKey = ''

@@ -120,6 +120,49 @@ export const UI_CSS = `
 .dab-slider-block + .dab-slider-block{margin-top:13px}
 .dab-slider-label{font-size:12px;font-weight:550;color:var(--dsw-alias-label-secondary,var(--dsw-alias-label-tertiary))}
 .dab-slider-val{font-family:var(--dab-mono);font-size:11px;color:var(--dsw-alias-label-tertiary);min-width:44px;text-align:right}
+/* Issue #33 ①: a slider value is also a number field — typing an exact value is
+   faster than hunting for it with a pointer, and the range input keeps its own
+   zero-lag DOM path. */
+.dab-slider-num{width:54px;flex:none;height:26px;padding:0 5px;border-radius:8px;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary);font-family:var(--dab-mono);font-size:11px;text-align:right}
+.dab-slider-num:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:1px}
+.dab-slider-num::-webkit-outer-spin-button,.dab-slider-num::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+.dab-slider-num[type=number]{-moz-appearance:textfield;appearance:textfield}
+/* Issue #33 ②: hover highlight. The layer is fixed and pointer-events:none, so it
+   never changes a host element's paint or hit-testing.
+   NO invented accent color: --dsw-alias-brand-primary is extracted FROM the
+   wallpaper, so it collides with that wallpaper; a fixed amber collides with an
+   amber wallpaper. Instead reuse the plugin's OWN effective scheme (rScheme:
+   forced override > picked theme color > wallpaper brightness verdict) and paint
+   its INVERSE — white plate on a dark interface, black plate on a light one.
+   Strictly neutral, so no wallpaper color can ever match it. */
+.dab-hover-hint{font-size:11px;line-height:1.5;color:var(--dsw-alias-label-tertiary);margin:10px 0 0}
+.dab-highlight-layer{position:fixed;inset:0;z-index:999998;pointer-events:none}
+.dab-highlight-layer[data-tone="dark"]{--dab-hl-fill:rgba(255,255,255,.26);--dab-hl-tag-bg:#111318;--dab-hl-tag-fg:#fff;--dab-hl-glow:rgba(255,255,255,.38)}
+.dab-highlight-layer[data-tone="light"]{--dab-hl-fill:rgba(0,0,0,.24);--dab-hl-tag-bg:#fff;--dab-hl-tag-fg:#111318;--dab-hl-glow:rgba(0,0,0,.36)}
+/* A translucent plate fills the WHOLE region (a hairline alone is nearly invisible
+   on a frosted surface). It BREATHES slowly and forever — opacity 22% to 100% of
+   the fill — instead of a one-shot flash, so the region reads without a hard
+   overlay. The plate is its OWN pseudo-element so the breathing touches only the
+   fill: the near-white border + near-black outline rings and the tag stay steady.
+   outline paints OUTSIDE the border box, so those two rings never overlap. The
+   animation has no fill-mode: a page that is not painting keeps the static plate,
+   so §2-H cannot break the feature. */
+.dab-highlight-box{position:fixed;box-sizing:border-box;border:2px dashed rgba(255,255,255,.95);outline:2px dashed rgba(0,0,0,.85);outline-offset:0;border-radius:10px;box-shadow:0 0 0 1px rgba(128,128,128,.45);transition:left .08s linear,top .08s linear,width .08s linear,height .08s linear}
+.dab-highlight-box::before{content:"";position:absolute;inset:0;border-radius:inherit;background:var(--dab-hl-fill);box-shadow:0 0 22px var(--dab-hl-glow);animation:dab-highlight-pulse 2.4s ease-in-out infinite;pointer-events:none}
+@keyframes dab-highlight-pulse{0%,100%{opacity:.22}50%{opacity:1}}
+@media (prefers-reduced-motion:reduce){.dab-highlight-box::before{animation:none;opacity:.7}}
+.dab-highlight-tag{position:absolute;top:6px;left:6px;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:3px 9px;border-radius:6px;background:var(--dab-hl-tag-bg);color:var(--dab-hl-tag-fg);border:1px solid rgba(128,128,128,.75);box-shadow:0 2px 10px rgba(0,0,0,.35);font-size:11.5px;font-weight:700;pointer-events:none}
+/* Issue #34: every sighting is a reportable row, with a one-click copy of the
+   diagnostic line (production builds cannot show the console) and a readonly
+   fallback for shells where the clipboard is unavailable. */
+.dab-tp-row{display:flex;align-items:flex-start;gap:10px;flex-wrap:wrap;padding:8px 0;border-bottom:1px solid var(--dsw-alias-border-l2)}
+.dab-tp-row:last-child{border-bottom:0}
+.dab-tp-info{display:flex;flex-direction:column;gap:3px;min-width:0;flex:1}
+.dab-tp-name{font-size:12px;font-weight:600;color:var(--dsw-alias-label-primary)}
+.dab-tp-state{font-size:11.5px;color:var(--dsw-alias-label-secondary,var(--dsw-alias-label-tertiary))}
+.dab-tp-tokens{font-family:var(--dab-mono);font-size:10px;color:var(--dsw-alias-label-tertiary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
+.dab-tp-copy{height:26px;padding:0 10px;font-size:11.5px;flex:none}
+.dab-tp-fallback{width:100%;font-family:var(--dab-mono);font-size:10.5px;padding:6px 8px;border-radius:8px;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary)}
 .dab-slider{-webkit-appearance:none;appearance:none;flex:1;min-width:0;height:4px;border-radius:99px;outline:none;cursor:pointer;margin:5px 0;background:linear-gradient(to right,var(--dsw-alias-brand-primary) calc(var(--pct,50) * 1%),var(--dsw-alias-border-l2) calc(var(--pct,50) * 1%));transition:height .15s ease}
 .dab-slider:hover{height:5px}
 .dab-slider::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:15px;height:15px;border-radius:50%;background:var(--dsw-alias-button-elevated-fill,#fff);border:2px solid var(--dsw-alias-brand-primary);box-shadow:0 1px 5px rgba(0,0,0,.28);transition:transform .16s cubic-bezier(.34,1.56,.64,1)}

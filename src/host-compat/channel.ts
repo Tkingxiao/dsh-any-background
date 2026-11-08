@@ -101,6 +101,12 @@ export const SUPPORTED_RELEASES: readonly SupportedRelease[] = [
   { channel: '0.2.1', release: '0.2.1-rc.4' },
   { channel: '0.2.1', release: '0.2.1-rc.5' },
   { channel: '0.2.2', release: '0.2.2-alpha.2' },
+  // Same line, re-read on a REAL 0.2.2-rc.1 host (not just artifacts): the plugin
+  // loads, `read` answers `version: 0.2.2-rc.1 / channel: 0.2.2`, and every rule
+  // INPUT the folder speaks for still resolves. Three evidence literals moved —
+  // see the rc.1 re-check block in `v0-2-2/adapter.ts` — but none of them is an
+  // input, so the folder keeps its answer and this row upgrades `line` → `exact`.
+  { channel: '0.2.2', release: '0.2.2-rc.1' },
 ]
 
 /** How the chosen adapter relates to the release that was detected. Reported so a

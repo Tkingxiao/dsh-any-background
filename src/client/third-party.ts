@@ -31,6 +31,7 @@
 import { OWNED_TOKENS } from './wallpaper'
 import { watchDom } from './dom-watch'
 import { rProtectThirdParty } from './state'
+import { rHostInfo } from './host-compat/release'
 
 /** One other plugin whose surface this plugin keeps legible. */
 export interface ThirdPartyPin {
@@ -44,18 +45,57 @@ export interface ThirdPartyPin {
    *  still say something true when the plugin was detected by `probe` alone (its
    *  stylesheet may already have been removed, or it may tag them differently). */
   tokens: readonly string[]
+  /** `pin` (default): a reviewed surface IS held steady by the `-third-party` sheet.
+   *  `reviewed`: the collision was checked, but deliberately left under the slider's
+   *  control — its whole surface is the thing the user is tuning, so pinning it would
+   *  override a product decision (§2-V #2). The card and the boot log must say this
+   *  instead of claiming protection, and must not ask for the same report again. */
+  mode?: 'pin' | 'reviewed'
 }
 
-/** The table. Adding a plugin is one row here plus the CSS that honors it. */
+/** The table. Adding a plugin is one row here plus the CSS that honors it (a
+ *  `reviewed` row is the exception: it is the documented decision NOT to add CSS).
+ *
+ *  The three rows below came from issue #34, reproduced on a real `0.2.2-rc.1` host
+ *  (dshmarket 1.73.16 / dsh-better-sidebar 0.30.1 / dsh-update-checker 1.7.3). The
+ *  token counts were re-counted in each installed bundle and match the report exactly;
+ *  the chosen selectors are all 0-hit in that host's own artifacts (§2-V #7). */
 export const THIRD_PARTY_PINS: readonly ThirdPartyPin[] = [
   {
     // The pinned surfaces are its sticky reading lanes; the CSS lives in
-    // `wallpaper.ts` (`READER_LANE_RULE` / `applyReaderLanes`), which is also where the
-    // `Reader.module.css:13 / :17 / :558` evidence is recorded.
+    // `wallpaper.ts` (`READER_LANE_RULE` / `applyThirdPartyPins`), which is also where
+    // the `Reader.module.css:13 / :17 / :558` evidence is recorded.
     plugin: 'dsh-better-display',
     labelKey: 'tpReaderLanes',
     probe: '[data-dsh-better-display]',
     tokens: ['--dsw-alias-bg-base'],
+  },
+  {
+    // Its 「任务」 popover (`Market.module.css` `.opPanel`, z-index 40, absolutely
+    // positioned, no backdrop-filter) paints `var(--dsw-alias-bg-layer-1,#fff)`. The
+    // root marker is the plugin's own (`data-dsh-market-root`), so the pin cannot
+    // reach a host element even though `_opPanel` is a generic-looking suffix.
+    plugin: 'dshmarket',
+    labelKey: 'tpMarketTaskPopover',
+    tokens: ['--dsw-alias-bg-layer-1'],
+  },
+  {
+    // Two plain buttons with stable, unhashed names — `.dsh-update-btn` /
+    // `.dsh-plugin-btn` — both `background:var(--dsw-alias-bg-layer-2,#374151)`.
+    // Small enough that a plate literal is the whole fix; no geometry, no frost.
+    plugin: 'dsh-update-checker',
+    labelKey: 'tpUpdateButtons',
+    tokens: ['--dsw-alias-bg-layer-2'],
+  },
+  {
+    // `.pane` fills from `--dsw-alias-bg-base` and so does most of its workbench
+    // (23 / 35 / 20 / 11 reads of bg-base / layer-1/2/3 respectively). Pinning that
+    // whole surface would silently take the 「主界面」 slider away from the very panel
+    // the user installed this plugin to tune. Reviewed, deliberately NOT pinned.
+    plugin: 'dsh-better-sidebar',
+    labelKey: 'tpSidebarReviewed',
+    mode: 'reviewed',
+    tokens: ['--dsw-alias-bg-base', '--dsw-alias-bg-layer-1', '--dsw-alias-bg-layer-2', '--dsw-alias-bg-layer-3', '--dsw-specific-input-major', '--dsw-specific-menu'],
   },
 ]
 
@@ -68,6 +108,9 @@ export interface Sighting {
    *  settings card would otherwise say "pinned" about something the user cannot see
    *  the point of. */
   labelKey?: string
+  /** Mirrors the registry row. Only a `pin` row claims protection; `reviewed` is a
+   *  documented non-decision and must never render as "pinned". */
+  mode?: 'pin' | 'reviewed'
 }
 
 /** This plugin's own sheets are tagged with its name (plus a suffix per table); they
@@ -157,6 +200,7 @@ function scan(): void {
       tokens: read.length > 0 ? read : [...(pin?.tokens ?? [])],
       pinned: pin !== undefined,
       labelKey: pin?.labelKey,
+      mode: pin?.mode,
     }
     next.push(s)
     report(plugin, s)
@@ -166,9 +210,26 @@ function scan(): void {
   if (changed) subs.forEach(cb => cb())
 }
 
+/** The exact line a user should paste into an issue. Production builds open no
+ *  DevTools and do not persist the renderer console (issue #34), so the settings card
+ *  has to be able to hand this over directly: one copy button, no reconstruction.
+ *  The host release rides along because a token collision is release-specific. */
+export function diagnosticLine(s: Sighting): string {
+  const host = rHostInfo()
+  return `dsh-any-background: ${s.plugin} paints from ${s.tokens.join(', ')} — ` +
+    `the same tokens the interface-opacity sliders own. ` +
+    `host=${host.version ?? 'unknown'} channel=${host.channel} ` +
+    `protectThirdParty=${rProtectThirdParty() ? 'on' : 'off'} ` +
+    `status=${s.mode === 'reviewed' ? 'reviewed-no-pin' : s.pinned ? 'pinned' : 'unregistered'}`
+}
+
 function report(plugin: string, s: Sighting): void {
   if (logged.has(plugin)) return
   logged.add(plugin)
+  if (s.pinned && s.mode === 'reviewed') {
+    console.log(`dsh-any-background: ${plugin} detected — reviewed, deliberately not pinned: its whole surface is what the interface-opacity sliders are for (${s.tokens.join(', ')})`)
+    return
+  }
   if (s.pinned) {
     // Say whether the pin is actually active: the user may have switched the whole
     // class off, and a log line that claims protection then is just wrong.
@@ -181,7 +242,7 @@ function report(plugin: string, s: Sighting): void {
   console.warn(
     `dsh-any-background: ${plugin} paints from ${s.tokens.join(', ')} — the same tokens the interface-opacity sliders own, ` +
     `so those surfaces fade with them. No compatibility pin is registered for ${plugin}; if one of its surfaces goes ` +
-    `transparent or unreadable, report this line and a pin can be added.`)
+    `transparent or unreadable, copy its line from 设置 → 主题 → 第三方插件兼容 and send it in.`)
 }
 
 /** Snapshot of what the scan found (for the settings card). */

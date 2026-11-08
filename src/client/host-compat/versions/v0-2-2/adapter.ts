@@ -69,9 +69,32 @@
  * is still there. If a future surface stops following the theme colour, check whether
  * it paints from one of these instead.
  *
- * NOT done for this line: no real-host smoke. Only `0.2.1-rc.3` is installed on the
- * machine this folder was written from, so §4.3 is still open for 0.2.2 — the claims
- * above are artifact reads, not screenshots.
+ * RE-CHECKED AT `0.2.2-rc.1` ON A REAL HOST (launcher `homes/0.2.2-rc.1`, isolated
+ * `dabtest-rc1` profile). This closes the host-half part of the §4.3 gap: the gate
+ * admits the plugin, `read` answers `host.version = 0.2.2-rc.1 / channel = 0.2.2`,
+ * the RPC config round-trip works, and a headless-Chrome boot of the page reports
+ * 179 tagged stylesheets with three third-party sightings. Still no pixel A/B for
+ * blur / occlusion — that part of §4.3 remains open.
+ *
+ * One pass over all 98 installed `lib/client.js` artifacts of this tag shows every
+ * RULE INPUT unchanged: `_handle{z-index:11`, `_overlayLayer{z-index:20`,
+ * `_leadingSeat{z-index:15`; `--dsw-menu-surface-fill`, `--dsw-specific-menu`,
+ * `--dsw-alias-menu-group-header-fill` and 9 `--dsw-menu-backdrop-filter`
+ * consumers; `data-shimmer` (3), `data-shell-bottom` (1), `data-rightbar-col` (1),
+ * `conversation.session.header.views.actions` (3), `data-dockkit-host` (1);
+ * `--dsw-specific-sidebar-nav-item-hover` still absent; `_pageBar[data-natural]`
+ * still the extra `--dsw-alias-bg-base` consumer. So `promotion` stays empty and
+ * the menu / font answers stand.
+ *
+ * THREE EVIDENCE LITERALS DID MOVE — recorded so a later reader does not mistake
+ * them for a regression: the menu plate is now `#fcfdfeb3` / `#303136a3` (was
+ * `#f8f9fa94` / `#43454a73`); `ui-theme` now composes
+ * `--dsw-font-family:var(--dsh-font-family-text-default)` instead of the nested
+ * `var(--dsh-font-family-text, …), …` (still a `body` declaration, so
+ * `applyFontFace`'s `!important` still wins — §E); and `--dsh-dockkit-float-top`
+ * is 0-hit on this tag, which would matter to the `0.2.0-rc.1` promotion rule but
+ * NOT here, because this folder emits no promotion. These are VALUES the comments
+ * quote, never inputs the adapter reads — it only asks for token NAMES.
  *
  * @module
  */
@@ -95,7 +118,7 @@ function panelFragments(): PanelFragments {
 
 export function createAdapter(host: HostInfo): HostAdapter {
   return {
-    id: '0.2.2-alpha.2',
+    id: '0.2.2-alpha.2…rc.1',
     channel: '0.2.2',
     host,
     panelFragments,

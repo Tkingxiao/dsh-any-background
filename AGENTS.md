@@ -35,7 +35,7 @@
 | 配置落盘在真实磁盘 | `<DSH_HOME>/.dsh-any-background-data/theme-config.json` | **在 generation restore 之外**：回滚主题不会还原插件设置，删目录 = 整体重置 |
 | 版本事实按 release 隔离 | `src/host-compat/channel.ts`、`src/client/host-compat/versions/<目录>/` | 样式/逻辑代码里出现版本号比较 = 架构违规（§2-D） |
 | 静态样式表只有一张，顺序即语义 | `src/client/host-compat/styles.ts: buildStaticStyles()` | 挪动拼接顺序会改变胜负（§2-E） |
-| 动态写盘的另一半 | `style[data-plugin="…-tokens" / "-header" / "-exempt" / "-reader" / "-wco" / "-parts" / "-table-fix"]` | 现场调试先看这几张表（§4.3），比读代码快 |
+| 动态写盘的另一半 | `style[data-plugin="…-tokens" / "-header" / "-exempt" / "-third-party" / "-wco" / "-parts" / "-table-fix"]` | 现场调试先看这几张表（§4.3），比读代码快 |
 | DOM 观察只有一个 observer、两棵树 | `src/client/dom-watch.ts`（bus：`body` 走 childList+subtree+`aria-expanded`，`head` 只走 childList） | 新的 DOM 观察订阅 bus 并选对 target，不要自建 observer（parts / header-tag / env / navIcon 四个原来各自一个）；`head` 那棵树只为开机自检看第三方样式表落地，按 record.target 路由且无人监听时不分配；最后一个退订自动断开 |
 | 轮换到期/选图数学双端共享 | `src/shared/rotation.ts`（tsdown 内联进两个 bundle） | 改日/周/随机语义只改这一处；在任一半侧重写 = 两端推进失去一致性 |
 
@@ -377,12 +377,37 @@ release 标题与提交主题一致；issue 回复要带根因 + 验证数字 + 
 6. **磨砂能不能压在它身上**：照 §2-F 三宗罪逐个数——它有没有就地（非 portal）浮层、有没有 `position:fixed` 后代、展开体是不是它的后代。dsh-better-display 的展开体是车道的**兄弟**（`Reader.tsx:663` vs `:648`），diff 面板是 in-flow `static` 行（`DiffPanel.tsx:109`），定位后代全是自包含对（`.think`/`.thinkText`、`.numberRoll*`），图片预览走 `<dialog>` 顶层 → 可以压。它自己的产物表里就有 `backdrop-filter:blur(12px)` 挂在这些 sticky 车道上，Chromium 认这条。
    **磨砂要糊得住东西，得有一整块够高的盒子**（v0.4.2 实测，同一页同一滚动位，量水平边缘能量）：逐条各画各的 40px 小盒时代，钉上滑块后 edge 3.04→**4.52**（不降反升——20% 底板把对比抬高了，模糊全落在边缘衰减区，等于没糊）；合并成 120px 一块后 edge 3.61→**0.70**，与"同样 20% 底板 + blur(30px) 的 fixed 对照"（**0.73**）吻合，而"同样 20% 底板、不磨砂"的对照是 **3.58** ≈ 无遮挡 3.81。结论两条：**底板单独什么遮不住，磨砂才是承重的**；而**磨砂要生效，盒子必须合并**——所以 §2-V 第 4 条不是审美，是功能。判据用边缘能量而不是看截图，是因为截图会被"测完开关序列后停在 OFF 再截"这类自摆乌龙骗过去（真发生过）。
 7. **识别只用结构标记，并证明它不撞宿主**：新选择器里的每个属性名都要在宿主安装产物里 grep 一遍（`grep -rl --include=*.js` 跑遍 `versions/<v>/node_modules/.pnpm` 的 97 个 `lib/client.js`），0 命中才允许写进规则；同时优先用**对方自己也在用的**标记（它内部 `closest('[data-dsh-better-display]')`，所以那名字是它自己的契约）。改名即失效 = 保持对方原样，这是特性不是缺陷（§2-E CSS Module 那条）。
-8. **整钉一张表，开关一撤到底**：合并后的几何（`padding-top` / 负 `margin-top` / `top`）、磨砂、底板字面量**全部写进 `style[data-plugin="…-reader"]` 这一张动态表**，不进 `buildStaticStyles()`。原因：`「保护第三方表面」`关掉时必须能整张撤下——静态表里留一半、动态表撤一半，会留下"几何还在、颜色没了"的半截状态。静态表是本插件与**宿主**的契约，第三方兼容不属于它（`styles.ts` 里那条注释就是这条）。
+8. **整钉一张表，开关一撤到底**：合并后的几何（`padding-top` / 负 `margin-top` / `top`）、磨砂、底板字面量**全部写进 `style[data-plugin="…-third-party"]` 这一张动态表**，不进 `buildStaticStyles()`。原因：`「保护第三方表面」`关掉时必须能整张撤下——静态表里留一半、动态表撤一半，会留下"几何还在、颜色没了"的半截状态。静态表是本插件与**宿主**的契约，第三方兼容不属于它（`styles.ts` 里那条注释就是这条）。
 9. **检测自动、保护登记**：`src/client/third-party.ts` 开机扫 `head` 里所有 `style[data-plugin="<包名>"]`（第三方插件挂自己表的通用约定），把读了 `OWNED_TOKENS` 的点名进日志——已登记的一行说明，未登记的 `console.warn` 并邀请把该行发过来。**不要**把未登记的表面自动钉值：猜别人哪块该亮就是 §2-G 那条有代价的启发式。加一个插件 = `THIRD_PARTY_PINS` 一行 + 它的 CSS。
 10. **兼容开关不进外观快照**：`protectThirdParty` 是行为开关（同 `fontEnabled`），**故意不写进 `ProfileAppearance` / `currentAppearance` / `applyAppearance`**——换一套外观不该顺手改变另一个插件的画法。它仍要走完 §2-A 的宿主半三处 + 客户端两处 + `smoke.mjs` 断言（含"非布尔值塌回默认"，别把 `"false"` 字符串当成真）。
 11. **钉值本身零运行时**：那张表由 `applyWp` / 开关两处直接写，**没有**为它设的 observer、不向对方 DOM 写任何节点/类/属性、也不需要读 `getComputedStyle`（密度来自我们自己的调色板入口）。因此 §2-O 的 teardown 只有一件事：`teardownWp()` 撤表。开机自检**才**是那个观察者——它订阅 `head` 的 childList（§R：只在新出现的 `style[data-plugin]` 且非自家表时重扫，实测 6 次无关 head 变更 0 重扫、1 次迟到插件表 1 点名），退订函数交给 `ctx.effect` 回收。两者别搞混：*检测有观察者，保护没有*。
-12. **能按语义钉的就不要按名字钉**：主题插件不可能枚举未来的第三方，所以 `[role="dialog"][aria-modal="true"]`（`wallpaper.ts:1382`）这类**宿主自己定义的语义**优先——语义臂是本插件与**宿主**的契约，可以留在 exempt 表里（第 8 条"开关一撤到底"的理由管不到它：它从来不受 `protectThirdParty` 约束）；按包名点名的兼容才走 `THIRD_PARTY_PINS` + `-reader` 表。**每条臂各有自己的令牌清单**，动一个被接管的令牌就要逐条臂问一遍"这条的清单里有没有它"——`bg-base` 正是从 dialog 臂的 layer 清单（`:1367-1369`）旁边漏过去的：对话框的卡片钉住了，它脚下的地面却继续跟着滑块消失。
+12. **能按语义钉的就不要按名字钉**：主题插件不可能枚举未来的第三方，所以 `[role="dialog"][aria-modal="true"]`（`wallpaper.ts:1382`）这类**宿主自己定义的语义**优先——语义臂是本插件与**宿主**的契约，可以留在 exempt 表里（第 8 条"开关一撤到底"的理由管不到它：它从来不受 `protectThirdParty` 约束）；按包名点名的兼容才走 `THIRD_PARTY_PINS` + `-third-party` 表。**每条臂各有自己的令牌清单**，动一个被接管的令牌就要逐条臂问一遍"这条的清单里有没有它"——`bg-base` 正是从 dialog 臂的 layer 清单（`:1367-1369`）旁边漏过去的：对话框的卡片钉住了，它脚下的地面却继续跟着滑块消失。
    **两个配套事实**：① dialog 臂的识别条件是 `:not([aria-labelledby])`（它靠这一点与 `SETTINGS_PANEL_SEL`（`:335`）区分确认弹窗和设置面板），所以第三方弹窗必须用 `aria-label` 而不是 `aria-labelledby`，写了就掉出豁免；② 第 1 条的扫描只认 `style[data-plugin]`，而 dsh-memu 的表挂的是 `data-dsh-memu="ui"`——**扫不到 ≠ 不存在**，语义臂就是这类"没打约定标记"的插件唯一的兜底。
+
+13. **登记 ≠ 钉住；反馈闭环必须长在 UI 里**（issue #34 / v0.4.4）。一条「未登记」日志只是
+    自检在工作，不是 bug——但生产构建不开 DevTools、渲染控制台也不落盘，"请把开机日志这一行
+    发给我"等于要不到的反馈。三件事要一起做：
+    ① 诊断行由 `third-party.ts: diagnosticLine()` 生成，带 `host.version` / `channel` /
+    `protectThirdParty`；设置卡片逐行列出包名、状态、令牌，并给「复制」按钮 + 剪贴板不可用时
+    可手选的文本框。日志模板里请用户"贴到 issue"的措辞也要同步改成指这个按钮。
+    ② 加一个插件 = `THIRD_PARTY_PINS` 一行 + 它的 CSS，**但 `mode:'reviewed'` 是合法的第三种
+    答案**：`dsh-better-sidebar` 的 `.pane` 整块面板正是「主界面」滑块要调的东西，钉死它等于
+    把滑块从用户手里拿走（第 2 条"已带对策的表面不要再替它决定"的另一形态）。卡片与开机日志
+    必须说"已核对、故意不钉"，**不能**渲染成 `已钉住`，也不该再向用户要同一份报告。
+    ③ 小而自足的浮层 / 按钮（dshmarket `[data-dsh-market-root] [class*="_opPanel"]`、
+    dsh-update-checker `.dsh-update-btn,.dsh-plugin-btn`）只需**一条令牌重声明**，不需要第 4 条
+    的合并几何、也不需要第 6 条的磨砂：没有吸顶带、没有底下滚过的正文。四个选择器名在
+    `0.2.2-rc.1` 的 98 个 `lib/client.js` 里 0 命中（第 7 条）。所有臂仍写在同一张
+    `style[data-plugin="dsh-any-background-third-party"]` 里，`applyThirdPartyPins()` 是唯一
+    写入者；开关关闭、boot 未取到颜色时整表撤下（第 8 条 / §2-E）。
+    **本次未做**像素级模糊 / 遮挡 A/B：真机只验到加载、RPC、自检日志与令牌落位，报告里必须
+    写明这一层没测，别把它说成观感验证。
+
+**同线内也可能"值变了、答案没变"**（0.2.2-rc.1 真机核对）：菜单底板
+`#f8f9fa94`/`#43454a73` → `#fcfdfeb3`/`#303136a3`、`--dsw-font-family` 收成单条 var、
+`--dsh-dockkit-float-top` 不再发出，但适配层只读**令牌名**与**结构标记**，三条都是注释里的
+证据字面量、不是规则输入。把这样的构建升 `exact` 之前必须逐个产物核"规则输入掉没掉零"，
+并把变动的证据写进该目录的注释——只写"同线所以一样"就是让旧目录替它没读过的 tag 作证（§2-D）。
 
 ---
 
@@ -405,6 +430,9 @@ release 标题与提交主题一致；issue 回复要带根因 + 验证数字 + 
 | 任何**按 DOM 标记遍历其它插件**的逻辑（如 `third-party.ts` 的扫描） | 必须在**真宿主页面**量过：宿主自己给每张表打 `data-plugin`（实测 157/172 张是 `@deepseek-ai/`），先判命名空间再截断、再聚合；mock 只会给你一张表，永远测不出来 |
 | 新增运行时文件 | `package.json` 的 `files` + `exports`（§0） |
 | `lib/` | 一定要 `npm run bundle`，产物和源码同批提交 |
+| `THIRD_PARTY_PINS` 新增一行 / 改 `mode` | §2-V 十三条：先 grep 宿主与第三方产物找令牌消费者、选择器名 0 命中；`reviewed` 行不得渲染成「已钉住」；所有臂仍写进同一张 `-third-party` 表，开关一撤到底；诊断行复制入口要在设置卡片上可用 |
+| `LiveSlider` 或任何滑块 UI | 数字框与 range 用 imperative 双向同步（不进 React 渲染路径）；空值不提交、越界收敛、`onBlur` 回填；新增 timer 要有 teardown（§2-O） |
+| 设置卡片 hover 高亮（issue #33 ②） | 目标节点只能来自本插件规则里已有的 `data-*` 标记 / 运行时标签，或 `partHighlightElements()` 返回的**同一批**三列节点，不许猜哈希类名；只画 `fixed` + `pointer-events:none` 的描边层，不写宿主节点、不碰第三方 z-index（§2-G / §2-T）；`showHighlight` 返回 0 要在卡片上说"当前页面没有该区域"，别画猜测的框（有些表面要打开对话才出现）；位置更新用捕获阶段 `scroll` + `resize`，不挂 rAF（§2-H）；离开设置页必须 `hideHighlight()`（§2-O）。**配色复用 `rScheme()`（强制方向 > 主题色明度 > 壁纸亮度判定）并取反色**：`--dsw-alias-brand-primary` 取自壁纸，换主题色就和背景同色；固定强调色（琥珀）遇到同色壁纸照样撞，且用户嫌难看。所以暗界面铺白色半透明板、亮界面铺黑色半透明板，标签同步反色，全程纯中性黑白。`showHighlight(..., tone)` 的 tone 由 `InterfacePage` 每次悬停传 `rScheme()`，纯 DOM 模块不引业务依赖。**2.4s `ease-in-out` 无限缓慢呼吸**（只动填充伪元素的 opacity 22% ↔ 100%，不是一次性闪现），虚线和标签保持静止；`prefers-reduced-motion` 退化为静态；再加近白 `border` + 近黑 `outline` 两条虚线（outline 画在 border box 外，不与 `::before` 那样因包含块是 padding box 而重叠）。动画只是装饰：不用 fill-mode，页面不绘制时静态填充仍在（§2-H）。**嵌套目标只保留最外层**，否则多个半透明板叠加成不透明一坨。验法：§4.2 打成 IIFE，在 file:// 页里量 left/top/width、去重、未连接节点、双层 hide、`[parent,child]` 只出 1 个 box；分别传 `tone=dark/light` 量 `getComputedStyle(box,'::before').backgroundColor` 应为白 / 黑、标签反色、`animationName` / `iterationCount=infinite`，并算 Rec.709 亮度差（暗底白板 `0.243`、亮底黑板 `0.240`；方向选错只有 `0.015` / `0`；琥珀壁纸白 / 黑板 `0.067` / `0.178`）。**CSS 写在 backtick 模板字符串里：注释中不要出现反引号**，否则会截断字符串（`TS1005`） |
 
 ---
 

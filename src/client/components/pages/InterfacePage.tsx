@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { CSSProperties, ComponentType } from 'react'
 import type { ThemeSectionProps, ThemeStoreState, PartOpacities, PartBlurs, CaptionInkMode } from '../../types'
-import { cfg, rOps, rSop, rBlurs, rChatTextOpacity, rTrajectoryOpacity, rPanelOpacity, rProducedOpacity, rHeaderOpacity, rHeaderBarOpacity, rCaptionInk, rProtectThirdParty } from '../../state'
+import { cfg, rOps, rSop, rBlurs, rChatTextOpacity, rTrajectoryOpacity, rPanelOpacity, rProducedOpacity, rHeaderOpacity, rHeaderBarOpacity, rCaptionInk, rProtectThirdParty, rScheme } from '../../state'
 import { saveConfig } from '../../rpc'
-import { applyCustomTokens, applySettingsOverrides, setPartBlur, applyViewCards, applyTrajectoryOverrides, applyPanelOverrides, applyProduced, applyHeaderPopovers, applyHeaderBar, applyReaderLanes } from '../../wallpaper'
-import { subscribeThirdParty, thirdPartySightings } from '../../third-party'
+import { applyCustomTokens, applySettingsOverrides, setPartBlur, applyViewCards, applyTrajectoryOverrides, applyPanelOverrides, applyProduced, applyHeaderPopovers, applyHeaderBar, applyThirdPartyPins, partHighlightElements, SETTINGS_PANEL_SEL } from '../../wallpaper'
+import { diagnosticLine, subscribeThirdParty, thirdPartySightings, type Sighting } from '../../third-party'
+import { hideHighlight, showHighlight } from '../PartHighlight'
 import { LiveSlider } from '../LiveSlider'
 import { CanvasIcon, SidebarIcon, ChatIcon, GearIcon, TextIcon, TrajectoryIcon, InputIcon, PanelIcon, HeaderBarIcon } from '../icons'
 
@@ -28,21 +29,54 @@ interface PartDef {
   /** Session header bar (the conversation's title / actions / view tabs):
    *  opacity + blur. Inert where the host renders that slot bare. */
   isHeaderBar?: boolean
+  /** Real regions to outline while this card is hovered (issue #33 ②). A function,
+   *  never a cached list: the host swaps these nodes on navigation. Every selector
+   *  here is one the plugin's own rules already use, and the three frame columns go
+   *  through `partHighlightElements` so they are literally the nodes setBlur paints. */
+  highlight?: () => HTMLElement[]
 }
 
+/** Resolve a set of stable selectors into live nodes. `data-*` markers and the
+ *  plugin's own runtime tags only — never a hashed host class name (§2-E). */
+const qsa = (...sels: string[]): HTMLElement[] =>
+  sels.flatMap(s => Array.from(document.querySelectorAll<HTMLElement>(s)))
+
 const PARTS: PartDef[] = [
-  { opKey: 'bg', labelKey: 'uiOpacityBg', Icon: CanvasIcon },
-  { opKey: 'sidebar', labelKey: 'uiOpacitySide', Icon: SidebarIcon },
-  { opKey: 'card', labelKey: 'uiOpacityCard', Icon: ChatIcon },
-  { opKey: 'input', labelKey: 'uiOpacityInput', Icon: InputIcon },
-  { isSettings: true, labelKey: 'uiSop', Icon: GearIcon },
-  { isChat: true, labelKey: 'uiChatRegion', Icon: TextIcon },
-  { isTrajectory: true, labelKey: 'uiTrajectory', Icon: TrajectoryIcon },
-  { isProduced: true, labelKey: 'uiProduced', Icon: TextIcon },
-  { isHeader: true, labelKey: 'uiHeader', Icon: PanelIcon },
-  { isHeaderBar: true, labelKey: 'uiHeaderBar', Icon: HeaderBarIcon },
-  { isPanel: true, labelKey: 'uiPanelNative', Icon: PanelIcon },
+  { opKey: 'bg', labelKey: 'uiOpacityBg', Icon: CanvasIcon, highlight: () => partHighlightElements('center') },
+  { opKey: 'sidebar', labelKey: 'uiOpacitySide', Icon: SidebarIcon, highlight: () => partHighlightElements('sidebar') },
+  { opKey: 'card', labelKey: 'uiOpacityCard', Icon: ChatIcon, highlight: () => qsa('[data-menu-material]', '[data-approval-key]') },
+  { opKey: 'input', labelKey: 'uiOpacityInput', Icon: InputIcon, highlight: () => qsa('[data-composer-card]', '[data-composer-seat]', '[data-composer-chip]') },
+  { isSettings: true, labelKey: 'uiSop', Icon: GearIcon, highlight: () => qsa(SETTINGS_PANEL_SEL) },
+  { isChat: true, labelKey: 'uiChatRegion', Icon: TextIcon, highlight: () => qsa('[data-chat-flow]', '[data-dab-chat-card]') },
+  { isTrajectory: true, labelKey: 'uiTrajectory', Icon: TrajectoryIcon, highlight: () => qsa('[data-conversation-composer-overlay]', '[data-dab-traj-card]') },
+  { isProduced: true, labelKey: 'uiProduced', Icon: TextIcon, highlight: () => qsa('[data-code-block-content]', '[data-code-block-banner]', '[data-diff]', '[data-changed-files]', '[data-terminal]', '[data-read]') },
+  { isHeader: true, labelKey: 'uiHeader', Icon: PanelIcon, highlight: () => qsa('[data-dsh-any-header-popover]') },
+  { isHeaderBar: true, labelKey: 'uiHeaderBar', Icon: HeaderBarIcon, highlight: () => qsa('.dab-header-bar', '[data-windows-titlebar]') },
+  { isPanel: true, labelKey: 'uiPanelNative', Icon: PanelIcon, highlight: () => [...partHighlightElements('right'), ...qsa('[data-sidebar-right-panel]')] },
 ]
+
+/** Clipboard is unavailable in some production shells (insecure context, denied
+ *  permission). Issue #34 is precisely "the boot log cannot be reached", so a failed
+ *  copy must not be a dead end: the card then shows a selectable readonly field. */
+async function copyDiagnosticText(text: string): Promise<boolean> {
+  try {
+    if (navigator.clipboard?.writeText !== undefined) {
+      await navigator.clipboard.writeText(text)
+      return true
+    }
+  } catch { /* fall through to the legacy path */ }
+  try {
+    const ta = document.createElement('textarea')
+    ta.value = text
+    ta.style.position = 'fixed'
+    ta.style.opacity = '0'
+    document.body.appendChild(ta)
+    ta.select()
+    const ok = document.execCommand('copy')
+    ta.remove()
+    return ok
+  } catch { return false }
+}
 
 export function InterfacePage({ p }: { p: ThemeSectionProps }) {
   const { t, setOps, setBlurs, setSop, setPanelOp, useStore } = p
@@ -58,6 +92,32 @@ export function InterfacePage({ p }: { p: ThemeSectionProps }) {
   const [tpRev, setTpRev] = useState(0)
   useEffect(() => subscribeThirdParty(() => setTpRev(v => v + 1)), [])
   void tpRev
+  // One-shot feedback for the diagnostic-line copy button. The timer is cleared on
+  // unmount (§2-O: every scheduled thing we create needs a teardown).
+  const [copied, setCopied] = useState<string | null>(null)
+  const [copyFailed, setCopyFailed] = useState<string | null>(null)
+  const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => () => { if (copyTimer.current !== null) clearTimeout(copyTimer.current) }, [])
+  const copyDiagnostic = async (s: Sighting): Promise<void> => {
+    const ok = await copyDiagnosticText(diagnosticLine(s))
+    setCopyFailed(ok ? null : s.plugin)
+    setCopied(ok ? s.plugin : null)
+    if (copyTimer.current !== null) clearTimeout(copyTimer.current)
+    if (ok) copyTimer.current = setTimeout(() => setCopied(null), 2200)
+  }
+  // Hover highlight (issue #33 ②). The outline layer is plugin-owned, so leaving the
+  // page must remove it too (§2-O) — not just moving the mouse off a card.
+  const [hoverHint, setHoverHint] = useState<string | null>(null)
+  useEffect(() => () => hideHighlight(), [])
+  const hoverPart = (part: PartDef, name: string): void => {
+    if (part.highlight === undefined) return
+    // Re-read the scheme on every hover: it already folds in the forced override,
+    // the theme color's lightness and the wallpaper verdict, so the plate is always
+    // the inverse of what the interface currently looks like.
+    const n = showHighlight(part.highlight(), name, rScheme())
+    setHoverHint(n === 0 ? t('uiHighlightNone') : `${t('uiHighlightFound')} ${n}`)
+  }
+  const leavePart = (): void => { hideHighlight(); setHoverHint(null) }
   // The panel row owns the host's own right Sidebar only. The dsh-better-sidebar
   // workbench used to ride this row too, but it is an artifact viewer, not a page
   // column, so since 0.3.2 it belongs to the produced row below (PRODUCED_RULE).
@@ -91,7 +151,8 @@ export function InterfacePage({ p }: { p: ThemeSectionProps }) {
           const blurKey: keyof PartBlurs = isChat ? 'chat' : isTrajectory ? 'trajectory' : isSettings ? 'settings' : isPanel ? 'panel' : isProduced ? 'produced' : isHeader ? 'header' : isHeaderBar ? 'headerBar' : opKey!
           const opacity = isChat ? rChatTextOpacity() : isTrajectory ? rTrajectoryOpacity() : isSettings ? rSop() : isPanel ? rPanelOpacity() : isProduced ? rProducedOpacity() : isHeader ? rHeaderOpacity() : isHeaderBar ? rHeaderBarOpacity() : rOps()[opKey!]
           return (
-            <section key={blurKey} className="dab-card dab-card-hover dab-rise" style={{ '--d': i + 1 } as CSSProperties}>
+            <section key={blurKey} className="dab-card dab-card-hover dab-rise" style={{ '--d': i + 1 } as CSSProperties}
+              onMouseEnter={() => hoverPart(part, label)} onMouseLeave={leavePart}>
               <div className="dab-part-head">
                 <div className="dab-part-ico"><Icon size={16} /></div>
                 <div className="dab-part-name">{label}</div>
@@ -212,6 +273,8 @@ export function InterfacePage({ p }: { p: ThemeSectionProps }) {
         })}
       </div>
 
+      <div className="dab-hover-hint">{hoverHint ?? t('uiHighlightHint')}</div>
+
       {/* Third-party compatibility. This plugin fades the HOST's tokens, so any other
           plugin that fills from them fades too — and its author had no way to know.
           The scan names who is installed and what of ours they read; this card is where
@@ -228,7 +291,7 @@ export function InterfacePage({ p }: { p: ThemeSectionProps }) {
               cfg.protectThirdParty = !rProtectThirdParty()
               // The pin lives entirely in its own sheet, so this single call emits or
               // removes all of it — merged geometry, frost and plate alike.
-              applyReaderLanes()
+              applyThirdPartyPins()
               saveConfig()
               // …and bump the local counter: `saveConfig` only debounces the write, it
               // does not touch metaRev, so without this the switch would flip the
@@ -243,9 +306,27 @@ export function InterfacePage({ p }: { p: ThemeSectionProps }) {
           {thirdPartySightings().length === 0
             ? <span style={{ fontSize: 12 }}>{t('tpNone')}</span>
             : thirdPartySightings().map(s => (
-              <span key={s.plugin} style={{ fontSize: 12 }} title={s.tokens.join(', ')}>
-                {s.plugin}：{s.pinned && s.labelKey ? `${t(s.labelKey)} ${t('tpPinned')}` : s.pinned ? t('tpPinned') : t('tpUnpinned')}
-              </span>
+              <div key={s.plugin} className="dab-tp-row">
+                <div className="dab-tp-info">
+                  <span className="dab-tp-name">{s.plugin}</span>
+                  <span className="dab-tp-state">
+                    {s.mode === 'reviewed'
+                      ? (s.labelKey ? t(s.labelKey) : t('tpReviewed'))
+                      : s.pinned && s.labelKey
+                        ? `${t(s.labelKey)} · ${t('tpPinned')}`
+                        : s.pinned ? t('tpPinned') : t('tpUnpinned')}
+                  </span>
+                  <span className="dab-tp-tokens" title={s.tokens.join(', ')}>{s.tokens.join(', ')}</span>
+                </div>
+                <button type="button" className="dab-btn dab-btn-ghost dab-tp-copy"
+                  title={t('tpCopyHint')} onClick={() => { void copyDiagnostic(s) }}>
+                  {copyFailed === s.plugin ? t('tpCopyFail') : copied === s.plugin ? t('tpCopied') : t('tpCopy')}
+                </button>
+                {copyFailed === s.plugin && (
+                  <input className="dab-tp-fallback" readOnly value={diagnosticLine(s)}
+                    onFocus={e => e.currentTarget.select()} aria-label={t('tpCopyHint')} />
+                )}
+              </div>
             ))}
         </div>
       </section>

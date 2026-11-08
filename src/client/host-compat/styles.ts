@@ -96,7 +96,7 @@ export function buildStaticStyles(): string {
     // (No third-party accommodation lives here. This sheet is the plugin's contract
     // with the HOST; another plugin's pin has to be able to vanish entirely — paint,
     // frost and merged-box geometry alike — when its switch is turned off, so it rides
-    // its own sheet: see `applyReaderLanes` in `wallpaper.ts`.)
+    // its own sheet: see `applyThirdPartyPins` in `wallpaper.ts`.)
     + PLACEHOLDER_RULE
 }
 
