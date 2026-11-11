@@ -3073,7 +3073,13 @@ export function applyViewCards(): void {
     if (target === null) return
     const plain = spec.plain === true
     const opacity = spec.opacity()
-    const blurPx = spec.blur()
+    // An opaque card background makes the frost a visual no-op, but the
+    // backdrop-filter surface it creates still has to be re-rendered over a
+    // playing video wallpaper — Firefox then toggles the card's top clip edge
+    // between two backdrop samples (a flickering ~18px dark band right under the
+    // session header, reported 2026-11-11). Skip the underlay whenever the card
+    // paints opaque; a translucent card keeps its frost untouched.
+    const blurPx = !plain && opacity >= 1 ? 0 : spec.blur()
     if (!plain) {
       if (!target.hasAttribute(spec.mark)) stashCardPrev(target, spec.prev, false)
       // Mirrors .dab-card (layer-1 background, border, 16px radius, 18px
