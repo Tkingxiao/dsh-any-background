@@ -8,8 +8,8 @@
 import { defineStore } from './runtime'
 import type { Ctx, RpcResultLike, BoundActions, ThemeSectionProps, PartOpacities, PartBlurs, PartStrokes, BackgroundType, GeneratedBgParams, ProfileAppearance, ProfileEntry, RotationItem, ScheduleConfig, SchemeOverride, UploadOutcome, StoreInstance } from './types'
 import { NS, zh, en } from './i18n'
-import { cfg, rHasColor, rColor, rWp, rWpImage, rWpVideo, rBgState, rVideoBgState, setWpUrl, setWpImageUrl, setWpVideoUrl, setWpVideoSnapshot, setBgState, adoptConfig, DEFAULT_CONFIG, setBgDark, rBgDark, rProfiles, rRotation, rSchedule, rScheme, rColorScheme, rSchemeOverride, currentAppearance, applyAppearance } from './state'
-import { RPC_CHANNEL, VIDEO_SERVE_URL, FONT_SERVE_URL, fontServeUrl, initRpc, saveConfig, flushSave, loadPersisted, persistWallpaper, persistVideo, persistConfig, uploadVideo, uploadFont, removeFont as rpcRemoveFont, rotationAdd, rotationRemove, rotationActivate, rotationRestore, rotationFileUrl, setVideoFromUrl as rpcSetVideoFromUrl } from './rpc'
+import { cfg, rHasColor, rColor, rWp, rWpImage, rWpVideo, rBgState, rVideoBgState, setWpUrl, setWpImageUrl, setWpVideoUrl, setWpVideoSnapshot, setBgState, adoptConfig, DEFAULT_CONFIG, setBgDark, rBgDark, rProfiles, rRotation, rUrlRefresh, rSchedule, rScheme, rColorScheme, rSchemeOverride, currentAppearance, applyAppearance } from './state'
+import { RPC_CHANNEL, VIDEO_SERVE_URL, FONT_SERVE_URL, fontServeUrl, initRpc, saveConfig, flushSave, loadPersisted, persistWallpaper, persistVideo, persistConfig, uploadVideo, uploadFont, removeFont as rpcRemoveFont, rotationAdd, rotationRemove, rotationActivate, rotationRestore, rotationFileUrl, setVideoFromUrl as rpcSetVideoFromUrl, setWallpaperFromUrl } from './rpc'
 import type { RotationPoolEntry } from './rpc'
 import { applyWp, teardownWp, applySettingsOverrides, applyPanelOverrides, applyStrokes, applyFontFace, watchParts, watchThemeResets, regenerateGeneratedBg, setBackgroundType, updateGeneratedBg, applyThemeColor, onGeneratedSnapshot, watchWallpaperDragQuality, clearThemeTokens, onVerdictApplied, onColorAdopted, LABEL_TOKENS, SETTINGS_PANEL_SEL } from './wallpaper'
 import { mountStaticStyles } from './host-compat/styles'
@@ -332,6 +332,52 @@ export function apply(ctx: Ctx): void {
     await applyRotationIndex(pickNextRotationIndex(), true)
   }
 
+  // ── URL wallpaper daily refresh (issue #35 ②) ──────────────────────────────
+  // A URL wallpaper is downloaded once into the wallpaper slot; a source that
+  // serves a NEW image over time (Bing daily mirrors and the like) then sits
+  // still forever. This re-fetches it on the day boundary. The fetch itself is
+  // the host's `setWallpaperUrl` RPC — the browser cannot cross-origin fetch
+  // an arbitrary wallpaper host, the node half has no such fence.
+  const refreshUrlWallpaper = async (): Promise<boolean> => {
+    const ur = cfg.urlRefresh
+    if (!ur.enabled || ur.url === '') return false
+    const r = await setWallpaperFromUrl(ur.url)
+    if (!r.ok) {
+      console.warn('dsh-any-background: url wallpaper refresh failed', r.error)
+      return false
+    }
+    // Mirror setWpFromServer's state switch (bound may not exist on the boot
+    // chain yet), then re-extract the theme color — the picture changed.
+    cfg.backgroundType = 'image'
+    setBgDark(null)
+    setWpImageUrl(r.wallpaperUrl ?? null)
+    setWpUrl(rWpImage())
+    setBgState({ ...DEFAULT_CONFIG.bgState })
+    await adoptWallpaperColor(rWp()!)
+    applyThemeColor()
+    syncBg()
+    return true
+  }
+
+  /** Run the daily refresh when it is due and the wallpaper slot actually
+   *  belongs to it: rotation pool enabled = rotation owns the slot; a video /
+   *  generated background = nothing to refresh; no URL recorded = feature
+   *  never set up. One attempt per day — a FAILED attempt is stamped too, so
+   *  a dead endpoint is retried tomorrow, not every 30 s tick. */
+  const maybeRefreshUrlWallpaper = async (): Promise<void> => {
+    const ur = cfg.urlRefresh
+    if (!ur.enabled || ur.url === '') return
+    if (rRotation().enabled) return
+    if (cfg.backgroundType !== 'image') return
+    if (rWpImage() === null) return
+    const last = ur.last !== null ? new Date(ur.last) : null
+    if (last !== null && !isNaN(last.getTime()) && last.toDateString() === new Date().toDateString()) return
+    const ok = await refreshUrlWallpaper()
+    cfg.urlRefresh = { ...rUrlRefresh(), last: new Date().toISOString() }
+    persistConfig()
+    if (ok) syncMetaNow()
+  }
+
   // ── Day/night profile schedule ───────────────────────────────────────────────
   const parseHHMM = (s: string): number => {
     const m = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(s)
@@ -357,6 +403,9 @@ export function apply(ctx: Ctx): void {
     // does it inside `read`; rotationDue is always true for it), so the
     // tick must not drive it or the wallpaper flips every 30 s.
     if (sharedRotationAdvancesLive(rRotation())) void maybeRotate()
+    // URL wallpaper daily refresh rides the same tick; parked when rotation
+    // owns the slot (see maybeRefreshUrlWallpaper's guards).
+    void maybeRefreshUrlWallpaper()
     const sc = rSchedule()
     if (!sc.enabled) return
     // Both steps are optional: `matchMedia?.(…)` alone still throws on the
@@ -415,6 +464,9 @@ export function apply(ctx: Ctx): void {
       // before the branch restore so the fresh wallpaper is what gets applied.
       await maybeRotate()
     }
+    // A due URL-wallpaper refresh re-runs the boot chain's color adoption —
+    // the rotation path above already re-applies when IT advanced.
+    await maybeRefreshUrlWallpaper()
     // Regenerate on reload if enabled, else reconstruct from saved params.
     if (cfg.backgroundType === 'video') {
       const v = rWpVideo()
@@ -1022,6 +1074,13 @@ export function apply(ctx: Ctx): void {
       rotateNow: async (): Promise<boolean> => {
         if (rRotation().items.length === 0) return false
         return applyRotationIndex(pickNextRotationIndex(), true)
+      },
+      // Manual pick of one pool item (issue #35): same activation path as the
+      // cadence advance, but `auto: false` — lastRotate is kept so a picked
+      // image does not reset the daily/weekly clock (mirror of the host's
+      // handleRotationSet cursor semantics).
+      applyRotationItem: async (index: number): Promise<boolean> => {
+        return applyRotationIndex(index, false)
       },
       // Network video URL: the server streams it into the video slot; the
       // client switches to video mode and plays from the serve URL, then

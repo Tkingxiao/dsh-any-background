@@ -297,6 +297,13 @@ export const UI_CSS = `
 .dab-thumb-x{position:absolute;top:2px;right:2px;width:16px;height:16px;border:0;border-radius:50%;background:rgba(0,0,0,.55);color:#fff;cursor:pointer;display:grid;place-items:center;opacity:0;transition:opacity .18s ease,background .18s ease;padding:0}
 .dab-thumb:hover .dab-thumb-x{opacity:1}
 .dab-thumb-x:hover{background:var(--dsw-alias-state-error-primary)}
+/* Issue #35 ①: pool thumbnails are click-to-apply. Scoped by the role so the
+ * add tile (a real <button>) and the remove cross keep their own behavior. */
+.dab-thumb[role="button"]{cursor:pointer;transition:border-color .18s ease,box-shadow .18s ease,transform .18s ease}
+.dab-thumb[role="button"]:hover{border-color:var(--dsw-alias-brand-primary);transform:translateY(-1px)}
+.dab-thumb[role="button"]:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:1px}
+.dab-thumb-apply{position:absolute;left:0;right:0;bottom:0;height:15px;display:grid;place-items:center;font-size:9.5px;line-height:1;letter-spacing:.05em;color:#fff;background:rgba(0,0,0,.55);opacity:0;transition:opacity .18s ease;pointer-events:none}
+.dab-thumb[role="button"]:hover .dab-thumb-apply,.dab-thumb[role="button"]:focus-visible .dab-thumb-apply{opacity:1}
 .dab-thumb-add{border-style:dashed;cursor:pointer;background:transparent;color:var(--dsw-alias-label-tertiary);font:inherit;transition:border-color .22s ease,color .22s ease}
 .dab-thumb-add:hover{border-color:var(--dsw-alias-brand-primary);color:var(--dsw-alias-brand-primary)}
 .dab-chip-sep{width:1px;height:18px;background:var(--dsw-alias-border-l2);margin:0 4px;flex:none}

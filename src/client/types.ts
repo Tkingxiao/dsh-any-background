@@ -173,6 +173,20 @@ export interface RotationConfig {
   lastRotate: string | null
 }
 
+/** Issue #35 ②: re-fetch a URL wallpaper once a day, for sources that serve a
+ *  different image over time (Bing daily mirrors and the like — a plain static
+ *  URL re-downloads the same bytes and simply re-applies them). Mutually
+ *  exclusive with the rotation pool: while rotation is enabled this stays
+ *  parked, because both would write the same wallpaper slot on their own clock. */
+export interface UrlRefreshConfig {
+  enabled: boolean
+  /** The source URL last applied through 「从网址」; '' when none. */
+  url: string
+  /** ISO timestamp of the last refresh attempt (success or failure — one
+   *  attempt per day, no 30 s retry hammering on a failing endpoint). */
+  last: string | null
+}
+
 /** Day/night profile auto-switch schedule. */
 export interface ScheduleConfig {
   enabled: boolean
@@ -284,6 +298,8 @@ export interface ThemeConfig {
   profiles: ProfileEntry[]
   /** Wallpaper rotation pool + cadence. */
   rotation: RotationConfig
+  /** Daily re-fetch of a URL wallpaper (issue #35 ②). */
+  urlRefresh: UrlRefreshConfig
   /** Day/night profile auto-switch schedule. */
   schedule: ScheduleConfig
   /** Forced interface scheme. */
@@ -378,6 +394,9 @@ export interface ThemeSectionProps {
   addRotationItems: (files: File[]) => Promise<boolean>
   /** Remove a rotation item by index. */
   removeRotationItem: (index: number) => Promise<boolean>
+  /** Activate a specific pool item as the wallpaper (issue #35: click a
+   *  thumbnail to apply it — the cadence buttons only advance). */
+  applyRotationItem: (index: number) => Promise<boolean>
   /** Immediately advance the rotation to the next item. */
   rotateNow: () => Promise<boolean>
   /** Download a background video from a network URL and activate it. */

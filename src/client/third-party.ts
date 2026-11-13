@@ -88,6 +88,22 @@ export const THIRD_PARTY_PINS: readonly ThirdPartyPin[] = [
     tokens: ['--dsw-alias-bg-layer-2'],
   },
   {
+    // Its whole dialog set is a fixed, centered work surface painted through a
+    // `color-mix` of the layer-1 token (`--sm-dialog-surface` → `--sm-dialog-fill`,
+    // client bundle 0.7.x: `.sm-panelDialog{background:var(--sm-dialog-fill)}`),
+    // and its inputs, header menu, custom select lists and bulk bar read
+    // layer-2/3 directly. Faded by the card slider and carrying no frost of its
+    // own, the dialog's text mixes with whatever the wallpaper and the bottom
+    // panel hold — issue #38's 「背景没有模糊，和底部面板文字显示重叠」. Pinned
+    // opaque on its roots (the market-popover precedent: a local token
+    // re-declaration, no frost — frost behind an opaque plate is the #36 no-op),
+    // which also keeps the plugin's own 「弹窗不透明度」 mix working: it blends
+    // the pinned literal, not a faded token.
+    plugin: 'dsh-session-manager',
+    labelKey: 'tpSessionManagerDialog',
+    tokens: ['--dsw-alias-bg-layer-1', '--dsw-alias-bg-layer-2', '--dsw-alias-bg-layer-3'],
+  },
+  {
     // `.pane` fills from `--dsw-alias-bg-base` and so does most of its workbench
     // (23 / 35 / 20 / 11 reads of bg-base / layer-1/2/3 respectively). Pinning that
     // whole surface would silently take the 「主界面」 slider away from the very panel

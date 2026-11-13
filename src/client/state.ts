@@ -1,4 +1,4 @@
-import type { BgState, ThemeConfig, PartOpacities, PartBlurs, PartStrokes, StrokeConfig, BgMode, ProfileEntry, RotationConfig, RotationItem, ScheduleConfig, SchemeOverride, ProfileAppearance, CaptionInkMode } from './types'
+import type { BgState, ThemeConfig, PartOpacities, PartBlurs, PartStrokes, StrokeConfig, BgMode, ProfileEntry, RotationConfig, RotationItem, ScheduleConfig, SchemeOverride, ProfileAppearance, CaptionInkMode, UrlRefreshConfig } from './types'
 
 export const DEFAULT_CONFIG: ThemeConfig = {
   color: null,
@@ -55,6 +55,7 @@ export const DEFAULT_CONFIG: ThemeConfig = {
   protectThirdParty: true,
   profiles: [],
   rotation: { enabled: false, mode: 'shuffle', interval: 'daily', current: 0, items: [], lastRotate: null },
+  urlRefresh: { enabled: false, url: '', last: null },
   schedule: { enabled: false, mode: 'time', dayProfile: null, nightProfile: null, dayStart: '07:00', nightStart: '19:00' },
   schemeOverride: 'auto',
   activeProfile: null,
@@ -220,6 +221,12 @@ export function rRotation(): RotationConfig {
     ? { ...DEFAULT_CONFIG.rotation, ...r, items: Array.isArray(r.items) ? r.items : [] }
     : { ...DEFAULT_CONFIG.rotation, items: [] }
 }
+export function rUrlRefresh(): UrlRefreshConfig {
+  const r = cfg.urlRefresh
+  return r && typeof r === 'object'
+    ? { enabled: r.enabled === true, url: typeof r.url === 'string' ? r.url : '', last: typeof r.last === 'string' ? r.last : null }
+    : { ...DEFAULT_CONFIG.urlRefresh }
+}
 export function rSchedule(): ScheduleConfig {
   return cfg.schedule && typeof cfg.schedule === 'object' ? { ...DEFAULT_CONFIG.schedule, ...cfg.schedule } : { ...DEFAULT_CONFIG.schedule }
 }
@@ -346,6 +353,15 @@ function adoptRotation(raw: unknown): RotationConfig {
   }
 }
 
+function adoptUrlRefresh(raw: unknown): UrlRefreshConfig {
+  const r = (raw ?? {}) as Partial<UrlRefreshConfig>
+  return {
+    enabled: r.enabled === true,
+    url: typeof r.url === 'string' && /^https?:\/\//i.test(r.url) ? r.url : '',
+    last: typeof r.last === 'string' ? r.last : null,
+  }
+}
+
 function adoptSchedule(raw: unknown): ScheduleConfig {
   const r = (raw ?? {}) as Partial<ScheduleConfig>
   return {
@@ -424,6 +440,7 @@ export function adoptConfig(raw: unknown): void {
     protectThirdParty: typeof c.protectThirdParty === 'boolean' ? c.protectThirdParty : DEFAULT_CONFIG.protectThirdParty,
     profiles: adoptProfiles(c.profiles),
     rotation: adoptRotation(c.rotation),
+    urlRefresh: adoptUrlRefresh(c.urlRefresh),
     schedule: adoptSchedule(c.schedule),
     schemeOverride: c.schemeOverride === 'light' || c.schemeOverride === 'dark' ? c.schemeOverride : 'auto',
     activeProfile: typeof c.activeProfile === 'string' ? c.activeProfile : null,

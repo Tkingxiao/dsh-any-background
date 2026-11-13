@@ -41,6 +41,7 @@ export const zh: Record<string, string> = {
   tpReaderLanes: '吸顶总结栏',
   tpMarketTaskPopover: '「任务」浮层',
   tpUpdateButtons: '更新检查按钮',
+  tpSessionManagerDialog: '会话管理弹窗',
   tpSidebarReviewed: '已核对 —— 整块面板跟随「主界面」滑块，不替你钉死',
   tpCopy: '复制诊断行',
   tpCopied: '已复制',
@@ -186,6 +187,11 @@ export const zh: Record<string, string> = {
   rotDaily: '每天',
   rotWeekly: '每周',
   rotNow: '立即切换',
+  rotPick: '应用这张',
+  rotPicked: '已切换到选中的壁纸',
+  rotPickFail: '应用失败：轮换池文件丢失，试着移除后重新添加',
+  urlRefreshTitle: '每日自动刷新',
+  urlRefreshHint: '每天自动重新下载上面这个网址的图片并应用，适合会返回新图片的地址（如必应每日一图类接口）。轮换池启用时此功能暂停，避免两边抢同一张壁纸。',
 }
 
 export const en: Record<string, string> = {
@@ -229,6 +235,7 @@ export const en: Record<string, string> = {
   tpReaderLanes: 'its sticky reading lanes',
   tpMarketTaskPopover: 'its task popover',
   tpUpdateButtons: 'its update-check buttons',
+  tpSessionManagerDialog: 'its session-manager dialogs',
   tpSidebarReviewed: 'reviewed — the whole panel follows the Main-interface slider, not pinned for you',
   tpCopy: 'Copy report line',
   tpCopied: 'Copied',
@@ -374,4 +381,9 @@ export const en: Record<string, string> = {
   rotDaily: 'Daily',
   rotWeekly: 'Weekly',
   rotNow: 'Switch now',
+  rotPick: 'Apply this one',
+  rotPicked: 'Wallpaper switched to the selected image',
+  rotPickFail: 'Apply failed: the pool file is missing — remove it and re-add',
+  urlRefreshTitle: 'Refresh daily',
+  urlRefreshHint: 'Re-downloads the URL above once a day and applies it — for sources that serve a new image over time (Bing daily mirrors and the like). Paused while the rotation pool is enabled, so the two never fight over the same wallpaper slot.',
 }

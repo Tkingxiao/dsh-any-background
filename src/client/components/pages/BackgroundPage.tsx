@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import type { ThemeSectionProps, ThemeStoreState, BackgroundType, GeneratedBgParams, BgMode } from '../../types'
-import { cfg, rWop, rBl, rBgMode } from '../../state'
+import { cfg, rWop, rBl, rBgMode, rUrlRefresh } from '../../state'
 import { saveConfig, setWallpaperFromUrl, uploadWallpaper, uploadRefusalText, WALLPAPER_SERVE_URL } from '../../rpc'
 import { applyWp, setWpOpacity, setWpBlur, pauseGeneratedBg, resumeGeneratedBg } from '../../wallpaper'
 import { defaultParamsFor } from '../../utils/bg-generators'
@@ -19,7 +19,7 @@ const BG_MODES: Array<{ mode: BgMode; labelKey: string }> = [
 ]
 
 export function BackgroundPage({ p, notify }: { p: ThemeSectionProps; notify: (msg: string, ok?: boolean) => void }) {
-  const { t, setWpFromServer, setVideo, setWop, setBl, setBgType, setGeneratedBg, regenerateBg, setRegenerateOnReload, setRotation, addRotationItems, removeRotationItem, rotateNow, setVideoFromUrl, useStore } = p
+  const { t, setWpFromServer, setVideo, setWop, setBl, setBgType, setGeneratedBg, regenerateBg, setRegenerateOnReload, setRotation, addRotationItems, removeRotationItem, applyRotationItem, rotateNow, setVideoFromUrl, useStore } = p
   // Field-level store subscriptions: dragging sliders / picking colors changes
   // only the color fields, and the background page has no reason to re-render
   // for those — full-state subscription re-renders this whole page (hero img,
@@ -40,6 +40,9 @@ export function BackgroundPage({ p, notify }: { p: ThemeSectionProps; notify: (m
   const [urlVal, setUrlVal] = useState('')
   const [urlBusy, setUrlBusy] = useState(false)
   const [urlErr, setUrlErr] = useState<string | null>(null)
+  // Local mirror of cfg.urlRefresh so the 每日自动刷新 toggle re-renders; cfg is
+  // the persisted truth (same pattern as the bgMode mirror above).
+  const [urlRefresh, setUrlRefreshLocal] = useState(rUrlRefresh())
   // Layout mode is owned by cfg (persisted on click); local mirror only so
   // the chip row re-renders on selection. It must re-derive from cfg whenever
   // the store's bgRev moves: importTheme rewrites cfg.bgMode through
@@ -98,6 +101,11 @@ export function BackgroundPage({ p, notify }: { p: ThemeSectionProps; notify: (m
       // The host already replaced the local wallpaper file; just switch the
       // theme to image mode and point the display at the serve URL.
       setWpFromServer(r.wallpaperUrl ?? null)
+      // Record the source so the 每日自动刷新 toggle has something to re-fetch
+      // (issue #35 ②). A static URL simply re-applies the same bytes.
+      cfg.urlRefresh = { ...rUrlRefresh(), url: u }
+      setUrlRefreshLocal(cfg.urlRefresh)
+      saveConfig()
       setUrlOpen(false)
       setUrlVal('')
     } else if (r.error === 'not an image') {
@@ -129,6 +137,27 @@ export function BackgroundPage({ p, notify }: { p: ThemeSectionProps; notify: (m
     cfg.bgMode = m
     applyWp()
     saveConfig()
+  }
+
+  /** Remove the stored wallpaper and its URL-refresh source with it — a
+   *  refresh firing after removal would re-download and re-apply the picture
+   *  the user just deleted. */
+  const removeWallpaper = () => {
+    setWpFromServer(null)
+    cfg.urlRefresh = { enabled: false, url: '', last: null }
+    setUrlRefreshLocal(cfg.urlRefresh)
+    saveConfig()
+  }
+
+  // Issue #35 ①: click a pool thumbnail to apply THAT image now — until this
+  // the strip's only action was advancing (shuffle/order + 立即切换), which
+  // never lands on a chosen picture.
+  const pickItem = (i: number) => {
+    if (rotBusy || i === rotation.current) return
+    setRotBusy(true)
+    void applyRotationItem(i)
+      .then(ok => { notify(ok ? t('rotPicked') : t('rotPickFail'), ok) })
+      .finally(() => setRotBusy(false))
   }
 
   const setGenType = (type: Exclude<BackgroundType, 'image' | 'video'>) => {
@@ -199,7 +228,7 @@ export function BackgroundPage({ p, notify }: { p: ThemeSectionProps; notify: (m
                     <RefreshIcon size={13} />{t('bgRegenerate')}
                   </button>
                 ) : null}
-                <button type="button" className="dab-btn dab-btn-danger" onClick={() => setWpFromServer(null)}>
+                <button type="button" className="dab-btn dab-btn-danger" onClick={removeWallpaper}>
                   <TrashIcon size={13} />{t('bgRemove')}
                 </button>
               </div>
@@ -253,7 +282,7 @@ export function BackgroundPage({ p, notify }: { p: ThemeSectionProps; notify: (m
                     <EditIcon size={14} />{t('bgEdit')}
                   </button>
                 ) : null}
-                <button type="button" className="dab-btn dab-btn-danger-inverted" onClick={() => setWpFromServer(null)}>
+                <button type="button" className="dab-btn dab-btn-danger-inverted" onClick={removeWallpaper}>
                   <TrashIcon size={14} />{t('bgRemove')}
                 </button>
               </>
@@ -289,6 +318,29 @@ export function BackgroundPage({ p, notify }: { p: ThemeSectionProps; notify: (m
               ))}
             </div>
           </div>
+          {/* Issue #35 ②: daily re-fetch of the applied URL wallpaper. The row
+              only exists once a URL wallpaper has been applied — there is
+              nothing to re-fetch before that. */}
+          {urlRefresh.url !== '' ? (
+            <div style={{ marginTop: 14 }}>
+              <div className="dab-row-head">
+                <div className="dab-swatch-title" style={{ marginBottom: 0 }}>{t('urlRefreshTitle')}</div>
+                <button type="button" className={`dab-toggle${urlRefresh.enabled ? ' is-on' : ''}`}
+                  role="switch" aria-checked={urlRefresh.enabled}
+                  title={t('urlRefreshTitle')}
+                  onClick={() => {
+                    // Re-enabling clears the day stamp so the next 30 s tick
+                    // applies immediately instead of waiting for tomorrow.
+                    cfg.urlRefresh = { ...rUrlRefresh(), enabled: !rUrlRefresh().enabled, last: null }
+                    setUrlRefreshLocal(cfg.urlRefresh)
+                    saveConfig()
+                  }}>
+                  <span className="dab-toggle-knob" />
+                </button>
+              </div>
+              <p className="dab-hint" style={{ marginTop: 6 }}>{t('urlRefreshHint')}</p>
+            </div>
+          ) : null}
         </section>
 
         {/* Wallpaper rotation pool */}
@@ -303,10 +355,15 @@ export function BackgroundPage({ p, notify }: { p: ThemeSectionProps; notify: (m
           <p className="dab-hint" style={{ marginTop: 8 }}>{t('rotHint')}</p>
           <div className="dab-thumbstrip">
             {rotation.items.map((it, i) => (
-              <div key={it.file} className={`dab-thumb${rotation.enabled && i === rotation.current ? ' is-current' : ''}`}>
+              <div key={it.file}
+                className={`dab-thumb${rotation.enabled && i === rotation.current ? ' is-current' : ''}`}
+                role="button" tabIndex={0} title={t('rotPick')} aria-label={t('rotPick')}
+                onClick={() => pickItem(i)}
+                onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pickItem(i) } }}>
                 {it.thumb ? <img src={it.thumb} alt="" draggable={false} /> : <PhotoIcon size={15} />}
+                <span className="dab-thumb-apply" aria-hidden="true">{t('rotPick')}</span>
                 <button type="button" className="dab-thumb-x" title={t('rotRemove')}
-                  disabled={rotBusy} onClick={() => { setRotBusy(true); void removeRotationItem(i).finally(() => setRotBusy(false)) }}>
+                  disabled={rotBusy} onClick={e => { e.stopPropagation(); setRotBusy(true); void removeRotationItem(i).finally(() => setRotBusy(false)) }}>
                   <XIcon size={10} />
                 </button>
               </div>

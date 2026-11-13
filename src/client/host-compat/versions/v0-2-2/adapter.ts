@@ -96,6 +96,45 @@
  * NOT here, because this folder emits no promotion. These are VALUES the comments
  * quote, never inputs the adapter reads — it only asks for token NAMES.
  *
+ * RE-CHECKED AT `0.2.2-rc.2` AND `0.2.2-rc.3` FROM THE SOURCE TREE (tags
+ * `dsh-v0.2.2-rc.2`, `dsh-v0.2.2-rc.3`; rc.3 is the newest release line, master
+ * sits ~10 small commits past it). Same-line reads, so the folder keeps its
+ * answer and these rows only upgrade the verdict `line` → `exact`:
+ *   · Every RULE INPUT above is unchanged on both tags — `[data-chat-flow]`,
+ *     `[data-conversation-scroll]`, `[data-composer-seat]`,
+ *     `[data-conversation-composer-overlay]`, `data-shell-overlay`,
+ *     `data-rightbar-col`, `body[data-ds-dark-theme]` and the
+ *     `--dsw-alias-bg-*` / `--dsw-specific-*` token set all keep their
+ *     semantics (`ui-chat`/`ui-conversation` diffs are additive: an
+ *     `.older`-history block, a `conversation.hero.frame` slot that renders
+ *     `.root[data-phase='hero']{isolation:isolate}` — the hero phase mounts no
+ *     `[data-chat-flow]`, which `applyViewCards` already treats as "view not
+ *     mounted", and a header menu-button restyle).
+ *   · ONE NEW TOKEN FAMILY the sidebar slider must now own:
+ *     `design-platform.css` gained darwin-only
+ *     `--dsw-specific-sidebar-wash-top/-bottom` (+ their `-clear` stops),
+ *     `--dsw-specific-sidebar-tint` and `--dsw-specific-sidebar-glass-*`, and
+ *     `AppFrame.module.css` paints the sidebar column from the washes + tint on
+ *     `[data-platform='darwin']`. The tint is derived FROM
+ *     `--dsw-specific-sidebar-fill`, so the 「侧边栏」 slider already reaches
+ *     it through that token; the two washes are static literals that would
+ *     survive a fully faded sidebar — they joined the sidebar group in
+ *     `wallpaper.ts` (`OPACITY_TOKEN_GROUPS`/`OPACITY_VARS`), which on
+ *     non-darwin hosts is inert (the tokens resolve empty there and are
+ *     skipped). The `-clear` stops are alpha-0 by definition and the glass
+ *     pair is unclaimed like every `--dsw-specific-sidebar-glass-*` (see the
+ *     "does NOT claim" list above — these arrived with the same commit).
+ *   · Gate logic, `dsh.client` manifest fields and the six client packages'
+ *     exports are unchanged (version bumps only, all six at `0.2.2-rc.3`);
+ *     `SettingsLauncherOwnerProps.openSettings(sectionId?)` grew an optional
+ *     argument nothing here calls.
+ *   · Master-only (NOT in any tag, next release's problem): plugin
+ *     stylesheets move from `data-plugin-css` to a DocumentStyles
+ *     `<style data-plugin="…" data-path="…">` pipeline, and ui-layout's
+ *     ThemePresenter recomputes the `theme-color` meta from body background on
+ *     every `<style>` mutation. The third-party scanner keys on
+ *     `style[data-plugin]`, which BOTH generations carry, so detection holds.
+ *
  * @module
  */
 import {
@@ -118,7 +157,7 @@ function panelFragments(): PanelFragments {
 
 export function createAdapter(host: HostInfo): HostAdapter {
   return {
-    id: '0.2.2-alpha.2…rc.1',
+    id: '0.2.2-alpha.2…rc.3',
     channel: '0.2.2',
     host,
     panelFragments,

@@ -4,7 +4,7 @@
   <a href="https://www.npmjs.com/package/dsh-any-background"><img alt="npm 版本" src="https://img.shields.io/npm/v/dsh-any-background?color=4d6bfe"></a>
   <a href="https://www.npmjs.com/package/dsh-any-background"><img alt="npm 月下载量" src="https://img.shields.io/npm/dm/dsh-any-background?color=4d6bfe"></a>
   <a href="https://github.com/Tkingxiao/dsh-any-background/blob/main/LICENSE"><img alt="License: MIT" src="https://img.shields.io/npm/l/dsh-any-background?color=4d6bfe"></a>
-  <a href="https://www.npmjs.com/package/@deepseek-ai/dsh?activeTab=versions"><img alt="支持的 DSH 版本：0.2.0-rc.1 ~ 0.2.2-rc.1 及其上" src="https://img.shields.io/badge/DSH-0.2.0--rc.1%20~%200.2.2--rc.1%2B-4d6bfe" /></a>
+  <a href="https://www.npmjs.com/package/@deepseek-ai/dsh?activeTab=versions"><img alt="支持的 DSH 版本：0.2.0-rc.1 ~ 0.2.2-rc.3 及其上" src="https://img.shields.io/badge/DSH-0.2.0--rc.1%20~%200.2.2--rc.3%2B-4d6bfe" /></a>
   <a href="https://github.com/topics/dsh-better-sidebar"><img alt="插件生态：GitHub topic dsh-better-sidebar" src="https://img.shields.io/badge/%E6%8F%92%E4%BB%B6%E7%94%9F%E6%80%81-topic%20dsh--better--sidebar-4d6bfe" /></a><br /><br />
   <a href="https://github.com/Tkingxiao/dsh-any-background"><img src="https://img.shields.io/github/stars/Tkingxiao/dsh-any-background?style=social" alt="GitHub stars"></a>
   <a href="https://dsh.directory/plugins/tkingxiao/dsh-any-background"><img src="https://dsh.directory/badges/listed.svg" alt="dsh.directory listed"></a>
@@ -12,7 +12,7 @@
 
 [English](README.md) | 中文
 
-一个 **DeepSeek Harness** 外观插件：自定义主题色、背景壁纸（图片 / 视频 / 算法生成），以及逐表面的透明度与模糊度控制。兼容 **DSH `0.2.0-rc.1` 直至 `0.2.1-rc.3`，其上所有版本一并放行**。
+一个 **DeepSeek Harness** 外观插件：自定义主题色、背景壁纸（图片 / 视频 / 算法生成），以及逐表面的透明度与模糊度控制。兼容 **DSH `0.2.0-rc.1` 直至 `0.2.2-rc.3`，其上所有版本一并放行**。
 
 ---
 
@@ -91,6 +91,14 @@
 - **兼容门禁新增一致性自检**：`npm test` 现在会核对 `engines.dsh`、六条 peer、`dsh.compatibility.dsh` 四处是否点名了每一个已核对构建、是否都留着不设上界的尾巴，并核对 `lib/` 里确实带着这些构建与对应的渠道（改了 `src/` 忘了重新 bundle 会被直接抓住）。
 - 装完或更新后请**重启一次宿主**——兼容门禁在组装 profile 时才跑。
 
+### v0.4.5（issue #35 / #36 / #38 · 核对 `0.2.2-rc.2` / `0.2.2-rc.3`）
+
+- **issue #36 —— 标题栏下方随视频闪烁的暗带消失。** 视频壁纸 + 标题栏半透明（模糊度 0）+ 对话文本框 100% 不透明时，Firefox（窗口化 GPU 合成）会在会话标题栏底边画一条随视频帧闪烁的 ~18px 暗带。根因：对话卡片的磨砂垫层（`backdrop-filter`）挂在一张完全不透明的卡片背后，视觉上是空操作——但滤镜表面仍迫使合成器在视频的每一帧重建，采样间歇性地把标题栏的深色内容采进去。`applyViewCards` 现在在卡片透明度滑块为 100% 时完全跳过垫层（报告者已逐像素验证无差异）；半透明卡片照旧保留磨砂，轨迹页不受影响。
+- **issue #38 —— `dsh-session-manager` 已登记并钉住。** 它的整套弹窗（`.sm-panelDialog` 及同族，承载头部菜单 / 自定义下拉的覆盖层）通过 `--dsw-alias-bg-layer-1` 的 `color-mix` 派生表面，输入框与菜单直读 layer-2/3——「对话框选项面板」滑块把它淡化成半透明，而它自己没有任何磨砂，文字与壁纸、底部面板的内容叠在一起。新钉值在其根元素上把三个 layer 令牌重发为**不透明**字面量（沿用 dshmarket 浮层的先例：只发令牌字面量、不发磨砂，它自己的「弹窗不透明度」混色照常工作）。设置卡片现在把它列为已钉住，开机日志会点名。
+- **issue #35 ① —— 轮换池缩略图点击即应用。** 以前轮换池只能"推进"（随机 / 顺序 / 立即切换），永远落不到指定的某一张上。现在点击缩略图（悬停出现「应用这张」角标）即激活该图片，走与轮换推进完全相同的路径（含主题色重新提取），并且与宿主激活路径一致地**不重置**轮换时钟（`lastRotate`）。支持键盘操作，当前项点击无效。
+- **issue #35 ② —— 网址壁纸支持每日自动刷新。** 从网址应用壁纸后，背景页会出现「每日自动刷新」开关。到天边界（下一次 30 秒 tick，或下次启动）时，宿主会重新下载该网址并应用——适合会随时间返回新图片的地址（必应每日一图类接口）。静态网址只是重新应用同样的字节。每天只尝试一次（失败也记时间戳，坏地址不会被每 30 秒锤一次）；轮换池启用时暂停，避免两边抢同一张壁纸；移除壁纸时一并清除。下载走既有的宿主侧通道，字节不过 RPC。
+- **核对 `0.2.2-rc.2` 与 `0.2.2-rc.3`**（读两个 tag 的源码树）。同一条补丁线、同一份适配层答案，判定 `exact`。唯一的行为差异：`design-platform.css` 新增 darwin 专属的 `--dsw-specific-sidebar-wash-top/-bottom`（连同 `-tint`、`-glass-*`）绘制 macOS 侧栏列——tint 从 fill 令牌派生、本来就跟滑块走；两个静态 wash 并入「侧边栏」透明度组（独立插件变量；`toRgba` 同时支持了它们使用的现代 `rgb(r g b / a)` 语法），且在非 darwin 宿主上完全不生效。`conversation.hero.frame` / `[data-phase='hero']` 阶段不挂 `[data-chat-flow]`，`applyViewCards` 本就视作"视图未挂载"。门禁四处枚举与 `dshReleases` 已点名两个构建；master 上尚未发版的改动（DocumentStyles `data-plugin`/`data-path` 管线、ThemePresenter 的 style 观察器）已记进适配层，留给下一个版本。
+
 ### v0.4.4（真机核对 `0.2.2-rc.1` · issue #34 第三方登记与反馈 · issue #33 数值输入与区域高亮）
 
 - **真机核对 `0.2.2-rc.1`。** 在 launcher `homes/0.2.2-rc.1` 建隔离测试档（本地插件用 link，另装 dshmarket `1.73.16` / dsh-better-sidebar `0.30.1` / dsh-update-checker `1.7.3`）启动 `dsh web`：兼容门禁放行，`read` 回 `host.version=0.2.2-rc.1 / channel=0.2.2`，配置写入与重读落盘一致；独立 headless Chrome 开机抓到 179 张 `style[data-plugin]`，三条「未登记」日志与 issue #34 逐字吻合。于是该构建进入四处门禁与 `dshReleases`，判定从 `line` 升为 `exact`。
@@ -142,7 +150,7 @@ pnpm dsh web
 
 ## 兼容性
 
-- **[`dsh web`](https://github.com/deepseek-ai/deepseek-harness)：`0.2.0-rc.1` ~ `0.2.2-rc.1`，其上所有版本一并放行。** 门禁先逐一列出核对过的构建，再以不设上界的 `>=0.2.0-rc.1` 收尾。这是有意的：宿主强制的正是这份 peer 列表，范围没写到的版本会在导入任何模块之前被整行禁用——一条写到头的范围等于在一款还能工作的插件前面砌墙。（更准确地说：宿主 `app-boot` 的 `unmetRequirements` 在 `engines.dsh` 存在时只看它自己、忽略 peer，所以四处都要写、但真正决定加载的是 `engines.dsh`。）
+- **[`dsh web`](https://github.com/deepseek-ai/deepseek-harness)：`0.2.0-rc.1` ~ `0.2.2-rc.3`，其上所有版本一并放行。** 门禁先逐一列出核对过的构建，再以不设上界的 `>=0.2.0-rc.1` 收尾。这是有意的：宿主强制的正是这份 peer 列表，范围没写到的版本会在导入任何模块之前被整行禁用——一条写到头的范围等于在一款还能工作的插件前面砌墙。（更准确地说：宿主 `app-boot` 的 `unmetRequirements` 在 `engines.dsh` 存在时只看它自己、忽略 peer，所以四处都要写、但真正决定加载的是 `engines.dsh`。）
 - **没见过的构建怎么跑**：取最近的一份事实，并在日志里写清它离 `exact` 有多远。一份过期事实最坏的代价是某个滑块不再淡出宿主已经搬走的那个表面，而一道失败关闭的版本检查代价是整个插件。
 - **核对过的构建**（`dsh.compatibility.dshReleases`）：
 
@@ -153,7 +161,8 @@ pnpm dsh web
   | `0.2.1-alpha.1` ~ `0.2.1-rc.5` | `v0-2-1` | 事实未变，并入同一份；每个核对过的构建各占一行，判定为 `exact`。`rc.4` / `rc.5` 的产物与 `rc.3` 逐个文件哈希一致 |
   | `0.2.2-alpha.2` | `v0-2-2` | 新开的补丁线，另开一份事实；逐条重读后答案与 `v0-2-1` 相同（层级阶梯、菜单霜令牌、字体令牌、头部插槽键、75 个宿主选择器命中） |
   | `0.2.2-rc.1` | `v0-2-2` | **真机核对**：门禁 / RPC / 开机自检全过；98 个产物文件里规则输入全部仍命中，三处证据字面量变动已记进适配层注释；判定 `exact` |
-  | `0.2.2-rc.1` 之上 | 沿用该行最近的核对结果 | 未核对的新构建取档位并写日志 |
+  | `0.2.2-rc.2` / `0.2.2-rc.3` | `v0-2-2` | 从两个 tag 的源码逐条重读：同一条补丁线、同一份答案；唯一的行为差异——darwin 专属的侧栏 wash 令牌——已并入「侧边栏」滑块组，其它平台不生效；判定 `exact` |
+  | `0.2.2-rc.3` 之上 | 沿用该行最近的核对结果 | 未核对的新构建取档位并写日志 |
 
 - **版本事实按 release 隔离**：宿主版本由 Node 半侧解析、随 `read` RPC 下发，样式与逻辑只向适配层提问（这块表面归谁、磨砂挂在哪一层、菜单该重写哪些令牌），不比较版本字符串；适配新宿主 = 新增一个版本目录并在注册表登记。
 - **安装或更新插件后仍需重启宿主**：兼容检查发生在组装 profile 时，而不是插件更新时。依赖特定宿主结构的功能（右侧栏面板模糊、官方侧栏「主题」卡片）只在对应宿主上启用，其余功能在整个范围内表现一致。

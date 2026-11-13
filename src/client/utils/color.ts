@@ -140,6 +140,14 @@ function buildTokens(hue: number, sat: number, lit: number, scheme?: 'light' | '
         '--dsw-alias-state-business-primary': '#679efe',
         '--dsw-alias-state-business-tertiary': '#34415b',
         '--dsw-specific-sidebar-fill': hsl(h(0), s(0), l(-0.06)),
+        // macOS sidebar washes (0.2.2-rc.2+): the host derives them from its own
+        // palette as low-alpha accent gradients, so the picked palette derives
+        // them the same way — picked hue, host's alphas — instead of leaving
+        // the host's blue washes over a recolored sidebar. Sampled-surface mode
+        // covers them through OPACITY_TOKEN_GROUPS; these two entries are the
+        // picked-color counterpart.
+        '--dsw-specific-sidebar-wash-top': rgba(h(0), s(0), l(0.18), 0.1),
+        '--dsw-specific-sidebar-wash-bottom': rgba(h(0), s(0), l(-0.12), 0.09),
         '--dsw-specific-sidebar-nav-item-active': hsl(h(0), s(0), l(0.04)),
         '--dsw-specific-sidebar-nav-item-hover': hsl(h(0), s(0), l(0)),
         '--dsw-specific-input-major': hsl(h(0), s(0), l(0.02)),
@@ -187,6 +195,8 @@ function buildTokens(hue: number, sat: number, lit: number, scheme?: 'light' | '
       '--dsw-alias-markdown-code-block': hsl(h(0), s(-0.1), l(-0.03)),
       '--dsw-alias-markdown-inline-code': hsl(h(0), s(-0.08), l(0.04)),
       '--dsw-specific-sidebar-fill': hsl(h(0), s(-0.1), l(-0.03)),
+      '--dsw-specific-sidebar-wash-top': rgba(h(0), s(-0.1), l(0.12), 0.08),
+      '--dsw-specific-sidebar-wash-bottom': rgba(h(0), s(-0.1), l(-0.08), 0.07),
       '--dsw-specific-sidebar-nav-item-active': hsl(h(0), s(-0.08), l(0.05)),
       '--dsw-specific-sidebar-nav-item-hover': hsl(h(0), s(-0.12), l(0)),
       '--dsw-specific-input-major': hsl(h(0), s(-0.12), l(0.1)),
@@ -204,8 +214,17 @@ export function toRgba(c: string, a: number): string {
   if (hx) { let d = hx[1]!; if (d.length === 3) d = d.split('').map(x => x + x).join(''); const n = parseInt(d, 16); return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})` }
   const rgb = /^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)(?:\s*,\s*([\d.]+))?\s*\)$/i.exec(c.trim())
   if (rgb) return `rgba(${rgb[1]},${rgb[2]},${rgb[3]},${a})`
+  // Modern space-separated syntax (`rgb(122 155 240 / 0.1)`) — the shape the
+  // host writes the darwin sidebar wash tokens in (design-platform.css,
+  // 0.2.2-rc.2+). Without this branch the re-emit would pass the string
+  // through untouched and the token would keep its host alpha at every
+  // slider position.
+  const sp = /^rgba?\(\s*(\d+)\s+(\d+)\s+(\d+)\s*(?:\/\s*([\d.]+))?\s*\)$/i.exec(c.trim())
+  if (sp) return `rgba(${sp[1]},${sp[2]},${sp[3]},${a})`
   const hsl = /^hsla?\(\s*([\d.]+)\s*,\s*([\d.]+)%\s*,\s*([\d.]+)%/i.exec(c.trim())
   if (hsl) return `hsla(${hsl[1]},${hsl[2]}%,${hsl[3]}%,${a})`
+  const hslSp = /^hsla?\(\s*([\d.]+)(?:deg)?\s+([\d.]+)%\s+([\d.]+)%\s*(?:\/\s*([\d.]+))?\s*\)$/i.exec(c.trim())
+  if (hslSp) return `hsla(${hslSp[1]},${hslSp[2]}%,${hslSp[3]}%,${a})`
   return c.trim()
 }
 

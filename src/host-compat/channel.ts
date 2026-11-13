@@ -107,6 +107,12 @@ export const SUPPORTED_RELEASES: readonly SupportedRelease[] = [
   // see the rc.1 re-check block in `v0-2-2/adapter.ts` — but none of them is an
   // input, so the folder keeps its answer and this row upgrades `line` → `exact`.
   { channel: '0.2.2', release: '0.2.2-rc.1' },
+  // rc.2 / rc.3 re-read from the source tree of both tags: same verdict, same
+  // folder. The one behavioral delta — the darwin-only sidebar wash tokens —
+  // rides the sidebar slider via `OPACITY_TOKEN_GROUPS` and is inert on other
+  // platforms; the full read is the rc.2/rc.3 block in `v0-2-2/adapter.ts`.
+  { channel: '0.2.2', release: '0.2.2-rc.2' },
+  { channel: '0.2.2', release: '0.2.2-rc.3' },
 ]
 
 /** How the chosen adapter relates to the release that was detected. Reported so a

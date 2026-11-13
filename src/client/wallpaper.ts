@@ -87,7 +87,7 @@ export const LABEL_TOKENS = [
 // entirely behind a solid theme color.
 const OPACITY_TOKEN_GROUPS: Array<{ part: keyof PartOpacities; names: string[] }> = [
   { part: 'bg', names: ['--dsw-alias-bg-base'] },
-  { part: 'sidebar', names: ['--dsw-specific-sidebar-fill'] },
+  { part: 'sidebar', names: ['--dsw-specific-sidebar-fill', '--dsw-specific-sidebar-wash-top', '--dsw-specific-sidebar-wash-bottom'] },
   { part: 'card', names: ['--dsw-alias-bg-layer-1', '--dsw-alias-bg-layer-2', '--dsw-alias-bg-layer-3', '--dsw-specific-menu'] },
   { part: 'input', names: ['--dsw-specific-input-major'] },
 ]
@@ -99,6 +99,16 @@ const OPACITY_TOKEN_GROUPS: Array<{ part: keyof PartOpacities; names: string[] }
 const OPACITY_VARS: Record<string, string> = {
   '--dsw-alias-bg-base': '--dsh-any-op-bg',
   '--dsw-specific-sidebar-fill': '--dsh-any-op-sidebar',
+  // macOS-only decorative washes painting the sidebar column on
+  // `[data-platform='darwin']` (`AppFrame.module.css`, new on 0.2.2-rc.2):
+  // static literals that would otherwise survive a fully faded sidebar. The
+  // tint is derived FROM the fill token, so it already follows the slider.
+  // Each carries its OWN plugin var — one variable holds one color+alpha, and
+  // sharing the fill's var would overwrite the fill's color with the wash's.
+  // Inert elsewhere — on non-darwin hosts these resolve empty and every
+  // consumer of the sampled surfaces skips an unset name.
+  '--dsw-specific-sidebar-wash-top': '--dsh-any-op-sidebar-wash-top',
+  '--dsw-specific-sidebar-wash-bottom': '--dsh-any-op-sidebar-wash-bottom',
   '--dsw-alias-bg-layer-1': '--dsh-any-op-card-1',
   '--dsw-alias-bg-layer-2': '--dsh-any-op-card-2',
   '--dsw-alias-bg-layer-3': '--dsh-any-op-card-3',
@@ -1577,6 +1587,19 @@ export const READER_LANE_RULE =
 const MARKET_POPOVER_SEL = '[data-dsh-market-root] [class*="_opPanel"]'
 const UPDATE_BUTTONS_SEL = '.dsh-update-btn,.dsh-plugin-btn'
 
+// dsh-session-manager's dialog set (issue #38). The four roots each declare the
+// dialog fill through `--sm-dialog-surface:var(--dsw-alias-bg-layer-1,…)`; the
+// overlay layer hosts the floating panel, header menu and the fixed custom-select
+// lists, which read layer-2/3 — custom properties inherit downward, so ONE
+// opaque re-declaration per root covers every descendant by inheritance (the
+// same mechanism `SIDEBAR_ONE_LAYER_RULE` uses). The class names are the
+// plugin's own unhashed contract (`sm-` prefix, stable across its bundle); a
+// rename on their side simply drops the pin. Scope proof: `.sm-panelDialog`,
+// `.sm-nativeDialog`, `.sm-migrateDialog`, `.sm-settingsCard`, `.sm-overlayLayer`
+// are 0-hit across the host's own 0.2.2-rc.1 client bundles.
+const SESSION_MANAGER_ROOTS =
+  '.sm-panelDialog,.sm-nativeDialog,.sm-migrateDialog,.sm-settingsCard,.sm-overlayLayer'
+
 /** Emit only the plates whose literal actually resolved. A `var()` pointing at an
  *  unset property is the §2-E guaranteed-invalid trap — its symptom would be the very
  *  transparency being pinned — so an unresolvable token means NO declaration. The
@@ -1592,6 +1615,14 @@ function thirdPartyPinRules(surfaces: Record<string, string>): string {
   }
   pin(MARKET_POPOVER_SEL, '--dsw-alias-bg-layer-1')
   pin(UPDATE_BUTTONS_SEL, '--dsw-alias-bg-layer-2')
+  // The session-manager pin is one rule per root set — all three tokens share the
+  // same selector, and splitting them would emit three identical-prefix rules.
+  const sm = ['--dsw-alias-bg-layer-1', '--dsw-alias-bg-layer-2', '--dsw-alias-bg-layer-3']
+    .map(t => ({ t, v: surfaces[t] }))
+    .filter(x => x.v !== undefined && x.v.trim() !== '')
+    .map(x => `${x.t}:${x.v}`)
+    .join(';')
+  if (sm !== '') out.push(`${SESSION_MANAGER_ROOTS}{${sm}}`)
   return out.join('')
 }
 
@@ -3073,7 +3104,15 @@ export function applyViewCards(): void {
     if (target === null) return
     const plain = spec.plain === true
     const opacity = spec.opacity()
-    const blurPx = spec.blur()
+    // Frost is a visual no-op behind a fully opaque surface — the card's own
+    // background covers the underlay completely (verified pixel-identical with
+    // the video paused) — but the filter surface still makes the compositor
+    // rebuild it every video frame, and windowed Firefox/GPU compositing then
+    // draws an ~18px dark band at the title-bar seam that flickers with the
+    // video (issue #36; static wallpapers and blur>0 configs don't trigger it).
+    // So an opaque card skips the underlay entirely; a translucent one keeps
+    // its frost, and `plain` views (no card background) are untouched.
+    const blurPx = !plain && opacity >= 1 ? 0 : spec.blur()
     if (!plain) {
       if (!target.hasAttribute(spec.mark)) stashCardPrev(target, spec.prev, false)
       // Mirrors .dab-card (layer-1 background, border, 16px radius, 18px

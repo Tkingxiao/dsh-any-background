@@ -205,6 +205,18 @@ try {
   const badBody = await badRestore.json()
   assert.equal(badBody.result.value.ok, false, 'rotationRestore: path traversal refused')
 
+  // 5e. Issue #35 ②: the urlRefresh config round-trips and its fence holds —
+  //     only http(s) URLs pass, unknown shapes collapse to the defaults, and
+  //     a stored value survives the sanitizer (a key only the client declared
+  //     would be dropped here with an "ignoring unknown config field" warning,
+  //     which the drift check above would catch).
+  await rpc('writeConfig', { config: { urlRefresh: { enabled: true, url: 'https://example.com/daily.jpg', last: '2020-01-01T00:00:00.000Z' } } })
+  assert.deepEqual(onDisk().urlRefresh, { enabled: true, url: 'https://example.com/daily.jpg', last: '2020-01-01T00:00:00.000Z' }, 'writeConfig: urlRefresh persists')
+  await rpc('writeConfig', { config: { urlRefresh: { enabled: true, url: 'javascript:alert(1)', last: 42 } } })
+  assert.deepEqual(onDisk().urlRefresh, { enabled: true, url: '', last: null }, 'writeConfig: non-http url and non-string last collapse to defaults')
+  await rpc('writeConfig', { config: { urlRefresh: null } })
+  assert.deepEqual(onDisk().urlRefresh, { enabled: false, url: '', last: null }, 'writeConfig: absent urlRefresh normalizes to defaults')
+
   // 6. The wallpaper upload route refuses a body whose bytes are not an image
   //    even when the Content-Type claims one (the same fence as the URL
   //    download), and accepts real PNG bytes.

@@ -166,6 +166,15 @@ interface ScheduleConfig {
   dayStart: string
   nightStart: string
 }
+/** Issue #35 ②: daily re-fetch of a URL wallpaper (Bing daily mirrors etc.).
+ *  Client-driven: the browser half advances on its 30 s tick and at boot, so a
+ *  closed page simply refreshes on the next open. Mutually exclusive with the
+ *  rotation pool (both write the wallpaper slot; rotation wins while enabled). */
+interface UrlRefreshConfig {
+  enabled: boolean
+  url: string
+  last: string | null
+}
 
 interface ThemeConfig {
   /** Saved HSL theme color; null means "use the system theme". */
@@ -213,6 +222,8 @@ interface ThemeConfig {
   profiles: ProfileEntry[]
   /** Wallpaper rotation pool + cadence. */
   rotation: RotationConfig
+  /** Daily re-fetch of a URL wallpaper (issue #35 ②). */
+  urlRefresh: UrlRefreshConfig
   /** Day/night profile auto-switch schedule. */
   schedule: ScheduleConfig
   /** Forced interface scheme ('auto' derives from the color's lightness). */
@@ -268,6 +279,7 @@ export const DEFAULT_CONFIG: ThemeConfig = {
   protectThirdParty: true,
   profiles: [],
   rotation: { enabled: false, mode: 'shuffle', interval: 'daily', current: 0, items: [], lastRotate: null },
+  urlRefresh: { enabled: false, url: '', last: null },
   schedule: { enabled: false, mode: 'time', dayProfile: null, nightProfile: null, dayStart: '07:00', nightStart: '19:00' },
   schemeOverride: 'auto',
   activeProfile: null,
@@ -475,6 +487,7 @@ function normalizeConfig(raw: unknown): ThemeConfig {
     protectThirdParty: typeof r.protectThirdParty === 'boolean' ? r.protectThirdParty : DEFAULT_CONFIG.protectThirdParty,
     profiles: normalizeProfiles(r.profiles),
     rotation: normalizeRotation(r.rotation),
+    urlRefresh: normalizeUrlRefresh(r.urlRefresh),
     schedule: normalizeSchedule(r.schedule),
     schemeOverride: r.schemeOverride === 'light' || r.schemeOverride === 'dark' ? r.schemeOverride : 'auto',
     activeProfile: typeof r.activeProfile === 'string' ? r.activeProfile : null,
@@ -597,6 +610,18 @@ function normalizeRotation(raw: unknown): RotationConfig {
     current: typeof r.current === 'number' && isFinite(r.current) && r.current >= 0 ? Math.floor(r.current) : 0,
     items,
     lastRotate: typeof r.lastRotate === 'string' ? r.lastRotate : null,
+  }
+}
+
+function normalizeUrlRefresh(raw: unknown): UrlRefreshConfig {
+  const r = (raw ?? {}) as Partial<UrlRefreshConfig>
+  return {
+    enabled: r.enabled === true,
+    // The URL is re-fetched by the HOST's own downloader on the client's
+    // behalf, so only http(s) passes — the same fence writeWallpaperFromUrl
+    // enforces (no data:, no javascript:, nothing the fetch would refuse).
+    url: typeof r.url === 'string' && /^https?:\/\//i.test(r.url) ? r.url : '',
+    last: typeof r.last === 'string' ? r.last : null,
   }
 }
 
