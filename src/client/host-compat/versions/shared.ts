@@ -173,11 +173,9 @@ export function elementFrostDecl(value: string): string {
 /**
  * ── Where a menu's paint lives ────────────────────────────────────────────────
  * Verified by reading the emitting source at each tag, not inferred from a changelog.
- * The era this table now starts in (`0.2.0-rc.1`) already presents the shape below;
- * the 0.1.5 / 0.1.6 / 0.1.7-alpha line, where the menu ELEMENT painted itself and the
- * host frosted nothing at all before `0.1.7-alpha.1`, is recorded in
- * `LAYERED_MENU_SURFACE`'s first bullet rather than in an adapter, because no adapter
- * answers for it any more.
+ * Every supported release (`0.2.1` and `0.2.2`) presents the shape below, first
+ * introduced at `0.2.0-rc.1`; the pre-0.2.0 era, where the menu ELEMENT painted
+ * itself, is out of the supported range and not asserted anywhere.
  *
  * `0.1.7-rc.2` and `dsh-v0.2.0-rc.1`: `TabMenu`, `MenuView`, `PopupSelectView`,
  *   `ModelSelect` and `Menu` all render through the new
@@ -227,14 +225,14 @@ export function elementFrostDecl(value: string): string {
  *   is the single menu element the fade no longer reaches: an untinted, near-opaque
  *   band sitting on top of every row in the list the moment that list scrolls.
  */
-/** The answer for `0.2.0-rc` and for `0.2.1-alpha`. The old token
- *  stays in the list on purpose: 14 surfaces in the same claim set still paint their
+/** The base menu facts every supported line shares. The old token stays in the
+ *  list on purpose: 14 surfaces in the same claim set still paint their
  *  fill from it — the lineage tree, `CordisPanel`, the stat dialog, `QueueDock`,
  *  `TodoPanel`, `ContextMeter`, `GoalBar`, `JobListAction`, `HoverCard`, `TeamAction`,
  *  `ModelSelect`'s own card and the schedule trio (`PickerPopover`, `TaskMenu`,
  *  `ScheduleCatalogAction`) — while the shared menus moved to
  *  `--dsw-menu-surface-fill`. Dropping either name fades one half of that set. */
-export const LAYERED_MENU_SURFACE: MenuSurfaceFacts = {
+const LAYERED_MENU_SURFACE: MenuSurfaceFacts = {
   fillTokens: [MENU_FILL_TOKEN, '--dsw-menu-surface-fill'],
   frostDecl: value => `--dsw-menu-backdrop-filter:${value}`,
 }
@@ -243,7 +241,7 @@ export const LAYERED_MENU_SURFACE: MenuSurfaceFacts = {
  *  own contribution to the menu's look, first emitted at `0.2.0-rc.2`. */
 export const MENU_GROUP_HEADER_FILL_TOKEN = '--dsw-alias-menu-group-header-fill'
 
-/** The answer for `0.2.0-rc` from `0.2.0-rc.2` and for `0.2.1-alpha`: everything
+/** The answer for every supported line (`0.2.1` and `0.2.2`): everything
  *  `LAYERED_MENU_SURFACE` says, plus the heading `MenuGroup` renamed.
  *
  *  Riding `fillTokens` rather than being left out is a decision with evidence on

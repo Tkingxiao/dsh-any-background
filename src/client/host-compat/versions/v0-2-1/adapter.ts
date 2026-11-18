@@ -3,10 +3,10 @@
  * `alpha.2`, `alpha.3`, `alpha.4`, `alpha.5`, `rc.1`, `rc.2`, `rc.3`, `rc.4`
  * and `rc.5`.
  *
- * A new MINOR line opened with a prerelease, and the answer is the `0.2.0-rc.2`
- * folder's — which is a statement this file has to earn, because "same as the
- * release before" is exactly the reasoning that went wrong when `0.1.7-rc.2` moved
- * the menu paint. Read at the tag instead:
+ * A new MINOR line opened with a prerelease. The menu facts below were first earned
+ * on the `0.2.0` line, but "same as the release before" is exactly the reasoning that
+ * went wrong when `0.1.7-rc.2` moved the menu paint, so nothing is inherited unread.
+ * Read at the `0.2.1` tags instead:
  *   · `ui-theme/src/styles/design-platform.css` is BYTE-IDENTICAL to `0.2.0-rc.2`
  *     (`git diff --numstat` empty), so every token this plugin writes — the menu
  *     pair, the specific-menu alias, the turn-trigger chain — resolves to the same
@@ -15,7 +15,7 @@
  *     `MenuSurface.module.css` are byte-identical too, and `MenuGroup` is still the
  *     only consumer of `--dsw-alias-menu-group-header-fill`. That is why the menus
  *     here answer with `LAYERED_MENU_SURFACE_WITH_GROUP_HEADER`, the same facts the
- *     rc.2 folder checked, and not by re-typing them.
+ *     shared base checks, and not by re-typing them.
  *   · `ui-sidebar-right/shell/SidebarRight.module.css` and
  *     `ui-dockkit/src/components/TabLayout.tsx` unchanged (only `.tsx` service
  *     wiring moved), so the panel stays a stationary frame with sliding dockkit

@@ -2,7 +2,7 @@
  * The contract every per-version adapter folder implements.
  *
  * Business code reads THESE, never a release string. That is the isolation rule:
- * `0.2.0-rc` / `0.2.0-rc.2` / `0.2.1-alpha` may appear inside `versions/` and in the
+ * `0.2.1` / `0.2.2` may appear inside `versions/` and in the
  * front-door detector, and nowhere else in the plugin. Adding a new DSH line
  * then means adding one folder and one registry row — no `if` scattered through
  * the styling code.

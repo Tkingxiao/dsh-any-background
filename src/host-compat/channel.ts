@@ -5,7 +5,7 @@
  * Shared by both halves of the plugin: the node half resolves the release from
  * disk (see `detect.ts`) and ships the verdict to the client half, which uses it
  * to pick a per-version adapter (see `client/host-compat/versions/`). Keeping the
- * bucketing here means the two halves can never disagree about what `0.2.0-rc`
+ * bucketing here means the two halves can never disagree about what `0.2.1`
  * means — a drifted matcher on one side would silently hand the client a channel
  * the client's registry has no adapter for.
  *
@@ -13,18 +13,8 @@
  */
 
 /** Adapter channels the plugin ships an adapter for: a patch line plus its
- *  prerelease channel, so `0.2.0-rc.1` and a hypothetical `0.2.0-beta.1` are NOT
- *  the same answer. `unknown` is the "could not determine the release" bucket,
+ *  prerelease channel. `unknown` is the "could not determine the release" bucket,
  *  not a release.
- *
- *  `0.2.0-rc.2` is keyed down to the BUILD because the line split against that
- *  scheme: `0.2.0-rc.1` and `0.2.0-rc.2` are the same patch line AND the same
- *  prerelease channel, yet rc.2 renamed the token a sticky menu group heading
- *  paints from, so the rc.1 answer is no longer complete for it. When one channel
- *  name cannot hold both halves of a line, the half that opened the new facts is
- *  named for the build that opened them, and `classifyRelease`'s "highest verified
- *  row at or below the host" hands every later `0.2.0-rc` (and `0.2.0` stable) to
- *  it.
  *
  *  `0.2.1` IS KEYED TO THE PATCH LINE, not to a prerelease name, because the line's
  *  alpha builds and its rc builds answer with the same facts: checked per tag from
@@ -47,9 +37,10 @@
  *  reasoning-body slot contract (`ui-chat`, `cordis-client-runner`) — no token, no
  *  class shape, no `z-index`, no `data-slot` key.
  *
- *  The 0.1.5 / 0.1.6 / 0.1.7 channels are GONE: their folders went with them, and a
- *  channel with no folder is a compile error, not a fallback. A host still sitting
- *  on that era clamps to the oldest row here and says so (`nearest`).
+ *  The 0.1.x / 0.2.0 channels are GONE: hosts below 0.2.1 are no longer
+ *  supported, their folders went with them, and a channel with no folder is a
+ *  compile error, not a fallback. A host still sitting on that era clamps to the
+ *  oldest row here and says so (`nearest`).
  *
  *  `0.2.2` opens a NEW PATCH LINE, keyed the way `0.2.1` is — to the line, not to a
  *  prerelease name. Checked build: `0.2.2-alpha.2` (the `alpha` dist-tag; no
@@ -60,8 +51,6 @@
  *  unchanged-answers claim across a line boundary is a claim the new folder has to
  *  carry in its own words. */
 export type HostChannel =
-  | '0.2.0-rc'
-  | '0.2.0-rc.2'
   | '0.2.1'
   | '0.2.2'
   | 'unknown'
@@ -81,15 +70,9 @@ export interface SupportedRelease {
  *  were checked; several rows may share a `channel` when a newer build was
  *  verified as needing no change to that folder's adapter (as `0.2.1-alpha.2` was) —
  *  a row then reports `exact` instead of `line`, and no new folder appears.
- *  Rows may ALSO share a patch line while carrying different channels, which is
- *  how a line says "the facts changed halfway through it" (`0.2.0-rc.2` opens a
- *  second answer on a line that had one — see the note on `HostChannel` for why
- *  that row is keyed to the build).
  *  Adding an ADAPTER means adding a channel plus a folder in
  *  `client/host-compat/versions/`. */
 export const SUPPORTED_RELEASES: readonly SupportedRelease[] = [
-  { channel: '0.2.0-rc', release: '0.2.0-rc.1' },
-  { channel: '0.2.0-rc.2', release: '0.2.0-rc.2' },
   { channel: '0.2.1', release: '0.2.1-alpha.1' },
   { channel: '0.2.1', release: '0.2.1-alpha.2' },
   { channel: '0.2.1', release: '0.2.1-alpha.3' },
@@ -225,8 +208,8 @@ export function classifyRelease(version: string | null): HostVerdict {
     if (exact !== undefined) return { channel: exact.channel, match: 'exact' }
     // A patch line may carry several verified builds AND several channels, so take
     // the highest row at or below the host: an unverified newer build gets the
-    // newest verification that precedes it, whichever folder that was
-    // (`0.2.0-rc.3` → the rc.2 facts, not the rc.1 ones), and one older than every
+    // newest verification that precedes it, whichever folder that was (an
+    // unverified newer build on a verified line), and one older than every
     // row falls back to the line's first, since the folder's facts were derived from
     // that shape.
     const atOrBelow = sameLine.filter(row => cmp(row.parsed, host) <= 0)
