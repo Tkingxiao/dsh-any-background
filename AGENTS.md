@@ -99,8 +99,11 @@ npm test                            # bundle + 客户端纯状态（按图构图
 **症状**：新宿主一发布，插件整包不加载，界面无任何提示（issue #19、#20）。
 
 **检查路径**：`engines.dsh`、六条 `@deepseek-ai/dsh-*` `peerDependencies`、`dsh.compatibility.dsh`、
-`dsh.compatibility.dshReleases` 四处一起改，改完由 `npm test` 机检（`scripts/smoke.mjs` 第 8 步：每处都要点名每个已核对构建，
-且都留着不设上界的尾巴）。宿主**只对前缀是 `@deepseek-ai/dsh` / `dsh-*` 的 peer**
+`dsh.compatibility.dshReleases` 四处一起改，**再加第五处 `pnpm-lock.yaml`**——它把每条 peer 范围
+原样存成 importer 的 `specifier`，而 publish 作业跑的是 `pnpm install --frozen-lockfile`：范围加了、
+锁没重算，CI 就会**先建好 GitHub release、再让 npm 发布静默失败**（`b25114a`、v0.5.1 各踩一次，
+第二次就是本次审核抓到的）。改完由 `npm test` 机检（`scripts/smoke.mjs` 第 8 步：每处都要点名每个
+已核对构建、都留着不设上界的尾巴，并逐条比对锁里的 `specifier` 与 `package.json` 相等）。宿主**只对前缀是 `@deepseek-ai/dsh` / `dsh-*` 的 peer**
 做门禁（`packages/boot/app-boot/src/plugin-compatibility.ts`，`semver.satisfies(…, {includePrerelease:true})`）
 —— `@deepseek-ai/cordis`、`react`、`dsh-better-sidebar` 不参与，不要计入。
 
@@ -436,7 +439,7 @@ boot 把旧单槽收养给当前图（`serverRotated` 为真时旧槽属于上�
 | 一条 CSS 规则（`wallpaper.ts` 常量） | `styles.ts` 里的**位置**（谁该赢）、优先级、`0` 与"未设置"两种取值各画出什么（§E 第 2 行） |
 | 认领 / 标记逻辑 | 单一持有者摘除、空态排除、portal 与就地两种形状、误认领邻居（dockkit / antd / 输入位）、teardown 能摘干净（§O） |
 | 磨砂（任何 `backdrop-filter`） | 是否压在宿主部件上（三宗罪）、模态撤隔离、`0` 的语义、宿主同名令牌是否被覆盖；磨砂列若带提层（`dab-part-blur-side`），overlay(z-20)/模态豁免（z-index 与 isolation 同进同退）/portal 层的次序要逐个核对（§2-F v0.4.2） |
-| 版本事实（新宿主） | §C 四处 + §D 三处（跨线另开目录见 §D）+ `dshReleases` + README 兼容性段 + `npm test` 第 8 步的门禁机检会跟着红 |
+| 版本事实（新宿主） | §C 五处（含 `pnpm-lock.yaml` 的 importer `specifier`，漏了它 release 会发得出但 npm 发不出去）+ §D 三处（跨线另开目录见 §D）+ `dshReleases` + README 兼容性段 + `npm test` 第 8 步的门禁机检会跟着红 |
 | 被接管令牌的语义（`--dsw-alias-bg-base` / `-layer-*` / `--dsw-specific-*`），或新接入一个会画表面的第三方插件 | §2-V 十二条：grep 遍宿主**与已装第三方插件的产物表**找消费者、对方自带对策（glass）就排除、钉值钉在令牌上而不是 `background`、多条吸顶带合成一块（合并与否由 z 阶梯决定）、颜色跟主题只有密度钉死、磨砂能否压在它身上按 §2-F 逐个数、选择器每个名字都要 0 命中宿主才算数；**外加第 12 条**：三条豁免臂（dialog / 行菜单 / registry）各自的令牌清单逐个核，能按语义钉的不要按名字钉 |
 | 滑块 / 选择器 UI | `onInput` 与 `onChange` 两条路径都落值；`metaRev` 订阅；禁用态与越界值；双语标签 |
 | 取色 / 明暗 | 强制方向 × 主题色明度 × 壁纸 verdict 的 2×2×3 组合；无主题色分支；皮肤注册（§N） |

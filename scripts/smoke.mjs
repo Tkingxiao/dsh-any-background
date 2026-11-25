@@ -288,6 +288,19 @@ try {
     }
     assert.match(range, /\|\| >=\d/, `${where} has no uncapped tail — the gate would fail closed on the next host (§C red line)`)
   }
+  //    A FIFTH gate place lives outside package.json: `pnpm-lock.yaml` records each peer
+  //    range as an importer `specifier`, and CI installs the publish job with
+  //    `--frozen-lockfile`. Widen the range without re-resolving the lock and the release
+  //    cuts a GitHub release whose npm publish silently never happens (`b25114a`, v0.5.1).
+  const lock = readFileSync(new URL('../pnpm-lock.yaml', import.meta.url), 'utf8')
+  const packagesAt = lock.indexOf('\npackages:')
+  const importers = packagesAt > 0 ? lock.slice(0, packagesAt) : lock
+  for (const [name, range] of Object.entries(manifest.peerDependencies)) {
+    if (!name.startsWith('@deepseek-ai/dsh')) continue
+    const spec = new RegExp(`'${name}':\\n[ ]*specifier: (.+)`).exec(importers)?.[1]?.trim()
+    assert.equal(spec, range,
+      `pnpm-lock.yaml disagrees with package.json for ${name} — CI's --frozen-lockfile install fails and the release never reaches npm (§C)`)
+  }
   // Each verified build must route to an adapter folder, through a channel the
   // client bundle actually carries — a `SUPPORTED_RELEASES` row whose channel has
   // no folder is a runtime crash the type system cannot see from here.
