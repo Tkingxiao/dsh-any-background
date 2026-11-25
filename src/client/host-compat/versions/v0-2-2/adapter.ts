@@ -103,8 +103,8 @@
  * key that a subsequent `read` agreed with, and a headless-Chrome boot reported
  * this plugin's own `style[data-plugin="dsh-any-background"]` beside 168 host
  * tagged sheets with zero console errors. The A→B→A framing measurement from
- * the same run (two pool pictures, zoom 1.5 vs 3) is recorded in the v0.5.1
- * changelog and exercises this folder's static sheet on a real 0.2.2 page.
+ * the same run (two pool pictures, zoom 1.5 vs 3) is recorded in the issue #42
+ * closing note and exercises this folder's static sheet on a real 0.2.2 page.
  * `0.2.2-rc.4` itself was only re-read from source; its diff against rc.3 in
  * the packages this plugin speaks for is the `version` field in eight
  * `package.json` files.
