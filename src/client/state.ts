@@ -36,6 +36,7 @@ export const DEFAULT_CONFIG: ThemeConfig = {
   // shows the wallpaper exactly as uploaded.
   blur: 0,
   bgState: { zoom: 1, x: 0, y: 0, iw: 0, ih: 0 },
+  bgStates: {},
   videoBgState: { zoom: 1, x: 0, y: 0, iw: 0, ih: 0 },
   backgroundType: 'image',
   bgMode: 'fit',
@@ -73,7 +74,7 @@ export function adoptCaptionInk (v: unknown): CaptionInkMode {
 
 // In-memory mirror of the file-backed store; the UI reads and mutates this,
 // and it is synced to disk via the RPC layer.
-export let cfg: ThemeConfig = { ...DEFAULT_CONFIG, opacities: { ...DEFAULT_CONFIG.opacities }, blurs: { ...DEFAULT_CONFIG.blurs }, strokes: structuredClone(DEFAULT_CONFIG.strokes), bgState: { ...DEFAULT_CONFIG.bgState }, videoBgState: { ...DEFAULT_CONFIG.videoBgState } }
+export let cfg: ThemeConfig = { ...DEFAULT_CONFIG, opacities: { ...DEFAULT_CONFIG.opacities }, blurs: { ...DEFAULT_CONFIG.blurs }, strokes: structuredClone(DEFAULT_CONFIG.strokes), bgState: { ...DEFAULT_CONFIG.bgState }, bgStates: {}, videoBgState: { ...DEFAULT_CONFIG.videoBgState } }
 export let wpImageUrl: string | null = null
 // Retained across background-type switches so coming back to image/video
 // restores the original upload.
@@ -131,7 +132,42 @@ export function disposeVideoObjectUrl(): void {
     wpVideoObjectUrl = null
   }
 }
-export function setBgState(s: BgState): void { cfg.bgState = s }
+
+/** Framings remembered per wallpaper. Mirrors the host half's bound; the two
+ *  halves must agree or a save would silently drop what the other kept. */
+const MAX_BG_STATES = 60
+
+/** Content key of the wallpaper the current `bgState` describes. Host-supplied
+ *  (sha256 prefix); null when the picture has no key (older host half / removal). */
+let activeBgKey: string | null = null
+
+/** Point `bgState` at the framing recorded for `key` (issue #42). A picture with
+ *  no entry starts from the default frame; `null` also resets — that is the old
+ *  behaviour of every wallpaper swap, kept for hosts that cannot supply a key. */
+export function adoptBgStateFor(key: string | null): void {
+  activeBgKey = key
+  const saved = key === null ? undefined : cfg.bgStates[key]
+  cfg.bgState = saved ? { ...saved } : { ...DEFAULT_CONFIG.bgState }
+}
+
+/** First boot after the upgrade: the only stored framing describes the picture
+ *  that is active right now, so bless it as that picture's entry before
+ *  `adoptBgStateFor` resolves it (otherwise the upgrade would look like a reset). */
+export function seedBgStateFor(key: string | null): void {
+  if (key === null || cfg.bgStates[key] !== undefined) return
+  const cur = cfg.bgState
+  if (cur.iw > 0 && cur.ih > 0) cfg.bgStates[key] = { ...cur }
+}
+
+/** Editor commit: remember the frame for the picture on screen. */
+export function rememberBgState(state: BgState): void {
+  cfg.bgState = { ...state }
+  if (activeBgKey === null || state.iw <= 0 || state.ih <= 0) return
+  delete cfg.bgStates[activeBgKey]
+  cfg.bgStates[activeBgKey] = { ...state }
+  const keys = Object.keys(cfg.bgStates)
+  for (const key of keys.slice(0, Math.max(0, keys.length - MAX_BG_STATES))) delete cfg.bgStates[key]
+}
 
 // Brightness verdict of the active generated background, analyzed once per
 // switch from a captured frame. null = fall back to the picked color's lightness.
@@ -384,6 +420,23 @@ function adoptBgState(s: Partial<BgState>): BgState {
   }
 }
 
+/** The per-picture framing map, validated the same way the host half does: hex
+ *  keys only, an object value, and an intrinsic size or the entry is noise.
+ *  Filtering happens before the bound so both halves keep the SAME newest
+ *  entries; capping first would let junk consume the other half's room (§2-A). */
+function adoptBgStates(raw: unknown): Record<string, BgState> {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {}
+  const out: Record<string, BgState> = {}
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (!/^[0-9a-f]{8,64}$/.test(key) || value === null || typeof value !== 'object' || Array.isArray(value)) continue
+    const state = adoptBgState(value as Partial<BgState>)
+    if (state.iw > 0 && state.ih > 0) out[key] = state
+  }
+  const keys = Object.keys(out)
+  for (const key of keys.slice(0, Math.max(0, keys.length - MAX_BG_STATES))) delete out[key]
+  return out
+}
+
 /** Move a possibly-absent partial config into the shape the UI reads. */
 export function adoptConfig(raw: unknown): void {
   const c = (raw ?? {}) as Partial<ThemeConfig> & { opacity?: unknown }
@@ -422,6 +475,7 @@ export function adoptConfig(raw: unknown): void {
     wallpaperOpacity: num(c.wallpaperOpacity, DEFAULT_CONFIG.wallpaperOpacity),
     blur: num(c.blur, DEFAULT_CONFIG.blur),
     bgState: adoptBgState((c.bgState ?? {}) as Partial<BgState>),
+    bgStates: adoptBgStates(c.bgStates),
     videoBgState: adoptBgState((c.videoBgState ?? {}) as Partial<BgState>),
     backgroundType: bgType,
     bgMode,
@@ -445,6 +499,12 @@ export function adoptConfig(raw: unknown): void {
     schemeOverride: c.schemeOverride === 'light' || c.schemeOverride === 'dark' ? c.schemeOverride : 'auto',
     activeProfile: typeof c.activeProfile === 'string' ? c.activeProfile : null,
   }
+  // A wholesale config swap (boot read, importing a theme file) installs a
+  // framing map describing OTHER pictures, so the key the previous picture was
+  // bound to no longer identifies `cfg.bgState`. Leaving it unbound keeps a later
+  // edit from being filed under that stale key; the host's next `wallpaperKey`
+  // rebinds it. Import deliberately does not reset the framing itself.
+  activeBgKey = null
 }
 
 function normalizeGeneratedBg(p: ThemeConfig['generatedBg']): ThemeConfig['generatedBg'] {

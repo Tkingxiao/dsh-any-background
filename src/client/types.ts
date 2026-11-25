@@ -257,6 +257,10 @@ export interface ThemeConfig {
   blur: number
   /** Wallpaper placement state (zoom + fractional center + intrinsic size). */
   bgState: BgState
+  /** Per-picture framing, keyed by the wallpaper CONTENT hash the host half
+   *  returns (`wallpaperKey`). One slot per picture, not per file name: rotation
+   *  copies every pool item over the same serve slot (issue #42). */
+  bgStates: Record<string, BgState>
   /** Video placement state — a separate slot so editing the video framing
    *  never clobbers the image framing and vice versa. */
   videoBgState: BgState
@@ -335,6 +339,9 @@ export interface ThemeStoreState {
 export interface UploadOutcome {
   ok: boolean
   refusal?: { kind: 'too-large' | 'http'; status: number; limit?: string }
+  /** Content key of the freshly stored wallpaper (issue #42); absent on hosts
+   *  that predate the field or when the upload response carried no JSON. */
+  wallpaperKey?: string
 }
 
 export interface ThemeSectionProps {
@@ -347,7 +354,7 @@ export interface ThemeSectionProps {
   setColor: (h: number, s: number, l: number) => void
   /** Point the wallpaper at a serve URL whose bytes are already persisted
    *  (raw upload / URL download / rotation). null removes the stored image. */
-  setWpFromServer: (url: string | null) => void
+  setWpFromServer: (url: string | null, wallpaperKey?: string | null) => void
   /** Set/remove the background video. Prefers the raw Blob (streamed to
    *  disk over the binary upload route); a data URL string is the small-file
    *  legacy path through RPC. Resolves with the upload's outcome so the caller

@@ -96,6 +96,19 @@
  * NOT here, because this folder emits no promotion. These are VALUES the comments
  * quote, never inputs the adapter reads — it only asks for token NAMES.
  *
+ * RE-CHECKED ON A REAL `0.2.2-rc.5` HOST (v0.5.1 dev loop, isolated
+ * `dsh-smoke-home` + a `dabtest` profile linking this checkout). The gate
+ * admitted the plugin, `read` answered `host.version = 0.2.2-rc.5 / channel =
+ * 0.2.2` (the rc.5 row makes it `exact`), a wallpaper upload returned a content
+ * key that a subsequent `read` agreed with, and a headless-Chrome boot reported
+ * this plugin's own `style[data-plugin="dsh-any-background"]` beside 168 host
+ * tagged sheets with zero console errors. The A→B→A framing measurement from
+ * the same run (two pool pictures, zoom 1.5 vs 3) is recorded in the v0.5.1
+ * changelog and exercises this folder's static sheet on a real 0.2.2 page.
+ * `0.2.2-rc.4` itself was only re-read from source; its diff against rc.3 in
+ * the packages this plugin speaks for is the `version` field in eight
+ * `package.json` files.
+ *
  * RE-CHECKED AT `0.2.2-rc.2` AND `0.2.2-rc.3` FROM THE SOURCE TREE (tags
  * `dsh-v0.2.2-rc.2`, `dsh-v0.2.2-rc.3`; rc.3 is the newest release line, master
  * sits ~10 small commits past it). Same-line reads, so the folder keeps its

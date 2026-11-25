@@ -13,7 +13,7 @@
  *                       bytes — never base64 through the RPC channel.
  */
 import { access, copyFile, mkdir, open, readdir, readFile, writeFile, rm, rename, stat } from 'node:fs/promises'
-import { randomUUID } from 'node:crypto'
+import { randomUUID, createHash } from 'node:crypto'
 import { createReadStream, createWriteStream } from 'node:fs'
 import { Readable } from 'node:stream'
 import { dshHomePath } from '@deepseek-ai/dsh-home-paths'
@@ -185,7 +185,15 @@ interface ThemeConfig {
   settingsOpacity: number
   wallpaperOpacity: number
   blur: number
+  /** Placement of the ACTIVE picture. Kept as the one value every render path
+   *  reads; `bgStates` below is the memory behind it. */
   bgState: BgState
+  /** Per-picture framing, keyed by the wallpaper CONTENT hash (`activeWallpaperKey`)
+   *  — not by file name or serve URL, because rotation copies every pool item over
+   *  the same `wallpaper.jpg` slot. Switching the pool to B and back to A therefore
+   *  restores A's zoom/offset (issue #42); uploading a brand-new picture finds no
+   *  entry and starts from the default frame. Bounded by `MAX_BG_STATES`. */
+  bgStates: Record<string, BgState>
   videoBgState: BgState
   backgroundType: BackgroundType
   bgMode: BgMode
@@ -261,6 +269,7 @@ export const DEFAULT_CONFIG: ThemeConfig = {
   wallpaperOpacity: 1,
   blur: 0,
   bgState: { zoom: 1, x: 0, y: 0, iw: 0, ih: 0 },
+  bgStates: {},
   videoBgState: { zoom: 1, x: 0, y: 0, iw: 0, ih: 0 },
   backgroundType: 'image',
   bgMode: 'fit',
@@ -406,6 +415,28 @@ function normalizeBgState(s: Partial<BgState>): BgState {
   }
 }
 
+/** Cap on remembered per-picture framings. The rotation pool allows 30 items and
+ *  bots/humans can upload more over a session, so this is a memory bound, not a
+ *  promise that every current picture fits. Oldest-first eviction keeps the pool a
+ *  user actually rotates most in range (insertion order is JSON order). */
+const MAX_BG_STATES = 60
+/** Keys are the first 16 hex chars of a SHA-256; a wider shape is accepted so a
+ *  future digest length does not silently drop every entry. */
+const BG_KEY_RE = /^[0-9a-f]{8,64}$/
+
+/** Validate the per-picture framing map. Entries without an intrinsic size are
+ *  indistinguishable from "never framed" and are dropped rather than restored. */
+function normalizeBgStates(raw: unknown): Record<string, BgState> {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {}
+  const pairs = Object.entries(raw as Record<string, unknown>)
+    .filter(([key, value]) => BG_KEY_RE.test(key) && value !== null && typeof value === 'object' && !Array.isArray(value))
+    .map(([key, value]) => [key, normalizeBgState(value as Partial<BgState>)] as const)
+    .filter(([, state]) => state.iw > 0 && state.ih > 0)
+  const out: Record<string, BgState> = {}
+  for (const [key, state] of pairs.slice(-MAX_BG_STATES)) out[key] = state
+  return out
+}
+
 /** Coerce an unknown persisted value into a valid ThemeConfig, falling back per-field. */
 const STROKE_GROUPS = ['bg', 'sidebar', 'card', 'settings', 'chat', 'trajectory', 'input', 'panel', 'produced', 'header', 'headerBar'] as const
 const STROKE_COLOR_KEYS = ['auto', 'gray', 'black', 'white', 'theme', 'custom'] as const
@@ -469,6 +500,7 @@ function normalizeConfig(raw: unknown): ThemeConfig {
     wallpaperOpacity: clamp(r.wallpaperOpacity, 0, 1, DEFAULT_CONFIG.wallpaperOpacity),
     blur: clamp(r.blur, 0, 60, DEFAULT_CONFIG.blur),
     bgState: normalizeBgState((r.bgState ?? {}) as Partial<BgState>),
+    bgStates: normalizeBgStates(r.bgStates),
     videoBgState: normalizeBgState((r.videoBgState ?? {}) as Partial<BgState>),
     backgroundType: bgType,
     bgMode,
@@ -789,6 +821,35 @@ async function wallpaperServeUrl(): Promise<string | null> {
   }
 }
 
+/** Content identity of the active wallpaper (issue #42).
+ *
+ *  The serve URL is constant and rotation copies every pool item over the same
+ *  `wallpaper.jpg`, so neither the URL nor the file name can tell two pictures
+ *  apart. The bytes can: a SHA-256 prefix is stable across A → B → A even though
+ *  the slot's mtime/size are rewritten on every copy. Cached by stat stamp so a
+ *  boot with a multi-MB wallpaper hashes once, not on every `read`. */
+let wallpaperKeyCache: { stamp: string; key: string } | null = null
+async function activeWallpaperKey(): Promise<string | null> {
+  try {
+    const st = await stat(wallpaperPath())
+    if (st.size === 0) return null
+    const stamp = `${st.mtimeMs}:${st.size}`
+    if (wallpaperKeyCache?.stamp === stamp) return wallpaperKeyCache.key
+    const hash = createHash('sha256')
+    await new Promise<void>((resolve, reject) => {
+      const stream = createReadStream(wallpaperPath())
+      stream.on('data', chunk => hash.update(chunk))
+      stream.on('error', reject)
+      stream.on('end', () => resolve())
+    })
+    const key = hash.digest('hex').slice(0, 16)
+    wallpaperKeyCache = { stamp, key }
+    return key
+  } catch {
+    return null
+  }
+}
+
 /** Persist a wallpaper (null removes it); false keeps the previous file. */
 async function writeWallpaper(dataUrl: string | null): Promise<boolean> {
   await ensureDir()
@@ -832,8 +893,8 @@ function isImageBytes(buf: Buffer): boolean {
  *  wallpaper.jpg slot (replacing whatever was stored), so type switches and
  *  rotation keep working through the single active slot. The response carries
  *  the serve URL, never the bytes. null removes the wallpaper.
- *  Returns { ok, wallpaperUrl?, error? }. */
-async function writeWallpaperFromUrl(url: string | null): Promise<{ ok: boolean; wallpaperUrl?: string | null; error?: string }> {
+ *  Returns { ok, wallpaperUrl?, wallpaperKey?, error? }. */
+async function writeWallpaperFromUrl(url: string | null): Promise<{ ok: boolean; wallpaperUrl?: string | null; wallpaperKey?: string | null; error?: string }> {
   if (url === null) {
     const ok = await writeWallpaper(null)
     return { ok, wallpaperUrl: null, error: ok ? undefined : 'remove failed' }
@@ -874,7 +935,7 @@ async function writeWallpaperFromUrl(url: string | null): Promise<{ ok: boolean;
     console.error('dsh-any-background: failed to write the downloaded wallpaper', e)
     return { ok: false, error: 'write failed' }
   }
-  return { ok: true, wallpaperUrl: WALLPAPER_ROUTE }
+  return { ok: true, wallpaperUrl: WALLPAPER_ROUTE, wallpaperKey: await activeWallpaperKey() }
 }
 
 // ── Wallpaper rotation pool ───────────────────────────────────────────────────
@@ -952,7 +1013,7 @@ async function handleRotationRemove(payload: unknown): Promise<{ ok: boolean; it
 /** Activate a rotation item: copy its bytes over the active wallpaper slot and
  *  return the serve URL so the client applies it live (bytes never round-trip
  *  through the RPC response). */
-async function handleRotationSet(payload: unknown): Promise<{ ok: boolean; wallpaperUrl?: string; error?: string }> {
+async function handleRotationSet(payload: unknown): Promise<{ ok: boolean; wallpaperUrl?: string; wallpaperKey?: string | null; error?: string }> {
   const idx = (payload as { index?: unknown } | null)?.index
   if (typeof idx !== 'number' || !isFinite(idx)) return { ok: false, error: 'invalid index' }
   const cfg = await readConfig()
@@ -987,7 +1048,7 @@ async function handleRotationSet(payload: unknown): Promise<{ ok: boolean; wallp
       }
     }
   } catch { /* best effort — see above */ }
-  return { ok: true, wallpaperUrl: WALLPAPER_ROUTE }
+  return { ok: true, wallpaperUrl: WALLPAPER_ROUTE, wallpaperKey: await activeWallpaperKey() }
 }
 
 /** Replace the whole rotation pool from an imported theme (v3 export): each
@@ -1425,7 +1486,7 @@ async function handleWallpaperUpload(req: any, res: any): Promise<void> {
         await rm(wallpaperPath(), { force: true })
         await rename(tmp, wallpaperPath())
         res.writeHead(200, { 'Content-Type': 'application/json' })
-        res.end(JSON.stringify({ ok: true, wallpaperUrl: WALLPAPER_ROUTE }))
+        res.end(JSON.stringify({ ok: true, wallpaperUrl: WALLPAPER_ROUTE, wallpaperKey: await activeWallpaperKey() }))
       } catch (e) {
         console.error('dsh-any-background: failed to finalize the wallpaper upload', e)
         void rm(tmp, { force: true })
@@ -1675,11 +1736,11 @@ async function handleRpcMethod(
         // The three slot probes are independent — resolve them concurrently
         // instead of paying three sequential stat/read round-trips. (The locals
         // cannot reuse the probe function names `videoUrl`/`fontUrl`.)
-        const [wpServeUrl, vidServeUrl, fntServeUrl, host] = await Promise.all([wallpaperServeUrl(), videoUrl(), fontUrl(), hostInfo])
+        const [wpServeUrl, wpKey, vidServeUrl, fntServeUrl, host] = await Promise.all([wallpaperServeUrl(), activeWallpaperKey(), videoUrl(), fontUrl(), hostInfo])
         // `host` is the front door's verdict; the client picks a per-version
         // adapter from it and lets the DOM arbitrate when the release is
         // undetermined. See `host-compat/`.
-        return { ok: true, value: { config, wallpaperUrl: wpServeUrl, videoUrl: vidServeUrl, fontUrl: fntServeUrl, rotated, firstRun, host } }
+        return { ok: true, value: { config, wallpaperUrl: wpServeUrl, wallpaperKey: wpKey, videoUrl: vidServeUrl, fontUrl: fntServeUrl, rotated, firstRun, host } }
       }
       case 'writeConfig':
         return { ok: true, value: await writeConfig((payload as { config?: unknown } | null)?.config as ThemeConfig ?? {}) }

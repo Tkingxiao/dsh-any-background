@@ -95,10 +95,10 @@ export function persistConfig(): void {
  *  `firstRun` means the server had no theme-config.json and just materialized
  *  its defaults: the caller should persist the browser side's own defaults and
  *  re-read once so every slider starts from a value that is really on disk. */
-export async function loadPersisted(): Promise<{ rotated: boolean; firstRun: boolean }> {
+export async function loadPersisted(): Promise<{ rotated: boolean; firstRun: boolean; wallpaperKey: string | null }> {
   const data = await rpcCall('read', {})
   if (data && typeof data === 'object') {
-    const d = data as { config?: unknown; wallpaperUrl?: unknown; videoUrl?: unknown; fontUrl?: unknown; rotated?: unknown; firstRun?: unknown; host?: unknown }
+    const d = data as { config?: unknown; wallpaperUrl?: unknown; wallpaperKey?: unknown; videoUrl?: unknown; fontUrl?: unknown; rotated?: unknown; firstRun?: unknown; host?: unknown }
     // Host release verdict first: feature gates read it before any appearance
     // work runs, and it is the only source of the real version string.
     adoptHostInfo(d.host)
@@ -117,9 +117,9 @@ export async function loadPersisted(): Promise<{ rotated: boolean; firstRun: boo
     else if (d.fontUrl === null) fontServeUrl = null
     // Mirror the same rev'd URL setWpImageUrl stored, so wpUrl never diverges.
     if (cfg.backgroundType === 'image') setWpUrl(rWpImage())
-    return { rotated: d.rotated === true, firstRun: d.firstRun === true }
+    return { rotated: d.rotated === true, firstRun: d.firstRun === true, wallpaperKey: typeof d.wallpaperKey === 'string' ? d.wallpaperKey : null }
   }
-  return { rotated: false, firstRun: false }
+  return { rotated: false, firstRun: false, wallpaperKey: null }
 }
 
 /** Persist a wallpaper (null removes it); one-shot, no debounce. */
@@ -137,7 +137,7 @@ export async function persistVideo(dataUrl: string | null): Promise<boolean> {
 /** Download a wallpaper from a network URL and persist it into the local slot
  *  (the host replaces wallpaper.jpg). Returns the freshly stored serve URL on
  *  success, or the host's failure message. */
-export async function setWallpaperFromUrl(url: string): Promise<{ ok: boolean; wallpaperUrl?: string | null; error?: string }> {
+export async function setWallpaperFromUrl(url: string): Promise<{ ok: boolean; wallpaperUrl?: string | null; wallpaperKey?: string | null; error?: string }> {
   if (!rpcCallFn) return { ok: false, error: 'rpc not ready' }
   let res: RpcResultLike | undefined
   try {
@@ -150,9 +150,9 @@ export async function setWallpaperFromUrl(url: string): Promise<{ ok: boolean; w
     const err = (res as { error?: { message?: string } }).error
     return { ok: false, error: err?.message ?? 'request failed' }
   }
-  const v = res.value as { ok?: boolean; wallpaperUrl?: string | null; error?: string }
+  const v = res.value as { ok?: boolean; wallpaperUrl?: string | null; wallpaperKey?: string | null; error?: string }
   return v?.ok === true
-    ? { ok: true, wallpaperUrl: v.wallpaperUrl ?? null }
+    ? { ok: true, wallpaperUrl: v.wallpaperUrl ?? null, wallpaperKey: typeof v.wallpaperKey === 'string' ? v.wallpaperKey : null }
     : { ok: false, error: v?.error ?? 'failed' }
 }
 
@@ -234,7 +234,12 @@ export async function uploadWallpaper(blob: Blob): Promise<UploadOutcome> {
       headers: { 'Content-Type': blob.type || 'image/jpeg' },
       body: blob,
     })
-    return res.ok ? { ok: true } : await refusedUpload(res)
+    if (!res.ok) return await refusedUpload(res)
+    // The host also returns the content key of the bytes it just stored; the
+    // caller uses it to restore that picture's framing (issue #42). A missing or
+    // malformed key only means "no identity", never a failed upload.
+    const body = await res.json().catch(() => null) as { wallpaperKey?: unknown } | null
+    return typeof body?.wallpaperKey === 'string' ? { ok: true, wallpaperKey: body.wallpaperKey } : { ok: true }
   } catch (e) {
     console.warn('dsh-any-background: wallpaper upload failed', e)
     return { ok: false }
@@ -302,11 +307,11 @@ export async function rotationRemove(index: number): Promise<{ ok: boolean; item
 
 /** Activate a rotation item: the server copies its bytes into the wallpaper
  *  slot and returns the serve URL for immediate display. */
-export async function rotationActivate(index: number): Promise<{ ok: boolean; wallpaperUrl?: string; error?: string }> {
+export async function rotationActivate(index: number): Promise<{ ok: boolean; wallpaperUrl?: string; wallpaperKey?: string | null; error?: string }> {
   if (!rpcCallFn) return { ok: false, error: 'rpc not ready' }
   try {
     const res = await rpcCallFn(rpcEndpoint('rotationSet'), { index })
-    if (res && res.ok === true) return (res.value ?? { ok: false, error: 'no value' }) as { ok: boolean; wallpaperUrl?: string; error?: string }
+    if (res && res.ok === true) return (res.value ?? { ok: false, error: 'no value' }) as { ok: boolean; wallpaperUrl?: string; wallpaperKey?: string | null; error?: string }
     return { ok: false, error: (res as { error?: { message?: string } })?.error?.message ?? 'request failed' }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }

@@ -28,11 +28,13 @@
 import type { HostAdapter, HostChannel, HostInfo } from './types'
 import { createAdapter as adapterFor021 } from './v0-2-1/adapter'
 import { createAdapter as adapterFor022 } from './v0-2-2/adapter'
+import { createAdapter as adapterFor023 } from './v0-2-3/adapter'
 import { createAdapter as adapterForUnknown } from './unknown/adapter'
 
 const ADAPTERS: Record<HostChannel, (host: HostInfo) => HostAdapter> = {
   '0.2.1': adapterFor021,
   '0.2.2': adapterFor022,
+  '0.2.3': adapterFor023,
   unknown: adapterForUnknown,
 }
 

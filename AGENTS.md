@@ -46,7 +46,7 @@
 ```bash
 npx tsc -p tsconfig.json --noEmit   # 类型：版本目录、adapter 字段、配置形状都靠它兜底
 npm run bundle                      # 必须跑：lib/ 是发布物
-npm test                            # 真起宿主半侧，跑「写盘 → 重读 → Profile」往返
+npm test                            # bundle + 客户端纯状态（按图构图 / 时间格式）+ 真起宿主半侧跑「写盘 → 重读 → Profile」往返
 ```
 
 视觉/CSS 类改动**再加一步真机冒烟**（§4.3）：mock 无法证明"拖动滑块后目标表面真的变化"——
@@ -79,7 +79,7 @@ npm test                            # 真起宿主半侧，跑「写盘 → 重�
 → `src/client/types.ts` + `src/client/state.ts` 的 `DEFAULT_CONFIG` / `adoptConfig` / `r*()` 读函数。
 
 **实例**：v0.2.8 `produced`、v0.3.8 `blurs.headerBar` / `headerBarOpacity` / `strokes.headerBar`
-（issue #28、#29②）、v0.3.9 `captionInk`。
+（issue #28、#29②）、v0.3.9 `captionInk`、v0.5.1 `bgStates`（嵌套记录，键是壁纸内容哈希，见 §2-U）。
 **防线**：`scripts/smoke.mjs` —— 每加一个键加一条断言（默认值 + 写入落盘 + 重读一致 + 非法值塌回
 默认 + 无 drift 警告）。
 
@@ -353,9 +353,26 @@ release 标题与提交主题一致；issue 回复要带根因 + 验证数字 + 
 | 输入未验：裸字节上传跳过内容校验 | 与 URL 下载、字体上传共用同一条魔数围栏，拒绝时回传原因 + 限额（§2-K） |
 | 竞态碰撞：同一毫秒生成的文件名互相覆盖 | 并发生成的名字加随机后缀 |
 | 内存态未回写：手动激活只推进内存游标，刷新回跳 | 凡"推进状态"的调用点都走服务端 read-modify-write 落盘 |
+| 状态与对象不绑定：一个槽位被下一张图/会话覆盖，切回原对象不还原 | 状态键必须取自对象**内容或稳定 ID**，不能取会被复用的路径 / URL / 文件名 |
 
 实例全部出自 `50cdb5a`（v0.4.0）。防线：`scripts/smoke.mjs` 的落盘往返断言 +
 每种模式各一条负路径用例。
+
+**实例（v0.5.1，issue #42）**：背景编辑器只存一份 `bgState`，而轮换把每张池图都拷进同一个
+`wallpaper.jpg`、对外也只有一个 serve URL —— 换图必然覆盖上一张的构图，切回不还原。修法是把状态
+键改成**壁纸字节的 SHA-256 前缀**（`src/index.ts: activeWallpaperKey()`，按 mtime+size 缓存），
+`read` / 上传 / URL / 轮换四条返回都带 `wallpaperKey`；客户端 `cfg.bgStates[key]` 存每张图的构图，
+`adoptBgStateFor(key)` 在换图时恢复。四条必须一起看的边界：① 升级迁移只能用**未轮换**的那次
+boot 把旧单槽收养给当前图（`serverRotated` 为真时旧槽属于上一张图，seed 会张冠李戴）；
+② 键是内容不是位置，A→B→A 必须命中同一键；③ 状态是展示状态，**不进 `ProfileAppearance`**
+（换档案不该改构图），但必须走完 §2-A 的宿主半与客户端两处白名单和 `smoke.mjs` 断言；
+④ **还有第五条换图路径**：`importTheme` 换的是整个配置 + 壁纸字节，却没有任何返回带着新图的键
+（`persistWallpaper` 是 fire-and-forget）。它调 `adoptConfig()` 换掉 `bgStates` 之后，内存里绑着的
+仍是**导入前那张图**的键，此时编辑器提交会把新图的构图记到旧图名下——旧图切回来就是错的构图。
+修法：`adoptConfig()` 一并置 `activeBgKey = null`（只解绑、**不**重置 `cfg.bgState`，否则导入带进来的
+构图被丢掉），下一次宿主 `read` / 换图再重新绑定。审计这类改动时把 `setWpImageUrl` /
+`adoptConfig` 的调用点全数数一遍，"四条返回都带键"不等于"所有换图路径都知道键"
+（`state-check.mjs` 的 `a config swap unbinds the stale key` 就是这条）。
 
 ### V. 跨插件令牌所有权 —— 别的插件的表面也吃我们接管的令牌
 
@@ -427,6 +444,7 @@ release 标题与提交主题一致；issue 回复要带根因 + 验证数字 + 
 | 上传 / URL 拉取 | 上限与错误回传、MIME 落盘、`revokeObjectURL`、失败不留半个槽位 |
 | 新增 z-index / 提层 | §2-T 阶梯核对：提层上限、dialog 豁免同进同退、被提层列的就地浮层盘点、body 级 portal 次序 |
 | 状态"推进"类改动（游标、缓存、收养） | §2-U 所有权核对：真相在磁盘还是内存、深拷贝、魔数而非文件名、写失败路径 |
+| 给"某张图 / 某个会话 / 某个工位"存展示状态 | 键取内容哈希或稳定 ID（§2-U v0.5.1）；**逐个数一遍换图路径**，每条都要拿到键，拿不到就解绑而不是沿用（`importTheme` 是漏网的那条，§2-U ④）；boot 的自动推进（`serverRotated`）不能用旧槽 seed；不进 `ProfileAppearance` |
 | 任何**按 DOM 标记遍历其它插件**的逻辑（如 `third-party.ts` 的扫描） | 必须在**真宿主页面**量过：宿主自己给每张表打 `data-plugin`（实测 157/172 张是 `@deepseek-ai/`），先判命名空间再截断、再聚合；mock 只会给你一张表，永远测不出来 |
 | 新增运行时文件 | `package.json` 的 `files` + `exports`（§0） |
 | `lib/` | 一定要 `npm run bundle`，产物和源码同批提交 |

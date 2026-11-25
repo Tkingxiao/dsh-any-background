@@ -4,6 +4,7 @@ import type { ThemeSectionProps, ThemeStoreState, ProfileEntry, ScheduleConfig }
 import { BUILTIN_PRESETS } from '../../utils/presets'
 import { hslToRgb } from '../../utils/color'
 import { DownloadIcon, UploadIcon, CheckIcon, PlusIcon, SunIcon, MoonIcon, ClockIcon, EditIcon } from '../icons'
+import { profileStamp } from '../../utils/date'
 
 const hexOf = (color: [number, number, number] | null): string =>
   color === null
@@ -151,7 +152,7 @@ export function ProfilePage({ p, notify }: { p: ThemeSectionProps; notify: (msg:
                   <>
                     <div className="dab-profile-meta">
                       <span className="dab-profile-name">{entry.name}</span>
-                      <span className="dab-profile-sub">{new Date(entry.createdAt).toLocaleDateString()}</span>
+                      <span className="dab-profile-sub">{profileStamp(entry.createdAt)}</span>
                     </div>
                     <button type="button" className="dab-btn" onClick={() => onApply(entry)}>{t('profileApply')}</button>
                     <button type="button" className="dab-btn" title={t('profileRename')}

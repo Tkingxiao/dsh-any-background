@@ -4,14 +4,14 @@
   <a href="https://www.npmjs.com/package/dsh-any-background"><img alt="npm 版本" src="https://img.shields.io/npm/v/dsh-any-background?color=4d6bfe"></a>
   <a href="https://www.npmjs.com/package/dsh-any-background"><img alt="npm 月下载量" src="https://img.shields.io/npm/dm/dsh-any-background?color=4d6bfe"></a>
   <a href="https://github.com/Tkingxiao/dsh-any-background/blob/main/LICENSE"><img alt="License: MIT" src="https://img.shields.io/npm/l/dsh-any-background?color=4d6bfe"></a>
-  <a href="https://www.npmjs.com/package/@deepseek-ai/dsh?activeTab=versions"><img alt="支持的 DSH 版本：0.2.1 ~ 0.2.2-rc.3 及其上" src="https://img.shields.io/badge/DSH-0.2.1%20~%200.2.2--rc.3%2B-4d6bfe" /></a>
+  <a href="https://www.npmjs.com/package/@deepseek-ai/dsh?activeTab=versions"><img alt="支持的 DSH 版本：0.2.1 ~ 0.2.3-alpha.2 及其上" src="https://img.shields.io/badge/DSH-0.2.1%20~%200.2.3--alpha.2%2B-4d6bfe" /></a>
   <a href="https://github.com/topics/dsh-better-sidebar"><img alt="插件生态：GitHub topic dsh-better-sidebar" src="https://img.shields.io/badge/%E6%8F%92%E4%BB%B6%E7%94%9F%E6%80%81-topic%20dsh--better--sidebar-4d6bfe" /></a><br /><br />
   <a href="https://github.com/Tkingxiao/dsh-any-background"><img src="https://img.shields.io/github/stars/Tkingxiao/dsh-any-background?style=social" alt="GitHub stars"></a>
 </p>
 
 [English](README.md) | 中文
 
-一个 **DeepSeek Harness** 外观插件：自定义主题色、背景壁纸（图片 / 视频 / 算法生成），以及逐表面的透明度与模糊度控制。兼容 **DSH `0.2.1` 直至 `0.2.2-rc.3`，其上所有版本一并放行**。
+一个 **DeepSeek Harness** 外观插件：自定义主题色、背景壁纸（图片 / 视频 / 算法生成），以及逐表面的透明度与模糊度控制。兼容 **DSH `0.2.1` 直至 `0.2.3-alpha.2`，其上所有版本一并放行**。
 
 ---
 
@@ -122,7 +122,7 @@ pnpm dsh web
 
 ## 兼容性
 
-- **[`dsh web`](https://github.com/deepseek-ai/deepseek-harness)：`0.2.1` ~ `0.2.2-rc.3`，其上所有版本一并放行。** 0.2.1 以下的老版本不再支持。门禁先逐一列出核对过的构建，再以不设上界的 `>=0.2.1-alpha.1` 收尾——宿主强制的正是这份列表（`engines.dsh` 存在时宿主只看它自己），范围没写到的版本会在导入任何模块之前被整行禁用。
+- **[`dsh web`](https://github.com/deepseek-ai/deepseek-harness)：`0.2.1` ~ `0.2.3-alpha.2`，其上所有版本一并放行。** 0.2.1 以下的老版本不再支持。门禁先逐一列出核对过的构建，再以不设上界的 `>=0.2.1-alpha.1` 收尾——宿主强制的正是这份列表（`engines.dsh` 存在时宿主只看它自己），范围没写到的版本会在导入任何模块之前被整行禁用。
 - **核对过的构建**（`dsh.compatibility.dshReleases`）：
 
   | 宿主构建 | 事实目录 | 说明 |
@@ -131,7 +131,9 @@ pnpm dsh web
   | `0.2.2-alpha.2` | `v0-2-2` | 新开的补丁线，另开一份事实；逐条重读后答案不变 |
   | `0.2.2-rc.1` | `v0-2-2` | **真机核对**：门禁 / RPC / 开机自检全过；判定 `exact` |
   | `0.2.2-rc.2` / `0.2.2-rc.3` | `v0-2-2` | 从两个 tag 的源码逐条重读：同一条补丁线、同一份答案；darwin 专属的侧栏 wash 令牌已并入「侧边栏」滑块组，其它平台不生效 |
-  | `0.2.2-rc.3` 之上 | 沿用该行最近的核对结果 | 未核对的新构建取档位并写日志 |
+  | `0.2.2-rc.4` / `0.2.2-rc.5` | `v0-2-2` | 源码逐条重读：相对 rc.3，本插件涉及的包里只有八个 `package.json` 的 `version` 字段变了。**rc.5 另做了真机隔离档案核对**：门禁、`read`、上传内容键与页面渲染全过、0 控制台错误；rc.4 仅源码重读 |
+  | `0.2.3-alpha.1` / `0.2.3-alpha.2` | `v0-2-3` | 新开的补丁线，另开一份事实；两个 tag 的源码逐条重读。**本机没有装 0.2.3 宿主，所以这条线的加载 / RPC 未在真实进程上冒烟** |
+  | `0.2.3-alpha.2` 之上 | 沿用该行最近的核对结果 | 未核对的新构建取档位并写日志 |
 
 - **版本事实按 release 隔离**：宿主版本由 Node 半侧解析、随 `read` RPC 下发，样式与逻辑只向适配层提问（这块表面归谁、磨砂挂在哪一层、菜单该重写哪些令牌），不比较版本字符串；适配新宿主 = 新增一个版本目录并在注册表登记。
 - **安装或更新插件后仍需重启宿主**：兼容检查发生在组装 profile 时，而不是插件更新时。依赖特定宿主结构的功能（右侧栏面板模糊、官方侧栏「主题」卡片）只在对应宿主上启用，其余功能在整个范围内表现一致。
@@ -150,6 +152,16 @@ pnpm dsh web
   - 样式依赖宿主 DOM 的稳定标记（如 `[data-sidebar-right-panel]`）与 CSS 令牌名；宿主大版本重构样式层时选择器可能失效，表现为相关滑块不再作用于对应表面（只影响观感，不影响稳定性）。版本相关的那部分选择器集中在对应的版本目录里，宿主改版通常只需改那一份。
   - `-webkit-text-stroke` 在部分单行省略号容器边缘约有 1px 裁切。
   - 有一条规则是对其它插件的有意让步：dsh-better-display 的吸顶车道用的正是「主界面」透明度接管的那个令牌，所以认出该插件后会把它钉在 20% 底板 + 30px 磨砂上、不随滑块；对方若改名，这条规则就匹配不到，车道回到它自己的画法。
+
+## 更新记录
+
+### 0.5.1
+- **按图保存构图**（issue #42）：背景编辑器提交的缩放 / 位移现在按壁纸**内容**记忆（宿主半算 SHA-256 键）。轮换池里从 A 图切到 B 图、再切回 A 图，A 的构图会还原，不再被重置。升级后，旧版本那唯一一份构图会登记为当前这张图的记录。导入主题时重新绑定内容键，不会把导入后的编辑记到上一张图名下。
+- **保存配置的时间显示到时分秒**（issue #42 ②）：档案列表原来只显示日期，同一天保存两次看起来完全一样。
+- **支持 DSH `0.2.3` 线**：新增 `v0-2-3` 事实目录，在 `0.2.3-alpha.1` / `alpha.2` 上核对；补上 `0.2.2-rc.4` / `rc.5` 两行（`rc.5` 另在真机隔离档案上冒烟通过）。0.2.3 的样式管线变化（模块元数据注入 `<style data-plugin data-path>`）已写进该目录；第三方自检读的仍是同一个属性。
+
+### 0.5.0
+- 移除 `0.2.0` 适配层，支持下界收缩到 DSH `0.2.1`；README 精简。
 
 ## 许可
 

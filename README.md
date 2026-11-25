@@ -4,14 +4,14 @@
   <a href="https://www.npmjs.com/package/dsh-any-background"><img alt="npm version" src="https://img.shields.io/npm/v/dsh-any-background?color=4d6bfe"></a>
   <a href="https://www.npmjs.com/package/dsh-any-background"><img alt="npm monthly downloads" src="https://img.shields.io/npm/dm/dsh-any-background?color=4d6bfe"></a>
   <a href="https://github.com/Tkingxiao/dsh-any-background/blob/main/LICENSE"><img alt="License: MIT" src="https://img.shields.io/npm/l/dsh-any-background?color=4d6bfe"></a>
-  <a href="https://www.npmjs.com/package/@deepseek-ai/dsh?activeTab=versions"><img alt="Supported DSH versions: 0.2.1 ~ 0.2.2-rc.3 and above" src="https://img.shields.io/badge/DSH-0.2.1%20~%200.2.2--rc.3%2B-4d6bfe" /></a>
+  <a href="https://www.npmjs.com/package/@deepseek-ai/dsh?activeTab=versions"><img alt="Supported DSH versions: 0.2.1 ~ 0.2.3-alpha.2 and above" src="https://img.shields.io/badge/DSH-0.2.1%20~%200.2.3--alpha.2%2B-4d6bfe" /></a>
   <a href="https://github.com/topics/dsh-better-sidebar"><img alt="Plugin ecosystem: GitHub topic dsh-better-sidebar" src="https://img.shields.io/badge/plugin%20ecosystem-topic%20dsh--better--sidebar-4d6bfe" /></a><br /><br />
   <a href="https://github.com/Tkingxiao/dsh-any-background"><img src="https://img.shields.io/github/stars/Tkingxiao/dsh-any-background?style=social" alt="GitHub stars"></a>
 </p>
 
 English | [中文](README.zh.md)
 
-A **DeepSeek Harness** appearance plugin: custom theme color, background wallpaper (image / video / algorithmically generated), and per-surface opacity & blur control. Compatible with **DSH `0.2.1` through `0.2.2-rc.3` — and every host release above it**.
+A **DeepSeek Harness** appearance plugin: custom theme color, background wallpaper (image / video / algorithmically generated), and per-surface opacity & blur control. Compatible with **DSH `0.2.1` through `0.2.3-alpha.2` — and every host release above it**.
 
 ---
 
@@ -122,7 +122,7 @@ pnpm dsh web
 
 ## Compatibility
 
-- **[`dsh web`](https://github.com/deepseek-ai/deepseek-harness): `0.2.1` ~ `0.2.2-rc.3`, and everything above it.** Hosts below 0.2.1 are no longer supported. The gate names each verified build and then closes with an uncapped `>=0.2.1-alpha.1`: the host enforces exactly this list (its `app-boot` reads `engines.dsh` when present and ignores peerDependencies), so a range that runs out is a wall in front of a plugin that would have kept working.
+- **[`dsh web`](https://github.com/deepseek-ai/deepseek-harness): `0.2.1` ~ `0.2.3-alpha.2`, and everything above it.** Hosts below 0.2.1 are no longer supported. The gate names each verified build and then closes with an uncapped `>=0.2.1-alpha.1`: the host enforces exactly this list (its `app-boot` reads `engines.dsh` when present and ignores peerDependencies), so a range that runs out is a wall in front of a plugin that would have kept working.
 - **Verified builds** (`dsh.compatibility.dshReleases`):
 
   | Host build | Facts folder | Notes |
@@ -131,7 +131,9 @@ pnpm dsh web
   | `0.2.2-alpha.2` | `v0-2-2` | a new patch line, so its own facts folder; every claim re-read and still true |
   | `0.2.2-rc.1` | `v0-2-2` | checked on a real host: gate / RPC / boot self-check all pass; `exact` verdict |
   | `0.2.2-rc.2` / `0.2.2-rc.3` | `v0-2-2` | re-read from both tags' source: same line, same answer; darwin-only sidebar wash tokens joined the 「侧边栏」 slider group |
-  | above `0.2.2-rc.3` | reuses the closest row | an unverified build takes that line's adapter, stated in the log |
+  | `0.2.2-rc.4` / `0.2.2-rc.5` | `v0-2-2` | source re-read: the whole diff against rc.3 in the packages this plugin speaks for is the `version` field in eight `package.json` files. **rc.5 also booted on a real isolated host**: gate, `read`, upload content key and the rendered page all passed with zero console errors; rc.4 is source-read only |
+  | `0.2.3-alpha.1` / `0.2.3-alpha.2` | `v0-2-3` | a new patch line, so its own facts folder; every claim re-read from both tags' source. **No 0.2.3 host is installed here, so loading / RPC were not smoke-tested on a real process for this line** |
+  | above `0.2.3-alpha.2` | reuses the closest row | an unverified build takes that line's adapter, stated in the log |
 
 - **Facts are isolated per release**: the host release is resolved on the Node half and handed down through the `read` RPC; styling and logic only ask the adapter questions (who owns this surface, which layer carries the frost, which token fades a menu) and never compare version strings. Supporting a new host means adding one version folder and registering it.
 - **A restart is needed after installing or updating the plugin**: the compatibility check runs while the profile is composed, not when the plugin is updated. Features that depend on a specific host structure (the right sidebar's panel blur, the official sidebar's "Theme" card) enable themselves only where that structure exists; everything else behaves identically across the range.
@@ -150,6 +152,16 @@ pnpm dsh web
   - The styling relies on stable host DOM markers (such as `[data-sidebar-right-panel]`) and CSS token names. A host restyle of those layers can leave a slider ineffective for its surface — cosmetic only, nothing breaks. The version-specific half of those selectors lives inside its own version folder, so a host revision normally means editing that one file.
   - `-webkit-text-stroke` may clip about 1px at the edge of some single-line ellipsis containers.
   - One rule is a deliberate cross-plugin accommodation: dsh-better-display paints its sticky reading lanes from the token our 「主界面」 opacity owns, so when that plugin is detected its lanes are pinned at a 20% plate + 30px frost outside the sliders. If it ever renames those markers the rule stops matching and its lanes go back to being painted its own way.
+
+## Changelog
+
+### 0.5.1
+- **Per-picture framing** (issue #42): the background editor's committed zoom / pan is now remembered per wallpaper **content** (a host-side SHA-256 key), so switching a rotation pool picture from A to B and back to A restores A's framing instead of resetting it. On upgrade, the old single framing is adopted as the active picture's entry. Importing a theme re-binds rather than inheriting the previous picture's key, so an edit right after an import can't land on the old wallpaper.
+- **Saved-config time shows minutes and seconds** (issue #42 ②): the profile list printed the date only, so two saves on one day looked identical.
+- **DSH `0.2.3` line supported**: new `v0-2-3` facts folder verified at `0.2.3-alpha.1` / `alpha.2`, plus `0.2.2-rc.4` / `rc.5` rows (`rc.5` also smoke-booted on a real isolated host). The 0.2.3 stylesheet-pipeline change (module-metadata `<style data-plugin data-path>` injection) is documented in that folder; the third-party scanner reads the same attribute.
+
+### 0.5.0
+- Dropped the `0.2.0` adapter layer; the supported floor is now DSH `0.2.1`. README trimmed.
 
 ## License
 

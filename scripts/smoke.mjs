@@ -84,6 +84,8 @@ try {
   assert.equal(first.config.strokes.headerBar.width, 0, 'default strokes.headerBar')
   assert.equal(first.config.captionInk, 'auto', 'default captionInk')
   assert.equal(first.config.protectThirdParty, true, 'default protectThirdParty')
+  assert.deepEqual(first.config.bgStates, {}, 'default bgStates (no picture framed yet)')
+  assert.equal(first.wallpaperKey, null, 'default read: no wallpaper content key')
 
   // 2. Values written through the RPC survive the sanitizer, on disk and on read.
   await rpc('writeConfig', {
@@ -93,6 +95,7 @@ try {
       headerOpacity: 0.33,
       captionInk: 'theme',
       protectThirdParty: false,
+      bgStates: { '0123456789abcdef': { zoom: 1.5, x: 0.4, y: 0.6, iw: 800, ih: 600 } },
       strokes: { headerBar: { width: 2, color: 'theme', customColor: '#123456' } },
       profiles: [{
         id: 'smoke-profile',
@@ -117,6 +120,7 @@ try {
   assert.equal(disk.headerOpacity, 0.33, 'disk: existing headerOpacity untouched')
   assert.equal(disk.captionInk, 'theme', 'disk: captionInk')
   assert.equal(disk.protectThirdParty, false, 'disk: protectThirdParty')
+  assert.deepEqual(disk.bgStates['0123456789abcdef'], { zoom: 1.5, x: 0.4, y: 0.6, iw: 800, ih: 600 }, 'disk: per-picture framing kept')
   assert.equal(disk.profiles.length, 1, 'disk: profile kept')
   assert.equal(disk.profiles[0].config.blurs.headerBar, 33, 'disk: profile blurs.headerBar')
   assert.equal(disk.profiles[0].config.blurs.header, 22, 'disk: profile blurs.header')
@@ -133,6 +137,7 @@ try {
   assert.equal(reloaded.config.profiles[0].config.blurs.headerBar, 33, 'read: profile headerBar')
   assert.equal(reloaded.config.captionInk, 'theme', 'read: captionInk')
   assert.equal(reloaded.config.protectThirdParty, false, 'read: protectThirdParty')
+  assert.deepEqual(reloaded.config.bgStates['0123456789abcdef'], { zoom: 1.5, x: 0.4, y: 0.6, iw: 800, ih: 600 }, 'read: per-picture framing round-trips')
 
   // 4. A value the host half does not know collapses to the default rather than
   //    reaching the browser half, where `rCaptionInk` would have to guess again.
@@ -143,6 +148,13 @@ try {
   //    because some editor wrote `"false"` with quotes.
   await rpc('writeConfig', { config: { protectThirdParty: 'yes' } })
   assert.equal(onDisk().protectThirdParty, true, 'disk: a non-boolean protectThirdParty falls back to true')
+  //    The per-picture framing map is content-keyed: a non-hex key or an entry
+  //    with no intrinsic size is noise, not a frame, and must not reach the disk.
+  await rpc('writeConfig', { config: { bgStates: {
+    'not-a-hash': { zoom: 2, x: 0, y: 0, iw: 10, ih: 10 },
+    'abcdef0123456789': { zoom: 2, x: 0, y: 0, iw: 0, ih: 0 },
+  } } })
+  assert.deepEqual(onDisk().bgStates, {}, 'disk: invalid / unframed bgStates entries are dropped')
 
   // 5. The rotation pool: same-millisecond adds get distinct file names, a
   //    manual activation persists the cursor server-side, and a remove keeps
@@ -157,6 +169,9 @@ try {
 
   const activated = await rpc('rotationSet', { index: 1 })
   assert.equal(activated.wallpaperUrl, '/dsh-any-background/wallpaper', 'rotationSet: serve URL returned')
+  // Issue #42: the response must identify the picture by CONTENT, because the
+  // serve URL and the slot file name are the same for every pool item.
+  assert.match(activated.wallpaperKey, /^[0-9a-f]{16}$/, 'rotationSet: content key returned')
   assert.equal(onDisk().rotation.current, 1, 'rotationSet: cursor persisted server-side')
 
   const removed = await rpc('rotationRemove', { index: 0 })
@@ -238,6 +253,12 @@ try {
       body: Buffer.from(PNG_1PX.slice('data:image/png;base64,'.length), 'base64'),
     })
     assert.equal(good.status, 200, 'wallpaper upload: real PNG bytes accepted')
+    const goodBody = await good.json()
+    assert.match(goodBody.wallpaperKey, /^[0-9a-f]{16}$/, 'wallpaper upload: content key returned')
+    // The same bytes must hash to the same key through a later `read`, or the
+    // client would store one frame under a key the next boot cannot find.
+    const keyed = await rpc('read', {})
+    assert.equal(keyed.wallpaperKey, goodBody.wallpaperKey, 'read: wallpaperKey matches the uploaded bytes')
   } finally {
     await new Promise(resolve => uploadServer.close(resolve))
   }

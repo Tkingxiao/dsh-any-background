@@ -8,7 +8,7 @@
 import { defineStore } from './runtime'
 import type { Ctx, RpcResultLike, BoundActions, ThemeSectionProps, PartOpacities, PartBlurs, PartStrokes, BackgroundType, GeneratedBgParams, ProfileAppearance, ProfileEntry, RotationItem, ScheduleConfig, SchemeOverride, UploadOutcome, StoreInstance } from './types'
 import { NS, zh, en } from './i18n'
-import { cfg, rHasColor, rColor, rWp, rWpImage, rWpVideo, rBgState, rVideoBgState, setWpUrl, setWpImageUrl, setWpVideoUrl, setWpVideoSnapshot, setBgState, adoptConfig, DEFAULT_CONFIG, setBgDark, rBgDark, rProfiles, rRotation, rUrlRefresh, rSchedule, rScheme, rColorScheme, rSchemeOverride, currentAppearance, applyAppearance } from './state'
+import { cfg, rHasColor, rColor, rWp, rWpImage, rWpVideo, rBgState, rVideoBgState, setWpUrl, setWpImageUrl, setWpVideoUrl, setWpVideoSnapshot, adoptBgStateFor, seedBgStateFor, adoptConfig, DEFAULT_CONFIG, setBgDark, rBgDark, rProfiles, rRotation, rUrlRefresh, rSchedule, rScheme, rColorScheme, rSchemeOverride, currentAppearance, applyAppearance } from './state'
 import { RPC_CHANNEL, VIDEO_SERVE_URL, FONT_SERVE_URL, fontServeUrl, initRpc, saveConfig, flushSave, loadPersisted, persistWallpaper, persistVideo, persistConfig, uploadVideo, uploadFont, removeFont as rpcRemoveFont, rotationAdd, rotationRemove, rotationActivate, rotationRestore, rotationFileUrl, setVideoFromUrl as rpcSetVideoFromUrl, setWallpaperFromUrl } from './rpc'
 import type { RotationPoolEntry } from './rpc'
 import { applyWp, teardownWp, applySettingsOverrides, applyPanelOverrides, applyStrokes, applyFontFace, watchParts, watchThemeResets, regenerateGeneratedBg, setBackgroundType, updateGeneratedBg, applyThemeColor, onGeneratedSnapshot, watchWallpaperDragQuality, clearThemeTokens, onVerdictApplied, onColorAdopted, LABEL_TOKENS, SETTINGS_PANEL_SEL } from './wallpaper'
@@ -306,7 +306,10 @@ export function apply(ctx: Ctx): void {
     setBgDark(null)
     setWpImageUrl(r.wallpaperUrl)
     setWpUrl(rWpImage())
-    setBgState({ ...DEFAULT_CONFIG.bgState })
+    // Restore the frame recorded for THIS picture (issue #42) — the host keys it
+    // by content, so A → B → A gets A's framing back even though every pool item
+    // shares one serve URL. No key = fresh picture = default frame (old behaviour).
+    adoptBgStateFor(r.wallpaperKey ?? null)
     cfg.rotation = { ...rot, current: idx, lastRotate: auto || rot.lastRotate === null ? new Date().toISOString() : rot.lastRotate }
     // The picture just switched, so any saved pick describes the old wallpaper:
     // extract once from the new one to re-adapt (placement state matches the
@@ -352,7 +355,7 @@ export function apply(ctx: Ctx): void {
     setBgDark(null)
     setWpImageUrl(r.wallpaperUrl ?? null)
     setWpUrl(rWpImage())
-    setBgState({ ...DEFAULT_CONFIG.bgState })
+    adoptBgStateFor(r.wallpaperKey ?? null)
     await adoptWallpaperColor(rWp()!)
     applyThemeColor()
     syncBg()
@@ -429,7 +432,7 @@ export function apply(ctx: Ctx): void {
   // applied above; the deferred restore below re-asserts too). The server
   // advances a due rotation inside the read itself, so the restored wallpaper
   // is already the new pick and paints from the first apply — no old→new flash.
-  void loadPersisted().then(async ({ rotated: serverRotated, firstRun }) => {
+  void loadPersisted().then(async ({ rotated: serverRotated, firstRun, wallpaperKey }) => {
     if (firstRun) {
       // Nothing was ever persisted on this machine (no theme-config.json).
       // Write the browser half's full default set straight away and re-read it
@@ -439,6 +442,14 @@ export function apply(ctx: Ctx): void {
       await loadPersisted()
       applyWp()
     }
+    // Restore the framing of the picture the server actually restored (issue #42;
+    // on a boot after a due rotation this is the NEW pick, so the old config's
+    // `bgState` describes the PREVIOUS picture and must not be blessed as the
+    // new one's entry). The single legacy `bgState` is seeded only when the
+    // active bytes did not change under us, so upgrading does not read as a
+    // framing reset.
+    if (!serverRotated) seedBgStateFor(wallpaperKey)
+    adoptBgStateFor(wallpaperKey)
     syncMetaNow()
     // The stored custom font (if any) applies immediately; fontEnabled gates
     // the token override without touching the file.
@@ -637,7 +648,7 @@ export function apply(ctx: Ctx): void {
       // (raw upload / URL download / rotation), so this only switches the theme
       // to image mode and points the display at the serve URL. null removes the
       // stored image and video.
-      setWpFromServer: (u: string | null) => {
+      setWpFromServer: (u: string | null, wallpaperKey: string | null = null) => {
         cfg.backgroundType = 'image'
         // Retain the upload in its own slot so type switches never lose it.
         // The generated-background brightness verdict stops applying here.
@@ -645,7 +656,9 @@ export function apply(ctx: Ctx): void {
         setWpImageUrl(u)
         // Mirror the same rev'd URL so wpUrl and the display never diverge.
         setWpUrl(rWpImage())
-        setBgState({ ...DEFAULT_CONFIG.bgState })
+        // Restore the frame this picture was last given (issue #42); a picture
+        // without an entry (fresh upload) or a removal starts from the default.
+        adoptBgStateFor(u === null ? null : wallpaperKey)
         if (u === null) {
           // Removing the background clears the stored video as well.
           setWpVideoUrl(null, null)

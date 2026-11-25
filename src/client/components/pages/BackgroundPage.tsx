@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import type { ThemeSectionProps, ThemeStoreState, BackgroundType, GeneratedBgParams, BgMode } from '../../types'
-import { cfg, rWop, rBl, rBgMode, rUrlRefresh } from '../../state'
+import { cfg, rWop, rBl, rBgMode, rUrlRefresh, rememberBgState } from '../../state'
 import { saveConfig, setWallpaperFromUrl, uploadWallpaper, uploadRefusalText, WALLPAPER_SERVE_URL } from '../../rpc'
 import { applyWp, setWpOpacity, setWpBlur, pauseGeneratedBg, resumeGeneratedBg } from '../../wallpaper'
 import { defaultParamsFor } from '../../utils/bg-generators'
@@ -80,7 +80,7 @@ export function BackgroundPage({ p, notify }: { p: ThemeSectionProps; notify: (m
     // re-encoding), then point the wallpaper at the serve URL. The browser
     // decodes it natively like any <img>.
     const outcome = await uploadWallpaper(f)
-    if (outcome.ok) setWpFromServer(WALLPAPER_SERVE_URL)
+    if (outcome.ok) setWpFromServer(WALLPAPER_SERVE_URL, outcome.wallpaperKey)
     else notify(uploadRefusalText(outcome, t, 'bgUploadFail'), false)
   }
 
@@ -100,7 +100,7 @@ export function BackgroundPage({ p, notify }: { p: ThemeSectionProps; notify: (m
     if (r.ok) {
       // The host already replaced the local wallpaper file; just switch the
       // theme to image mode and point the display at the serve URL.
-      setWpFromServer(r.wallpaperUrl ?? null)
+      setWpFromServer(r.wallpaperUrl ?? null, r.wallpaperKey ?? null)
       // Record the source so the 每日自动刷新 toggle has something to re-fetch
       // (issue #35 ②). A static URL simply re-applies the same bytes.
       cfg.urlRefresh = { ...rUrlRefresh(), url: u }
@@ -527,7 +527,7 @@ export function BackgroundPage({ p, notify }: { p: ThemeSectionProps; notify: (m
           onCommit={(z, x, y, iw, ih) => {
             const st = { zoom: z, x, y, iw, ih }
             if (backgroundType === 'video') cfg.videoBgState = st
-            else cfg.bgState = st
+            else rememberBgState(st)
             applyWp(); saveConfig(); setEditorOpen(false)
           }} />
       ) : null}

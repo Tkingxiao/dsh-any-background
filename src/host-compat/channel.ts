@@ -53,6 +53,7 @@
 export type HostChannel =
   | '0.2.1'
   | '0.2.2'
+  | '0.2.3'
   | 'unknown'
 
 /** A known channel — one that has a real adapter. */
@@ -96,6 +97,20 @@ export const SUPPORTED_RELEASES: readonly SupportedRelease[] = [
   // platforms; the full read is the rc.2/rc.3 block in `v0-2-2/adapter.ts`.
   { channel: '0.2.2', release: '0.2.2-rc.2' },
   { channel: '0.2.2', release: '0.2.2-rc.3' },
+  // rc.4 / rc.5 re-read from the source tree: the whole release diff against rc.3
+  // in every client package this plugin speaks for is the `version` field in eight
+  // `package.json` files. No token, selector, slot key or gate input moved, so the
+  // folder keeps its answer and these rows upgrade `line` → `exact`. rc.5 was also
+  // booted on a real isolated host (v0.5.1): gate, `read`, upload content key and
+  // page load all passed — see the v0-2-2 adapter's rc.5 note.
+  { channel: '0.2.2', release: '0.2.2-rc.4' },
+  { channel: '0.2.2', release: '0.2.2-rc.5' },
+  // 0.2.3 opens a new patch line. New folder `v0-2-3`: a line is a claim the
+  // folder has to make in its own words, even when the answers are the previous
+  // line's. alpha.1 and alpha.2 differ only in `package.json` versions and a
+  // two-line app-boot resolver edit, so both rows name the same facts.
+  { channel: '0.2.3', release: '0.2.3-alpha.1' },
+  { channel: '0.2.3', release: '0.2.3-alpha.2' },
 ]
 
 /** How the chosen adapter relates to the release that was detected. Reported so a
